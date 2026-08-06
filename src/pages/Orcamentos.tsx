@@ -1,0 +1,1095 @@
+import { useState, useEffect, useMemo } from 'react';
+import { supabase } from '../lib/supabase';
+import { 
+  Plus, Search, Calculator, GitBranch, Trash2, X, FileSpreadsheet,
+  ChevronDown, ChevronRight, Filter
+} from 'lucide-react';
+import { clsx } from 'clsx';
+import { useNavigate, useSearchParams } from 'react-router-dom';
+import { ModalImportarExcel } from '../components/ModalImportarExcel';
+
+const statusBadgeClasses = (status: string) => {
+  switch (status) {
+    case 'Aprovado e Ag. Envio': return 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold';
+    case 'Ag. Validação':        return 'bg-amber-50 text-amber-700 border-amber-300';
+    case 'Recusado pelo Gestor': return 'bg-rose-50 text-rose-700 border-rose-300 font-bold';
+    case 'Com Pendências':       return 'bg-amber-50 text-amber-800 border-amber-300 font-bold';
+    case 'Enviada':              return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    case 'Cancelada':            return 'bg-rose-50 text-rose-700 border-rose-200';
+    default:                    return 'bg-blue-50 text-blue-700 border-blue-200'; // Em andamento
+  }
+};
+
+const statusEnvioBadgeClasses = (s: string) => {
+  switch (s) {
+    case 'Ag. Retorno':  return 'bg-violet-50 text-violet-700 border-violet-200';
+    case 'Consolidada': return 'bg-teal-50 text-teal-700 border-teal-200';
+    case 'Encerrada':   return 'bg-slate-100 text-slate-600 border-slate-200';
+    case 'Cancelada':   return 'bg-rose-50 text-rose-700 border-rose-200';
+    case 'Perdido':     return 'bg-gray-100 text-gray-600 border-gray-200';
+    default:            return 'bg-slate-100 text-slate-600 border-slate-200';
+  }
+};
+
+export const getOrcamentoEffectiveStatus = (orc: any): string => {
+  if (!orc) return 'Em andamento';
+  const st = (orc.status || 'Em andamento').trim();
+  const isEnviada = st.toLowerCase() === 'enviada';
+  const isEncerrada = st.toLowerCase() === 'encerrada' || orc.status_envio === 'Encerrada';
+  const isCancelada = st.toLowerCase() === 'cancelada';
+  const isAgValidacao = st.toLowerCase().includes('valida');
+  const isAprov = orc.aprovado === true;
+
+  if (isEncerrada) {
+    return 'Encerrada';
+  }
+
+  if (isEnviada && orc.status_envio) {
+    return orc.status_envio;
+  }
+
+  if (isCancelada) {
+    return 'Cancelada';
+  }
+
+  const decisao = orc.decisao_gestor || (orc.id ? localStorage.getItem(`orcamento_decisao_${orc.id}`) : null);
+
+  if (decisao === 'recusar') {
+    return 'Recusado pelo Gestor';
+  }
+
+  if (decisao === 'aprovar_pendencia') {
+    return 'Com Pendências';
+  }
+
+  if (isAgValidacao && !isAprov) {
+    return 'Ag. Validação';
+  }
+
+  if (isAprov) {
+    return 'Aprovado e Ag. Envio';
+  }
+
+  return 'Em andamento';
+};
+
+export const renderStatusBadge = (orc: any) => {
+  const statusLabel = getOrcamentoEffectiveStatus(orc);
+  const isEnvio = ['Ag. Retorno', 'Consolidada', 'Encerrada', 'Perdido'].includes(statusLabel);
+  const badgeCls = isEnvio ? statusEnvioBadgeClasses(statusLabel) : statusBadgeClasses(statusLabel);
+
+  return (
+    <span className={clsx('text-[10px] font-bold px-2.5 py-0.5 rounded-full border whitespace-nowrap inline-block shadow-2xs', badgeCls)}>
+      {statusLabel}
+    </span>
+  );
+};
+
+export const getImportadoEffectiveStatusInfo = (
+  imp: any, 
+  stats: { total: number; linked: number }, 
+  createdOrc?: any
+) => {
+  if (createdOrc) {
+    const statusMap: Record<string, { label: string; badgeCls: string }> = {
+      'Ag. Validação': { label: 'Orçamento Ag. Validação', badgeCls: 'bg-amber-50 text-amber-800 border-amber-300 font-bold' },
+      'Aprovado e Ag. Envio': { label: 'Orçamento Aprovado', badgeCls: 'bg-emerald-50 text-emerald-800 border-emerald-300 font-bold' },
+      'Recusado pelo Gestor': { label: 'Orçamento Recusado', badgeCls: 'bg-rose-50 text-rose-800 border-rose-300 font-bold' },
+      'Ag. Retorno': { label: 'Orçamento Ag. Retorno', badgeCls: 'bg-purple-50 text-purple-800 border-purple-300 font-bold' },
+      'Consolidado': { label: 'Orçamento Consolidado', badgeCls: 'bg-teal-50 text-teal-800 border-teal-300 font-bold' },
+      'Cancelada': { label: 'Orçamento Cancelado', badgeCls: 'bg-rose-50 text-rose-700 border-rose-200 font-bold' },
+      'Cancelado': { label: 'Orçamento Cancelado', badgeCls: 'bg-rose-50 text-rose-700 border-rose-200 font-bold' },
+      'Encerrada': { label: 'Orçamento Encerrado', badgeCls: 'bg-slate-100 text-slate-700 border-slate-200 font-bold' },
+      'Encerrado': { label: 'Orçamento Encerrado', badgeCls: 'bg-slate-100 text-slate-700 border-slate-200 font-bold' },
+      'Perdido': { label: 'Orçamento Perdido', badgeCls: 'bg-slate-800 text-slate-100 border-slate-700 font-bold' },
+    };
+
+    if (createdOrc.status && statusMap[createdOrc.status]) {
+      return statusMap[createdOrc.status];
+    }
+    return { label: 'Orçamento em Andamento', badgeCls: 'bg-blue-50 text-blue-800 border-blue-300 font-bold' };
+  }
+
+  const percent = stats.total > 0 ? Math.round((stats.linked / stats.total) * 100) : 0;
+  const isAllLinked = (stats.total > 0 && stats.linked >= stats.total) || percent === 100 || imp.status === 'Concluído' || imp.status === 'Concluída';
+
+  if (isAllLinked) {
+    return { label: 'Vinculação Concluída', badgeCls: 'bg-emerald-50 text-emerald-700 border-emerald-200 font-bold' };
+  }
+
+  return { label: 'Em Vinculação', badgeCls: 'bg-amber-50 text-amber-700 border-amber-200 font-bold' };
+};
+
+export default function Orcamentos() {
+  const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
+  
+  // Abas Principais (Sincronizadas com URL ?tab=empresa / ?tab=importados)
+  const tabFromUrl = (searchParams.get('tab') as 'empresa' | 'importados') || 'empresa';
+  const [activeTabState, setActiveTabState] = useState<'empresa' | 'importados'>(tabFromUrl);
+
+  useEffect(() => {
+    const t = searchParams.get('tab');
+    if (t === 'empresa' || t === 'importados') {
+      setActiveTabState(t);
+    }
+  }, [searchParams]);
+
+  const activeTab = activeTabState;
+  const setActiveTab = (tab: 'empresa' | 'importados') => {
+    setActiveTabState(tab);
+    setSearchParams({ tab }, { replace: true });
+  };
+
+  // Orçamentos da Empresa
+  const [orcamentos, setOrcamentos] = useState<any[]>([]);
+  const [orcamentosTotals, setOrcamentosTotals] = useState<Record<string, any>>({});
+
+  // Orçamentos Importados (Cliente)
+  const [importados, setImportados] = useState<any[]>([]);
+  const [importadosStats, setImportadosStats] = useState<Record<string, { total: number; linked: number }>>({});
+  const [createdImportadosMap, setCreatedImportadosMap] = useState<Record<string, any>>({});
+
+  const [loading, setLoading] = useState(true);
+  const [searchTerm, setSearchTerm] = useState('');
+  const [selectedStatus, setSelectedStatus] = useState<string>('todos');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+
+  // Modais
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  const [newOrcamentoData, setNewOrcamentoData] = useState({
+    codigo: '',
+    descricao: '',
+    cliente: '',
+    projeto: '',
+    gestor_cliente: ''
+  });
+
+  useEffect(() => {
+    fetchOrcamentos();
+    fetchImportados();
+  }, []);
+
+  const fetchOrcamentos = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      setOrcamentos(data || []);
+
+      // Busca os totais dos itens para cada orçamento
+      const { data: items, error: itemsError } = await supabase
+        .schema('engenharia')
+        .from('orcamento_itens')
+        .select('orcamento_id, total, total_mat, total_mo');
+      
+      if (!itemsError && items) {
+        const totals: Record<string, any> = {};
+        items.forEach((item: any) => {
+          if (!totals[item.orcamento_id]) {
+            totals[item.orcamento_id] = { total: 0, mat: 0, mo: 0 };
+          }
+          totals[item.orcamento_id].total += parseFloat(item.total || 0);
+          totals[item.orcamento_id].mat += parseFloat(item.total_mat || 0);
+          totals[item.orcamento_id].mo += parseFloat(item.total_mo || 0);
+        });
+        setOrcamentosTotals(totals);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar orçamentos:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchImportados = async () => {
+    try {
+      const { data, error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos_importados')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setImportados(data || []);
+
+      // Busca contagem e progresso de itens por importação
+      const { data: rows, error: rowsError } = await supabase
+        .schema('engenharia')
+        .from('orcamento_importado_itens')
+        .select('orcamento_importado_id, composicao_id, insumo_id, tipo_vinculo, status_linha');
+
+      if (!rowsError && rows) {
+        const stats: Record<string, { total: number; linked: number }> = {};
+        rows.forEach((r: any) => {
+          const impId = r.orcamento_importado_id;
+          if (!stats[impId]) {
+            stats[impId] = { total: 0, linked: 0 };
+          }
+          stats[impId].total += 1;
+          const isLinked = !!(
+            r.composicao_id || 
+            r.insumo_id || 
+            r.tipo_vinculo === 'texto' || 
+            r.status_linha === 'inativo' || 
+            r.status_linha === 'inserido_empresa' || 
+            r.status_linha === 'inserido_empresa_e_cliente' || 
+            r.status_linha === 'desdobrado'
+          );
+          if (isLinked) {
+            stats[impId].linked += 1;
+          }
+        });
+        setImportadosStats(stats);
+      }
+
+      // Busca quais planilhas importadas já geraram um Orçamento Nativo da Empresa
+      const { data: createdOrcs } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .select('*')
+        .not('orcamento_importado_id', 'is', null);
+
+      if (createdOrcs) {
+        const map: Record<string, any> = {};
+        createdOrcs.forEach((o: any) => {
+          const impId = o.orcamento_importado_id;
+          if (impId) {
+            if (!map[impId]) {
+              map[impId] = o;
+            } else {
+              const existingRev = parseInt(map[impId].revisao || '0', 10);
+              const currentRev = parseInt(o.revisao || '0', 10);
+              if (currentRev > existingRev || (currentRev === existingRev && new Date(o.created_at || 0) > new Date(map[impId].created_at || 0))) {
+                map[impId] = o;
+              }
+            }
+          }
+        });
+        setCreatedImportadosMap(map);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar orçamentos importados:', err);
+    }
+  };
+
+  const generateNextOrcamentoCode = async () => {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const ddmm = `${dd}${mm}`;
+    const year = today.getFullYear();
+
+    const { data } = await supabase
+      .schema('engenharia')
+      .from('orcamentos')
+      .select('codigo')
+      .like('codigo', `${ddmm}.%`);
+
+    let nextSeq = 1;
+    if (data && data.length > 0) {
+      const seqs = data.map((o: any) => {
+        const parts = o.codigo.split('.');
+        if (parts.length >= 2) {
+          const num = parseInt(parts[1], 10);
+          return isNaN(num) ? 0 : num;
+        }
+        return 0;
+      });
+      const maxSeq = Math.max(...seqs);
+      nextSeq = maxSeq + 1;
+    }
+
+    const seqStr = String(nextSeq).padStart(3, '0');
+    return `${ddmm}.${seqStr}.0-${year}`;
+  };
+
+  const handleOpenCreateModal = async () => {
+    setIsCreateModalOpen(true);
+    try {
+      const suggestedCode = await generateNextOrcamentoCode();
+      setNewOrcamentoData({
+        codigo: suggestedCode,
+        descricao: '',
+        cliente: '',
+        projeto: '',
+        gestor_cliente: ''
+      });
+    } catch (err) {
+      console.error('Erro ao gerar código:', err);
+    }
+  };
+
+  const handleCreateOrcamento = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      const parts = newOrcamentoData.codigo.split('.');
+      let revisao = '0';
+      if (parts.length >= 3) {
+        const rest = parts[2];
+        revisao = rest.split('-')[0] || '0';
+      }
+
+      const { data: existente, error: checkError } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .select('id')
+        .eq('codigo', newOrcamentoData.codigo)
+        .eq('revisao', revisao)
+        .maybeSingle();
+
+      if (checkError) {
+        console.error('Erro ao verificar duplicidade de código:', checkError);
+      }
+
+      if (existente) {
+        alert(`❌ O código do orçamento "${newOrcamentoData.codigo}" já está sendo usado por outro orçamento.\n\nPor favor, escolha outro código.`);
+        setLoading(false);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .insert({
+          codigo: newOrcamentoData.codigo,
+          nome: newOrcamentoData.projeto,
+          descricao: newOrcamentoData.descricao,
+          cliente: newOrcamentoData.cliente,
+          projeto: newOrcamentoData.projeto,
+          gestor_cliente: newOrcamentoData.gestor_cliente,
+          revisao,
+          status: 'Em Elaboração'
+        })
+        .select('id')
+        .single();
+
+      if (error) throw error;
+
+      setIsCreateModalOpen(false);
+      navigate(`/orcamentos/${data.id}`);
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao criar orçamento: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleCreateRevision = async (orc: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+
+    const isEncerrada = getOrcamentoEffectiveStatus(orc) === 'Encerrada' || (orc.status === 'Enviada' && orc.status_envio === 'Encerrada');
+
+    if (!isEncerrada) {
+      const confirmEncerramento = window.confirm(
+        `A proposta "${orc.nome || orc.codigo}" ainda não possui o status "Encerrada".\n\n` +
+        `Para criar uma nova revisão, é necessário alterar o status da proposta atual para "Enviada" e o status de envio para "Encerrada".\n\n` +
+        `Deseja encerrar esta proposta e criar a nova revisão agora?`
+      );
+      if (!confirmEncerramento) return;
+    } else {
+      const confirmCreate = window.confirm(
+        `Criar nova revisão a partir de "${orc.nome || orc.codigo}"?\n\n` +
+        `A nova revisão começará com o status "Em andamento".`
+      );
+      if (!confirmCreate) return;
+    }
+
+    try {
+      setLoading(true);
+
+      // 1. Se ainda não estava encerrado, encerra a proposta atual
+      if (!isEncerrada) {
+        const { error: updateErr } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .update({
+            status: 'Enviada',
+            status_envio: 'Encerrada',
+            aprovado: true
+          })
+          .eq('id', orc.id);
+
+        if (updateErr) throw updateErr;
+      }
+
+      const currentRev = parseInt(orc.revisao || '0', 10);
+      const nextRev = currentRev + 1;
+      const parts = orc.codigo.split('.');
+      let newCode = orc.codigo;
+
+      if (parts.length >= 3) {
+        const dateSeq = `${parts[0]}.${parts[1]}`;
+        const year = parts[2].split('-')[1] || new Date().getFullYear();
+        newCode = `${dateSeq}.${nextRev}-${year}`;
+      }
+
+      // 2. Insere a nova revisão com status "Em andamento" e campos zerados
+      const { data: newOrc, error: newOrcError } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .insert({
+          codigo: newCode,
+          nome: orc.nome,
+          descricao: orc.descricao,
+          cliente: orc.cliente,
+          projeto: orc.projeto,
+          gestor_cliente: orc.gestor_cliente,
+          revisao: String(nextRev),
+          status: 'Em andamento',
+          status_envio: null,
+          aprovado: false,
+          aprovado_em: null,
+          aprovado_por: null,
+          proposta_id: orc.proposta_id,
+          regra_arredondamento: orc.regra_arredondamento,
+          bdi_ac: orc.bdi_ac,
+          bdi_s: orc.bdi_s,
+          bdi_g: orc.bdi_g,
+          bdi_r: orc.bdi_r,
+          bdi_df: orc.bdi_df,
+          bdi_l: orc.bdi_l,
+          bdi_i: orc.bdi_i
+        })
+        .select('id')
+        .single();
+
+      if (newOrcError) throw newOrcError;
+
+      if (newOrc?.id) {
+        localStorage.removeItem(`orcamento_decisao_${newOrc.id}`);
+        localStorage.removeItem(`orcamento_obs_gestor_${newOrc.id}`);
+      }
+
+      // Clona os itens da proposta anterior para a nova revisão
+      const { data: oldItems, error: itemsError } = await supabase
+        .schema('engenharia')
+        .from('orcamento_itens')
+        .select('*')
+        .eq('orcamento_id', orc.id);
+
+      if (itemsError) throw itemsError;
+
+      if (oldItems && oldItems.length > 0) {
+        const newItems = oldItems.map((item: any) => {
+          const { id: itemId, created_at, ...rest } = item;
+          return {
+            ...rest,
+            orcamento_id: newOrc.id
+          };
+        });
+
+        const { error: insertItemsError } = await supabase
+          .schema('engenharia')
+          .from('orcamento_itens')
+          .insert(newItems);
+
+        if (insertItemsError) throw insertItemsError;
+      }
+
+      alert(`Revisão ${newCode} criada com sucesso!\nA proposta anterior foi Encerrada e a nova revisão está em andamento.`);
+      fetchOrcamentos();
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao criar revisão: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteOrcamento = async (id: string, codigo: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const confirm = window.confirm(`Deseja realmente excluir permanentemente o orçamento ${codigo}?`);
+    if (!confirm) return;
+
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      alert('Orçamento excluído com sucesso!');
+      fetchOrcamentos();
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao excluir: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDeleteImportado = async (id: string, nome: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const confirm = window.confirm(`Deseja excluir permanentemente a planilha importada "${nome}"?`);
+    if (!confirm) return;
+
+    try {
+      setLoading(true);
+      const { error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos_importados')
+        .delete()
+        .eq('id', id);
+
+      if (error) throw error;
+      fetchImportados();
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao excluir planilha importada: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const filteredOrcamentos = useMemo(() => {
+    return orcamentos.filter(o => {
+      const matchesSearch = 
+        !searchTerm ||
+        o.nome?.toLowerCase().includes(searchTerm.toLowerCase()) || 
+        o.codigo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        o.cliente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        o.projeto?.toLowerCase().includes(searchTerm.toLowerCase());
+
+      if (!matchesSearch) return false;
+
+      if (selectedStatus === 'todos') return true;
+
+      const effStatus = getOrcamentoEffectiveStatus(o);
+      return effStatus === selectedStatus;
+    });
+  }, [orcamentos, searchTerm, selectedStatus]);
+
+  const parseCodeRevisionAndBase = (codigo: string) => {
+    if (!codigo) return { base: '', revisao: 0, year: '' };
+    const parts = codigo.split('.');
+    if (parts.length >= 3) {
+      const dateSeq = `${parts[0]}.${parts[1]}`;
+      const revYear = parts[2].split('-');
+      const rev = parseInt(revYear[0], 10) || 0;
+      const year = revYear[1] || '';
+      return { base: `${dateSeq}-${year}`, revisao: rev, year };
+    }
+    return { base: codigo, revisao: 0, year: '' };
+  };
+
+  const orcamentoGroups = useMemo(() => {
+    const groupsMap = new Map<string, any[]>();
+    filteredOrcamentos.forEach(orc => {
+      const { base } = parseCodeRevisionAndBase(orc.codigo);
+      if (!groupsMap.has(base)) {
+        groupsMap.set(base, []);
+      }
+      groupsMap.get(base)!.push(orc);
+    });
+
+    const groups: { parent: any; children: any[]; baseKey: string }[] = [];
+    groupsMap.forEach((list, baseKey) => {
+      list.sort((a, b) => {
+        const revA = parseCodeRevisionAndBase(a.codigo).revisao;
+        const revB = parseCodeRevisionAndBase(b.codigo).revisao;
+        return revB - revA;
+      });
+
+      const [parent, ...children] = list;
+      groups.push({
+        parent,
+        children: children || [],
+        baseKey
+      });
+    });
+
+    groups.sort((a, b) => {
+      const dateA = new Date(a.parent.created_at || 0).getTime();
+      const dateB = new Date(b.parent.created_at || 0).getTime();
+      return dateB - dateA;
+    });
+
+    return groups;
+  }, [filteredOrcamentos]);
+
+  const toggleGroup = (baseKey: string, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(baseKey)) {
+        next.delete(baseKey);
+      } else {
+        next.add(baseKey);
+      }
+      return next;
+    });
+  };
+
+  const filteredImportados = importados.filter(i =>
+    i.nome_arquivo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    i.cliente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    i.projeto?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Top Header */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-800">Meus Orçamentos</h2>
+          <p className="text-slate-500 text-sm">Gerencie orçamentos da empresa e planilhas importadas de clientes</p>
+        </div>
+        
+        <div className="flex items-center gap-2">
+          <button 
+            onClick={() => setIsImportModalOpen(true)}
+            className="bg-white hover:bg-slate-50 text-slate-700 font-bold border border-slate-200 px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+            <span>Importar Planilha Excel</span>
+          </button>
+          
+          <button 
+            onClick={handleOpenCreateModal}
+            className="bg-blue-600 hover:bg-blue-700 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Novo Orçamento</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Abas Superiores & Barra de Busca */}
+      <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b border-slate-100 pb-3">
+          {/* Selector de Abas */}
+          <div className="flex items-center gap-2 bg-slate-100 p-1 rounded-xl">
+            <button
+              onClick={() => setActiveTab('empresa')}
+              className={clsx(
+                "px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2",
+                activeTab === 'empresa' ? "bg-white text-blue-600 shadow-xs" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <Calculator className="w-4 h-4" />
+              <span>Orçamentos da Empresa ({orcamentos.length})</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('importados')}
+              className={clsx(
+                "px-4 py-2 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2",
+                activeTab === 'importados' ? "bg-white text-blue-600 shadow-xs" : "text-slate-500 hover:text-slate-700"
+              )}
+            >
+              <FileSpreadsheet className="w-4 h-4 text-emerald-600" />
+              <span>Importações / Clientes ({importados.length})</span>
+            </button>
+          </div>
+
+          {/* Campo de Busca & Filtro de Status */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
+            {activeTab === 'empresa' && (
+              <div className="relative shrink-0">
+                <Filter className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="w-full sm:w-auto pl-8 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500 font-semibold text-slate-700 appearance-none cursor-pointer hover:bg-slate-100/70 transition-colors"
+                >
+                  <option value="todos">Todos os Status</option>
+                  <option value="Em andamento">Em andamento</option>
+                  <option value="Ag. Validação">Ag. Validação</option>
+                  <option value="Recusado pelo Gestor">Recusado pelo Gestor</option>
+                  <option value="Com Pendências">Com Pendências</option>
+                  <option value="Aprovado e Ag. Envio">Aprovado e Ag. Envio</option>
+                  <option value="Ag. Retorno">Ag. Retorno</option>
+                  <option value="Consolidada">Consolidada</option>
+                  <option value="Encerrada">Encerrada</option>
+                  <option value="Perdido">Perdido</option>
+                  <option value="Cancelada">Cancelada</option>
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            )}
+
+            {/* Campo de Busca */}
+            <div className="relative w-full sm:w-64">
+              <Search className="w-4 h-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="text"
+                placeholder="Buscar por código, cliente ou projeto..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-9 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500 font-medium"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* ABA 1: ORÇAMENTOS DA EMPRESA */}
+        {activeTab === 'empresa' && (
+          <div>
+            {loading ? (
+              <div className="py-16 text-center text-slate-400 font-medium">Carregando orçamentos...</div>
+            ) : filteredOrcamentos.length === 0 ? (
+              <div className="py-16 text-center text-slate-400 font-medium">Nenhum orçamento encontrado.</div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-3 px-4 w-36">Código / Rev</th>
+                      <th className="py-3 px-4">Nome do Orçamento / Projeto</th>
+                      <th className="py-3 px-4">Cliente / Gestor</th>
+                      <th className="py-3 px-4 w-32">Status</th>
+                      <th className="py-3 px-4 text-right w-28">Total Mat.</th>
+                      <th className="py-3 px-4 text-right w-28">Total M.O.</th>
+                      <th className="py-3 px-4 text-right w-32">Valor Total</th>
+                      <th className="py-3 px-4 text-center w-24">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {orcamentoGroups.map((group) => {
+                      const hasChildren = group.children.length > 0;
+                      const isExpanded = expandedGroups.has(group.baseKey);
+
+                      // Render Parent Row
+                      const parent = group.parent;
+                      const parentTotals = orcamentosTotals[parent.id] || { total: 0, mat: 0, mo: 0 };
+                      const parentBdiFactor = 1 + (parent.bdi_ac || 0) + (parent.bdi_s || 0) + (parent.bdi_g || 0) + (parent.bdi_r || 0) + (parent.bdi_df || 0) + (parent.bdi_l || 0);
+
+                      return (
+                        <>
+                          <tr 
+                            key={parent.id}
+                            onClick={() => navigate(`/orcamentos/${parent.id}`)}
+                            className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
+                          >
+                            <td className="py-3.5 px-4 font-mono text-slate-700">
+                              <div className="flex items-center gap-1.5">
+                                {hasChildren && (
+                                  <button
+                                    onClick={(e) => toggleGroup(group.baseKey, e)}
+                                    className="p-1 hover:bg-slate-200/80 rounded text-slate-500 cursor-pointer transition-colors shrink-0"
+                                  >
+                                    {isExpanded ? <ChevronDown className="w-4 h-4 text-blue-600" /> : <ChevronRight className="w-4 h-4 text-blue-600" />}
+                                  </button>
+                                )}
+                                {!hasChildren && <div className="w-6 shrink-0" />}
+                                
+                                <div>
+                                  <div className="font-bold bg-slate-100/80 px-2 py-0.5 rounded border border-slate-200/50 inline-block">
+                                    {parent.codigo}
+                                  </div>
+                                  <div className="text-[10px] text-slate-400 font-bold mt-1 uppercase">
+                                    REVISÃO: {String(parent.revisao || '0').padStart(2, '0')}
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors text-sm">
+                                {parent.nome || 'Orçamento sem título'}
+                              </div>
+                              <div className="text-slate-400 text-[11px] mt-0.5 line-clamp-1 max-w-md">
+                                {parent.descricao || 'Sem descrição adicional'}
+                              </div>
+                            </td>
+                            <td className="py-3.5 px-4 text-slate-600 font-medium">
+                              <div>{parent.cliente || 'Não informado'}</div>
+                              <div className="text-[10px] text-slate-400 mt-0.5">Gestor: {parent.gestor_cliente || 'Não informado'}</div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                               {renderStatusBadge(parent)}
+                             </td>
+                            <td className="py-3.5 px-4 text-right font-medium text-slate-700 tabular-nums">
+                              {(parentTotals.mat * parentBdiFactor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-medium text-slate-700 tabular-nums">
+                              {(parentTotals.mo * parentBdiFactor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                            <td className="py-3.5 px-4 text-right font-bold text-blue-600 tabular-nums">
+                              {(parentTotals.total * parentBdiFactor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                            </td>
+                            <td className="py-3.5 px-4 text-center">
+                              <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                {parent.status_envio === 'Encerrada' && (
+                                  <button 
+                                    onClick={(e) => handleCreateRevision(parent, e)}
+                                    title="Criar Nova Revisão"
+                                    className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors cursor-pointer"
+                                  >
+                                    <GitBranch className="w-3.5 h-3.5" />
+                                  </button>
+                                )}
+                                <button 
+                                  onClick={(e) => handleDeleteOrcamento(parent.id, parent.codigo, e)}
+                                  title="Excluir Orçamento"
+                                  className="p-1.5 hover:bg-rose-50 text-rose-600 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+
+                          {isExpanded && group.children.map((child) => {
+                            const childTotals = orcamentosTotals[child.id] || { total: 0, mat: 0, mo: 0 };
+                            const childBdiFactor = 1 + (child.bdi_ac || 0) + (child.bdi_s || 0) + (child.bdi_g || 0) + (child.bdi_r || 0) + (child.bdi_df || 0) + (child.bdi_l || 0);
+
+                            return (
+                              <tr 
+                                key={child.id}
+                                onClick={() => navigate(`/orcamentos/${child.id}`)}
+                                className="bg-slate-50/20 hover:bg-slate-50/40 transition-colors cursor-pointer group/child border-b border-slate-100/50 text-slate-400"
+                              >
+                                <td className="py-1.5 px-4 font-mono pl-10 relative">
+                                  <span className="absolute left-6 top-1/2 -translate-y-1/2 text-slate-300 font-medium text-xs">↳</span>
+                                  <div className="font-normal bg-slate-100/40 px-1.5 py-0.5 rounded border border-slate-200/20 inline-block text-[10px] text-slate-500">
+                                    {child.codigo}
+                                  </div>
+                                  <div className="text-[8.5px] text-slate-400 font-medium mt-0.5 uppercase">
+                                    REVISÃO: {String(child.revisao || '0').padStart(2, '0')}
+                                  </div>
+                                </td>
+                                <td className="py-1.5 px-4">
+                                  <div className="font-medium text-slate-600 text-xs">
+                                    {child.nome || 'Orçamento sem título'}
+                                  </div>
+                                  <div className="text-slate-400 text-[10px] mt-0.5 line-clamp-1 max-w-md">
+                                    {child.descricao || 'Sem descrição adicional'}
+                                  </div>
+                                </td>
+                                <td className="py-1.5 px-4 text-slate-500 text-[10.5px]">
+                                  <div>{child.cliente || 'Não informado'}</div>
+                                  <div className="text-[9px] text-slate-400 mt-0.5">Gestor: {child.gestor_cliente || 'Não informado'}</div>
+                                </td>
+                                 <td className="py-1.5 px-4">
+                                   {renderStatusBadge(child)}
+                                 </td>
+                                <td className="py-1.5 px-4 text-right text-[10.5px] tabular-nums text-slate-500">
+                                  {(childTotals.mat * childBdiFactor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </td>
+                                <td className="py-1.5 px-4 text-right text-[10.5px] tabular-nums text-slate-500">
+                                  {(childTotals.mo * childBdiFactor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </td>
+                                <td className="py-1.5 px-4 text-right font-medium text-slate-600 text-[10.5px] tabular-nums">
+                                  {(childTotals.total * childBdiFactor).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                                </td>
+                                <td className="py-1.5 px-4 text-center">
+                                  <div className="flex items-center justify-center gap-1 opacity-0 group-hover/child:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                    <button 
+                                      onClick={(e) => handleDeleteOrcamento(child.id, child.codigo, e)}
+                                      title="Excluir Revisão Anterior"
+                                      className="p-1 hover:bg-rose-50 text-rose-500 rounded transition-colors cursor-pointer"
+                                    >
+                                      <Trash2 className="w-3 h-3 text-rose-450" />
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ABA 2: IMPORTAÇÕES / CLIENTES */}
+        {activeTab === 'importados' && (
+          <div>
+            {filteredImportados.length === 0 ? (
+              <div className="py-16 text-center space-y-3">
+                <FileSpreadsheet className="w-10 h-10 text-slate-300 mx-auto" />
+                <p className="text-slate-400 text-sm font-medium">Nenhuma planilha importada. Clique em "Importar Planilha Excel" para enviar um orçamento.</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
+                <table className="w-full text-xs text-left border-collapse">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-3 px-4">Projeto / Nome do Arquivo</th>
+                      <th className="py-3 px-4 w-52">Cliente</th>
+                      <th className="py-3 px-4 w-72">Progresso De-Para</th>
+                      <th className="py-3 px-4 w-36">Status</th>
+                      <th className="py-3 px-4 w-32">Importado Em</th>
+                      <th className="py-3 px-4 text-center w-36">Ações</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {filteredImportados.map((imp) => {
+                      const stats = importadosStats[imp.id] || { total: 0, linked: 0 };
+                      const percent = stats.total > 0 ? Math.round((stats.linked / stats.total) * 100) : 0;
+                      const createdOrc = createdImportadosMap[imp.id];
+                      const { label: statusLabel, badgeCls } = getImportadoEffectiveStatusInfo(imp, stats, createdOrc);
+
+                      return (
+                        <tr
+                          key={imp.id}
+                          onClick={() => navigate(`/orcamentos/depara/${imp.id}`)}
+                          className="hover:bg-slate-50/70 transition-colors cursor-pointer group"
+                        >
+                          <td className="py-3.5 px-4">
+                            <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors text-sm">
+                              {imp.projeto || imp.nome_arquivo}
+                            </div>
+                            <div className="text-slate-400 font-mono text-[10px] mt-0.5 max-w-sm truncate">
+                              {imp.nome_arquivo}
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4 font-semibold text-slate-700">
+                            {imp.cliente || 'Não informado'}
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <div className="space-y-1.5 max-w-[240px]">
+                              <div className="flex justify-between text-[11px] font-bold text-slate-600">
+                                <span>Vinculados:</span>
+                                <span>{stats.linked} / {stats.total} ({percent}%)</span>
+                              </div>
+                              <div className="w-full bg-slate-100 h-1.5 rounded-full overflow-hidden">
+                                <div className="bg-blue-600 h-full transition-all duration-300" style={{ width: `${percent}%` }} />
+                              </div>
+                            </div>
+                          </td>
+                          <td className="py-3.5 px-4">
+                            <span className={clsx("text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap inline-block shadow-2xs", badgeCls)}>
+                              {statusLabel}
+                            </span>
+                          </td>
+                          <td className="py-3.5 px-4 text-slate-500 font-medium">
+                            {imp.created_at ? new Date(imp.created_at).toLocaleDateString('pt-BR') : '-'}
+                          </td>
+                          <td className="py-3.5 px-4 text-center">
+                            <div className="flex items-center justify-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                              {createdOrc && (
+                                <button 
+                                  onClick={() => navigate(`/orcamentos/${createdOrc.id}`)}
+                                  title={`Abrir Orçamento ${createdOrc.codigo}`}
+                                  className="p-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-lg transition-colors cursor-pointer flex items-center justify-center shadow-2xs"
+                                >
+                                  <Calculator className="w-3.5 h-3.5 text-blue-600" />
+                                </button>
+                              )}
+                              <button
+                                onClick={(e) => handleDeleteImportado(imp.id, imp.nome_arquivo, e)}
+                                title="Excluir Planilha Importada"
+                                className="p-1.5 hover:bg-rose-50 text-rose-500 rounded-lg transition-colors cursor-pointer"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Modal Criar Novo Orçamento Nativo */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-800">Novo Orçamento da Empresa</h3>
+              <button onClick={() => setIsCreateModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateOrcamento} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento</label>
+                <input 
+                  type="text"
+                  required
+                  value={newOrcamentoData.codigo}
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, codigo: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono font-bold text-blue-600 outline-none focus:border-blue-500 bg-slate-50"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Nome do Projeto / Obra</label>
+                <input 
+                  type="text"
+                  required
+                  value={newOrcamentoData.projeto}
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, projeto: e.target.value})}
+                  placeholder="Ex: Construção de Galpão Industrial"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
+                <input 
+                  type="text"
+                  value={newOrcamentoData.cliente}
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cliente: e.target.value})}
+                  placeholder="Ex: Metalúrgica BRP Ltda"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
+                <input 
+                  type="text"
+                  value={newOrcamentoData.gestor_cliente}
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, gestor_cliente: e.target.value})}
+                  placeholder="Ex: Eng. Pamella"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                />
+              </div>
+
+              <div className="pt-4 flex justify-end gap-2 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={() => setIsCreateModalOpen(false)}
+                  className="px-4 py-2 text-slate-500 font-bold hover:text-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={loading}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition-all cursor-pointer"
+                >
+                  Criar Orçamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Importar Planilha Excel */}
+      <ModalImportarExcel 
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onSuccess={(importedId) => {
+          fetchImportados();
+          setActiveTab('importados');
+          navigate(`/orcamentos/depara/${importedId}`);
+        }}
+      />
+    </div>
+  );
+}
