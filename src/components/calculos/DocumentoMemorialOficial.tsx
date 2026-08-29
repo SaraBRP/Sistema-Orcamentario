@@ -4151,7 +4151,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                         const temFormula = !!(equacao || substituicao || obs || (item.parametrosLocais && item.parametrosLocais.length > 0));
 
                         return (
-                          <td className="py-2.5 px-4 text-left align-middle border-r border-slate-200 bg-white">
+                          <td className="py-2.5 px-4 text-left align-middle border-r border-slate-200">
                             <div className="flex items-center justify-between gap-2 w-full">
                               <div className="space-y-1 flex-1 min-w-0">
                                 {obs && <div className="text-[10px] font-bold uppercase text-slate-700 truncate">{obs}</div>}
