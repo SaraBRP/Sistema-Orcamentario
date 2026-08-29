@@ -3067,8 +3067,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
 
   const handleBindSectionParameter = (
     index: number,
-    param: { label: string; valor: number | string; unidade?: string; categoria?: string },
-    itemEap?: string
+    param: { label: string; valor: number | string; unidade?: string; categoria?: string }
   ) => {
     const copia = itens.map(i => ({ ...i }));
     const item = copia[index];
@@ -3079,18 +3078,15 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
 
     item.quantidade = valNum;
 
-    const catText = param.categoria ? param.categoria.toUpperCase() : 'PARÂMETRO VINCULADO';
-    const eapText = itemEap && itemEap !== 'GLOBAL' ? ` (EAP ${itemEap})` : '';
-
-    item.observacaoMemoria = `${catText}: ${param.label}`;
-    item.equacaoLiteral = `Parâmetro Vinculado: [${param.label}]${eapText}`;
+    item.observacaoMemoria = '';
+    item.equacaoLiteral = '';
     item.substituicaoNumerica = `${param.label} = ${valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${param.unidade || ''}`.trim();
 
     item.formulasLista = [
       {
         id: `param-bind-${Date.now()}`,
-        observacao: item.observacaoMemoria,
-        equacaoLiteral: item.equacaoLiteral,
+        observacao: '',
+        equacaoLiteral: '',
         substituicaoNumerica: item.substituicaoNumerica,
         resultado: valNum,
         modoCalculo: 'parametro'
@@ -3132,8 +3128,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
         const paramLabel = boundParam.parametro || boundParam.parametroNome || 'Parâmetro Global';
         const paramUnit = boundParam.unidade || '';
 
-        const obs = `PARÂMETRO GLOBAL: ${paramLabel}`;
-        const eqLit = `Parâmetro Vinculado: [${paramLabel}]`;
+        const obs = '';
+        const eqLit = '';
         const subst = `${paramLabel} = ${valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${paramUnit}`.trim();
 
         return {
@@ -3154,7 +3150,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
           ]
         };
       } else {
-        if (it.observacaoMemoria && it.observacaoMemoria.startsWith('PARÂMETRO GLOBAL:')) {
+        if (it.substituicaoNumerica && (it.observacaoMemoria?.startsWith('PARÂMETRO GLOBAL:') || !it.observacaoMemoria)) {
           return {
             ...it,
             observacaoMemoria: '',
@@ -4078,7 +4074,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                               type="button"
                                               onClick={(e) => {
                                                 e.stopPropagation();
-                                                handleBindSectionParameter(index, param, itemEap);
+                                                handleBindSectionParameter(index, param);
                                                 setActiveQuantityLinkIndex(null);
                                               }}
                                               className="w-full text-left px-2 py-1.5 hover:bg-blue-50 rounded-lg flex items-center justify-between text-xs cursor-pointer border border-transparent hover:border-blue-200 transition-colors"
