@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { 
-  Calculator, Plus, Trash2, BookOpen, ArrowUp, ArrowDown, ArrowLeft, Indent, Outdent, Type, CheckCircle2, ChevronRight, ChevronLeft, ChevronDown, CornerDownRight, GripVertical, Unlink, Sparkles, Globe, XCircle, FileText, Printer, Edit2, Check, Target, Search
+  Calculator, Plus, Trash2, BookOpen, ArrowUp, ArrowDown, ArrowLeft, Indent, Outdent, Type, CheckCircle2, ChevronRight, ChevronLeft, ChevronDown, CornerDownRight, GripVertical, Unlink, Sparkles, Globe, XCircle, FileText, Printer, Edit2, Check, Target, Search, Eye, EyeOff
 } from 'lucide-react';
 import type { 
   ItemMemoriaOficial, 
@@ -630,6 +630,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   const [activeQuantityLinkIndex, setActiveQuantityLinkIndex] = useState<number | null>(null);
   const [memorialDetalhadoIndex, setMemorialDetalhadoIndex] = useState<number | null>(null);
   const [mostrarMemorialGlobal, setMostrarMemorialGlobal] = useState(false);
+  const [showVincularPanel, setShowVincularPanel] = useState<boolean>(true);
 
   // Insumos filhos da composição atual sendo editada no modal
   const childItemsOfComposition = React.useMemo(() => {
@@ -3379,12 +3380,33 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                       Vincular Itens do Orçamento aos Parâmetros Globais
                     </span>
                   </div>
-                  <span className="text-[11px] font-semibold text-blue-800">
-                    Marque abaixo os itens do orçamento aos quais o parâmetro global se aplica (pode vincular a mais de um item).
-                  </span>
+
+                  <div className="flex items-center gap-3">
+                    <span className="text-[11px] font-semibold text-blue-800 hidden md:inline">
+                      Marque os itens aos quais o parâmetro se aplica.
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setShowVincularPanel(prev => !prev)}
+                      className="px-2.5 py-1 bg-white hover:bg-blue-100/80 text-blue-900 border border-blue-300 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs shrink-0"
+                      title={showVincularPanel ? "Minimizar painel de vinculação" : "Visualizar painel de vinculação"}
+                    >
+                      {showVincularPanel ? (
+                        <>
+                          <EyeOff className="w-3.5 h-3.5 text-blue-700" />
+                          <span className="text-[11px] font-bold">Minimizar</span>
+                        </>
+                      ) : (
+                        <>
+                          <Eye className="w-3.5 h-3.5 text-blue-600" />
+                          <span className="text-[11px] font-bold">Visualizar</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
                 </div>
 
-                {(() => {
+                {showVincularPanel && (() => {
                   const paramList = header.dadosComplementares || [];
                   const safeIdx = Math.min(selectedGlobalParamIndex, Math.max(0, paramList.length - 1));
                   const activeParam = paramList[safeIdx];
