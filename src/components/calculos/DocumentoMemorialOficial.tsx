@@ -5039,15 +5039,26 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                       ...globalParamsAsCustom.filter((gp: any) => !customParamsList.some((cp: any) => (cp.nome && cp.nome.trim().toLowerCase()) === (gp.nome && gp.nome.trim().toLowerCase())))
                                     ];
 
-                                    if (allAvailableParams.length === 0) {
+                                    const rhs = customTextLiteral.substring(customTextLiteral.indexOf('=') + 1);
+                                    const searchMatch = rhs.match(/^(.*[\+\-\*\/\(\,\=]|^)(.*)$/s);
+                                    const searchFilter = (searchMatch ? searchMatch[2] : rhs).trim().toLowerCase();
+
+                                    const filteredParams = allAvailableParams.filter((p) => {
+                                      if (!searchFilter) return true;
+                                      const pName = (p.nome || '').toLowerCase();
+                                      const pCat = (p.parametroNome || '').toLowerCase();
+                                      return pName.includes(searchFilter) || pCat.includes(searchFilter);
+                                    });
+
+                                    if (filteredParams.length === 0) {
                                       return (
                                         <div className="p-3 text-center text-slate-400 text-xs italic">
-                                          Nenhum parâmetro cadastrado na tabela acima ou no orçamento. Cadastre um parâmetro na tabela "Parâmetros da Fórmula" ou em "Parâmetros Globais" para utilizá-lo.
+                                          Nenhum parâmetro encontrado para "{searchFilter}".
                                         </div>
                                       );
                                     }
 
-                                    return allAvailableParams.map((p) => {
+                                    return filteredParams.map((p) => {
                                       const tag = `[${p.nome || 'Parâmetro'}]`;
                                       return (
                                         <button
@@ -5058,16 +5069,24 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                             const insertedTag = `[${pName}]`;
                                             let nextStr = customTextLiteral;
                                             if (!nextStr.includes('=')) return;
-                                            const eqIdx = nextStr.indexOf('=');
-                                            const prefix = nextStr.substring(0, eqIdx + 1);
-                                            const suffix = nextStr.substring(eqIdx + 1).trim();
 
-                                            if (!suffix) {
-                                              nextStr = `${prefix} ${insertedTag}`;
-                                            } else if (/[\+\-\*\/\(\=]\s*$/.test(suffix)) {
-                                              nextStr = `${prefix} ${suffix} ${insertedTag}`;
+                                            const eqIdx = nextStr.indexOf('=');
+                                            const lhs = nextStr.substring(0, eqIdx + 1);
+                                            const currentRhs = nextStr.substring(eqIdx + 1);
+
+                                            if (/\]\s*$/.test(currentRhs) || /\d+\s*$/.test(currentRhs)) {
+                                              nextStr = `${lhs}${currentRhs} + ${insertedTag}`;
                                             } else {
-                                              nextStr = `${prefix} ${suffix} + ${insertedTag}`;
+                                              const lastOpMatch = currentRhs.match(/^(.*[\+\-\*\/\(\,\=]|^)(.*)$/s);
+                                              if (lastOpMatch) {
+                                                const beforeSearchText = lastOpMatch[1];
+                                                const cleanBefore = beforeSearchText.endsWith(' ') || beforeSearchText.endsWith('=') || beforeSearchText === '' 
+                                                  ? beforeSearchText 
+                                                  : `${beforeSearchText} `;
+                                                nextStr = `${lhs}${cleanBefore}${insertedTag}`;
+                                              } else {
+                                                nextStr = `${lhs} ${insertedTag}`;
+                                              }
                                             }
 
                                             setCustomTextLiteral(nextStr);
