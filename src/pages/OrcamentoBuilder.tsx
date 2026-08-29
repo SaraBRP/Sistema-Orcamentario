@@ -1904,19 +1904,42 @@ export default function OrcamentoBuilder() {
         }
       }
 
-      // 2. Carrega itens
-      const { data: itensData, error: itensError } = await supabase
-        .schema('engenharia')
-        .from('orcamento_itens')
-        .select('*')
-        .eq('orcamento_id', id);
+      // 2. Carrega itens do Supabase (com fallback em localStorage para sincronização com memoriais)
+      let effectiveData: any[] = [];
+      try {
+        const { data: itensData, error: itensError } = await supabase
+          .schema('engenharia')
+          .from('orcamento_itens')
+          .select('*')
+          .eq('orcamento_id', id);
 
-      if (itensError) throw itensError;
+        if (!itensError && itensData && itensData.length > 0) {
+          effectiveData = itensData;
+        }
+      } catch (e) {
+        console.error('Erro ao buscar itens do Supabase:', e);
+      }
+
+      if (effectiveData.length === 0 && id) {
+        try {
+          const localItens = localStorage.getItem(`brp_orcamento_itens_${id}`) || localStorage.getItem(`orcamento_calculos_${id}`);
+          if (localItens) {
+            effectiveData = JSON.parse(localItens);
+          }
+        } catch (e) {
+          console.error('Erro ao carregar itens do localStorage:', e);
+        }
+      }
 
       // Ordenar por EAP lexicograficamente
-      const sorted = (itensData || []).map((i: any) => ({
+      const sorted = (effectiveData || []).map((i: any) => ({
         ...i,
         item_eap: (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim(),
+        isSecao: i.is_secao !== undefined ? Boolean(i.is_secao) : Boolean(i.isSecao),
+        is_secao: i.is_secao !== undefined ? Boolean(i.is_secao) : Boolean(i.isSecao),
+        level: i.level !== undefined ? i.level : undefined,
+        isChildInsumoOfComposition: i.is_child_insumo !== undefined ? Boolean(i.is_child_insumo) : Boolean(i.isChildInsumoOfComposition),
+        parentCompositionId: i.parent_composition_id || i.parentCompositionId || '',
         quantidade: parseFloat(i.quantidade || 0),
         valor_unitario_mat: parseFloat(i.valor_unitario_mat || 0),
         valor_unitario_mo: parseFloat(i.valor_unitario_mo || 0),

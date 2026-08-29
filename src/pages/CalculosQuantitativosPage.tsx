@@ -434,7 +434,8 @@ export default function CalculosQuantitativosPage() {
           gestor_cliente: activeMemorial.gestorCliente || activeMemorial.header?.gestorCliente || '',
           local_obra: localObra,
           revisao,
-          status: 'Em Elaboração'
+          status: 'Em Elaboração',
+          dados_complementares: activeMemorial.header?.dadosComplementares || []
         })
         .select('id')
         .single();
@@ -446,27 +447,182 @@ export default function CalculosQuantitativosPage() {
       console.error('Erro ao registrar orçamento no Supabase:', err);
     }
 
-    // Persiste os parâmetros das seções no localStorage para vinculação direta nas composições
-    try {
-      localStorage.setItem(`orcamento_parametros_${targetOrcId}`, JSON.stringify(activeMemorial.itens));
-    } catch (e) {
-      console.error('Erro ao salvar parâmetros de seções:', e);
+    // Busca preços de composições e insumos no banco de dados para enriquecer os itens
+    const codigos = activeMemorial.itens
+      .map(i => (i as any).codigo)
+      .filter((c): c is string => Boolean(c && c.trim() !== ''));
+
+    const priceMap = new Map<string, { mat: number; mo: number; total: number; id?: string; fonte?: string }>();
+
+    if (codigos.length > 0) {
+      try {
+        const { data: compData } = await supabase
+          .schema('engenharia')
+          .from('composicoes')
+          .select('id, codigo, fonte, custo_total, custo_material, custo_mao_obra')
+          .in('codigo', codigos);
+
+        (compData || []).forEach((c: any) => {
+          const mat = parseFloat(c.custo_material || 0);
+          const mo = parseFloat(c.custo_mao_obra || 0);
+          const tot = parseFloat(c.custo_total || 0) || (mat + mo);
+          priceMap.set(c.codigo, { mat, mo, total: tot, id: c.id, fonte: c.fonte });
+        });
+
+        const { data: insData } = await supabase
+          .schema('engenharia')
+          .from('insumos')
+          .select('id, codigo, fonte, preco_unitario, valor_nao_desonerado, tipo')
+          .in('codigo', codigos);
+
+        (insData || []).forEach((ins: any) => {
+          const preco = parseFloat(ins.preco_unitario || ins.valor_nao_desonerado || 0);
+          const isMo = (ins.tipo || '').toUpperCase().includes('MÃO DE OBRA') || (ins.tipo || '').toUpperCase().includes('MAO DE OBRA');
+          priceMap.set(ins.codigo, {
+            mat: isMo ? 0 : preco,
+            mo: isMo ? preco : 0,
+            total: preco,
+            id: ins.id,
+            fonte: ins.fonte
+          });
+        });
+      } catch (e) {
+        console.error('Erro ao consultar preços de insumos/composições:', e);
+      }
     }
 
-    // Insere TODOS os itens (seções e composições) no Supabase preservando a estrutura EAP criada
+    // Constrói a estrutura completa e enriquecida de itens para a Planilha Orçamentária
+    const itensEstruturados: any[] = [];
+
+    for (let idx = 0; idx < activeMemorial.itens.length; idx++) {
+      const item = activeMemorial.itens[idx];
+      const isSecao = Boolean(item.isSecao || (item as any).is_secao);
+      const cod = (item as any).codigo || '';
+      const desc = item.descricao || '';
+      const priceInfo = cod ? priceMap.get(cod) : undefined;
+
+      const valMat = priceInfo?.mat || (item as any).valor_unitario_mat || 0;
+      const valMo = priceInfo?.mo || (item as any).valor_unitario_mo || 0;
+      const valTot = priceInfo?.total || (item as any).valor_unitario || (valMat + valMo);
+      const qtd = isSecao ? 0 : (item.quantidade || 0);
+
+      const parentItem = {
+        id: item.id || `item-${Date.now()}-${idx}`,
+        orcamento_id: targetOrcId,
+        item_eap: item.item_eap,
+        descricao: desc,
+        unidade: isSecao ? '' : (item.unidade || 'UN'),
+        quantidade: qtd,
+        isSecao: isSecao,
+        is_secao: isSecao,
+        level: item.level !== undefined ? item.level : (isSecao ? 0 : 1),
+        codigo: cod,
+        banco_fonte: (item as any).banco_fonte || priceInfo?.fonte || '',
+        composicao_id: (item as any).composicao_id || priceInfo?.id || null,
+        equacaoLiteral: item.equacaoLiteral || (item as any).equacao_literal || '',
+        substituicaoNumerica: item.substituicaoNumerica || (item as any).substituicao_numerica || '',
+        observacaoMemoria: item.observacaoMemoria || (item as any).observacao_memoria || '',
+        valor_unitario_mat: valMat,
+        valor_unitario_mo: valMo,
+        valor_unitario: valTot,
+        total_mat: qtd * valMat,
+        total_mo: qtd * valMo,
+        total: qtd * valTot,
+        ordem: itensEstruturados.length + 1
+      };
+
+      itensEstruturados.push(parentItem);
+
+      // Se for composição e possuir id no banco, busca seus insumos filhas para incluir no orçamento
+      const compId = (item as any).composicao_id || priceInfo?.id;
+      if (!isSecao && compId) {
+        try {
+          const { data: compInsumos } = await supabase
+            .schema('engenharia')
+            .from('composicao_itens')
+            .select(`
+              id, quantidade,
+              insumo:insumos!insumo_id (id, codigo, descricao, unidade, preco_unitario, valor_nao_desonerado, tipo, fonte)
+            `)
+            .eq('composicao_id', compId);
+
+          if (compInsumos && compInsumos.length > 0) {
+            compInsumos.forEach((ci: any, subIdx: number) => {
+              const ins = ci.insumo;
+              if (ins) {
+                const subQtd = (ci.quantidade || 0) * qtd;
+                const insPreco = parseFloat(ins.preco_unitario || ins.valor_nao_desonerado || 0);
+                const isMo = (ins.tipo || '').toUpperCase().includes('MÃO DE OBRA') || (ins.tipo || '').toUpperCase().includes('MAO DE OBRA');
+                const subMat = isMo ? 0 : insPreco;
+                const subMo = isMo ? insPreco : 0;
+
+                itensEstruturados.push({
+                  id: `sub-${parentItem.id}-${subIdx}`,
+                  orcamento_id: targetOrcId,
+                  item_eap: `${parentItem.item_eap}.${subIdx + 1}`,
+                  descricao: ins.descricao,
+                  unidade: ins.unidade || 'UN',
+                  quantidade: ci.quantidade || 0,
+                  isSecao: false,
+                  is_secao: false,
+                  level: (parentItem.level || 1) + 1,
+                  codigo: ins.codigo || '',
+                  banco_fonte: ins.fonte || '',
+                  composicao_id: compId,
+                  isChildInsumoOfComposition: true,
+                  parentCompositionId: parentItem.id,
+                  valor_unitario_mat: subMat,
+                  valor_unitario_mo: subMo,
+                  valor_unitario: insPreco,
+                  total_mat: subQtd * subMat,
+                  total_mo: subQtd * subMo,
+                  total: subQtd * insPreco,
+                  ordem: itensEstruturados.length + 1
+                });
+              }
+            });
+          }
+        } catch (e) {
+          console.error('Erro ao buscar insumos da composição:', e);
+        }
+      }
+    }
+
+    // Persiste os dados localmente no LocalStorage para redundância e sincronização imediata
     try {
-      const itensParaInserirDb = activeMemorial.itens.map((item, idx) => ({
+      localStorage.setItem(`orcamento_calculos_${targetOrcId}`, JSON.stringify(activeMemorial.itens));
+      localStorage.setItem(`orcamento_parametros_${targetOrcId}`, JSON.stringify(activeMemorial.itens));
+      localStorage.setItem(`orcamento_header_${targetOrcId}`, JSON.stringify(activeMemorial.header));
+      localStorage.setItem(`orcamento_dados_comp_${targetOrcId}`, JSON.stringify(activeMemorial.header?.dadosComplementares || []));
+      localStorage.setItem(`brp_orcamento_itens_${targetOrcId}`, JSON.stringify(itensEstruturados));
+    } catch (e) {
+      console.error('Erro ao salvar parâmetros e itens no localStorage:', e);
+    }
+
+    // Insere os itens na tabela orcamento_itens no Supabase
+    try {
+      const itensParaInserirDb = itensEstruturados.map((item, idx) => ({
         orcamento_id: targetOrcId,
         item_eap: item.item_eap,
         descricao: item.descricao,
         unidade: item.isSecao ? '' : (item.unidade || 'UN'),
         quantidade: item.isSecao ? 0 : (item.quantidade || 0),
-        valor_unitario_mat: 0,
-        valor_unitario_mo: 0,
-        valor_unitario: 0,
-        total_mat: 0,
-        total_mo: 0,
-        total: 0,
+        is_secao: Boolean(item.isSecao),
+        level: item.level !== undefined ? item.level : (item.isSecao ? 0 : 1),
+        codigo: item.codigo || '',
+        banco_fonte: item.banco_fonte || '',
+        composicao_id: item.composicao_id || null,
+        parent_composition_id: item.parentCompositionId || null,
+        is_child_insumo: Boolean(item.isChildInsumoOfComposition),
+        equacao_literal: item.equacaoLiteral || '',
+        substituicao_numerica: item.substituicaoNumerica || '',
+        observacao_memoria: item.observacaoMemoria || '',
+        valor_unitario_mat: item.valor_unitario_mat || 0,
+        valor_unitario_mo: item.valor_unitario_mo || 0,
+        valor_unitario: item.valor_unitario || 0,
+        total_mat: item.total_mat || 0,
+        total_mo: item.total_mo || 0,
+        total: item.total || 0,
         ordem: idx + 1
       }));
 
@@ -511,7 +667,6 @@ export default function CalculosQuantitativosPage() {
     } catch {}
 
     alert(`Orçamento "${codigoOrcamentoGerado} - ${nomeOrcamento}" gerado com sucesso! Redirecionando para a área de orçamentos...`);
-    // Redireciona para a rota oficial dos orçamentos da empresa (/orcamentos/:id)
     navigate(`/orcamentos/${targetOrcId}`);
   };
 
