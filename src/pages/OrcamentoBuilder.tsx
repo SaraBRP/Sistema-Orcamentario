@@ -135,13 +135,10 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
       let calcQtd = item.quantidade || 0;
       const coef = (item as any).coeficiente;
 
-      if (coef && coef > 0 && item.effectiveMultiplier > 1) {
+      if (coef && coef > 0) {
         calcQtd = coef * item.effectiveMultiplier;
       } else if (item.effectiveMultiplier > 1) {
-        // Se a quantidade armazenada foi multiplicada por erro de multiplicador redundante, desfaz a dupla multiplicação
-        if (calcQtd > item.effectiveMultiplier && (calcQtd / item.effectiveMultiplier) > 0) {
-          calcQtd = calcQtd / item.effectiveMultiplier;
-        }
+        calcQtd = (item.quantidade || 0) * item.effectiveMultiplier;
       }
 
       (item as any).displayQuantidade = calcQtd;
@@ -149,17 +146,23 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
       item.total_mo  = calcQtd * (item.valor_unitario_mo || 0);
       item.total     = item.total_mat + item.total_mo;
     } else {
-      // Pai (Seção ou Composição/Atividade com filhos): soma filhos diretos já processados (bottom-up garante que estão calculados)
+      // Pai (Seção ou Composição/Atividade com filhos): soma filhos diretos já processados
       const sumMat   = directChildren.reduce((s, d) => s + d.total_mat, 0);
       const sumMo    = directChildren.reduce((s, d) => s + d.total_mo,  0);
       const sumTotal = directChildren.reduce((s, d) => s + d.total,     0);
 
       if (hasCode) {
-        // Composição com filhos explodidos: agrega filhos mas NÃO é summary
+        // Composição com filhos explodidos: agrega filhos
         item.isSummary = false;
-        item.total_mat = sumMat;
-        item.total_mo  = sumMo;
-        item.total     = sumTotal;
+        if (sumTotal > 0 || sumMat > 0 || sumMo > 0) {
+          item.total_mat = sumMat;
+          item.total_mo  = sumMo;
+          item.total     = sumTotal;
+        } else {
+          item.total_mat = (item.quantidade || 0) * (item.valor_unitario_mat || 0);
+          item.total_mo  = (item.quantidade || 0) * (item.valor_unitario_mo || 0);
+          item.total     = item.total_mat + item.total_mo;
+        }
       } else {
         // Etapa/atividade manual com filhos: é summary → zera campos editáveis
         item.isSummary = true;
