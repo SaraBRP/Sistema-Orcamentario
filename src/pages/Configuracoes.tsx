@@ -139,6 +139,13 @@ export default function Configuracoes() {
     return validProfiles.filter(p => p.approved !== false);
   }, [validProfiles]);
 
+  // Seleciona automaticamente o primeiro colaborador na matriz de permissões
+  useEffect(() => {
+    if (activeTab === 'permissoes' && approvedProfiles.length > 0 && !selectedUser) {
+      handleSelectUserForPermissions(approvedProfiles[0]);
+    }
+  }, [activeTab, approvedProfiles, selectedUser]);
+
   const pendingProfiles = useMemo(() => {
     return validProfiles.filter(p => p.approved === false);
   }, [validProfiles]);
@@ -220,7 +227,13 @@ export default function Configuracoes() {
     }
   };
 
-  // Abrir Modal de Edição
+  // Selecionar Usuário apenas para matriz de permissões (sem abrir modal de edição)
+  const handleSelectUserForPermissions = (user: Profile) => {
+    setSelectedUser(user);
+    setEditScreens(user.permitted_screens || MODULOS_SISTEMA.map(m => m.id));
+  };
+
+  // Abrir Modal de Edição (Somente quando clicado no ícone de editar da tabela)
   const handleOpenEdit = (user: Profile) => {
     setSelectedUser(user);
     setEditNome(user.nome || '');
@@ -621,7 +634,7 @@ export default function Configuracoes() {
                   {approvedProfiles.map(u => (
                     <button
                       key={u.id}
-                      onClick={() => handleOpenEdit(u)}
+                      onClick={() => handleSelectUserForPermissions(u)}
                       className={clsx(
                         'w-full text-left p-2.5 rounded-xl border text-xs transition-all flex items-center justify-between cursor-pointer',
                         selectedUser?.id === u.id

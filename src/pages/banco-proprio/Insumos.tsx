@@ -710,33 +710,29 @@ export default function BancoProprioInsumos() {
                 placeholder="Buscar por código ou descrição..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white text-sm"
+                className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white text-sm text-slate-900 font-normal placeholder:text-slate-500"
               />
             </div>
-            <select
-              value={filtroEstado}
-              onChange={(e) => setFiltroEstado(e.target.value)}
-              className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm min-w-[150px]"
-            >
-              <option value="">Todos os Estados</option>
-              {estadosDisponiveis.map(uf => <option key={uf} value={uf}>{uf}</option>)}
-            </select>
-          </div>
-          <div className="flex gap-2 overflow-x-auto pb-1 w-full justify-start scrollbar-thin">
-            {TIPOS.map(tipo => (
-              <button
-                key={tipo}
-                onClick={() => setTipoFiltro(tipoFiltro === tipo ? 'Todos' : tipo)}
-                className={clsx(
-                  'px-3 py-1.5 rounded-full text-xs font-medium transition-all whitespace-nowrap border flex-shrink-0',
-                  tipoFiltro === tipo
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
-                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                )}
+            <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+              <select
+                value={tipoFiltro}
+                onChange={(e) => setTipoFiltro(e.target.value)}
+                className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-normal text-slate-900 min-w-[160px]"
               >
-                {tipo}
-              </button>
-            ))}
+                <option value="Todos" className="text-slate-900 bg-white font-normal">Todos os Tipos</option>
+                {TIPOS.filter(t => t !== 'Todos').map(tipo => (
+                  <option key={tipo} value={tipo} className="text-slate-900 bg-white font-normal">{tipo}</option>
+                ))}
+              </select>
+              <select
+                value={filtroEstado}
+                onChange={(e) => setFiltroEstado(e.target.value)}
+                className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-normal text-slate-900 min-w-[150px]"
+              >
+                <option value="" className="text-slate-900 bg-white font-normal">Todos os Estados</option>
+                {estadosDisponiveis.map(uf => <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">{uf}</option>)}
+              </select>
+            </div>
           </div>
         </div>
 
@@ -747,7 +743,7 @@ export default function BancoProprioInsumos() {
               <tr>
                 {renderHeader('codigo', 'Cód.')}
                 {renderHeader('descricao', 'Descrição')}
-                {renderHeader('unidade', 'Und.')}
+                {renderHeader('unidade', 'UN')}
                 {renderHeader('tipo', 'Tipo')}
                 {renderHeader('estado', 'UF')}
                 {renderHeader('valor', 'Valor (R$)', 'right')}

@@ -244,49 +244,42 @@ export default function BancoProprioComposicoes() {
 
       <div className="bg-white rounded-2xl shadow-2xs border border-slate-200 overflow-hidden">
         <div className="p-3.5 border-b border-slate-200 flex flex-col gap-3 bg-slate-50/50">
-          <div className="flex flex-col md:flex-row gap-3 items-center justify-between">
-            <div className="flex flex-col sm:flex-row gap-2.5 items-center w-full md:w-auto">
-              <div className="relative w-full sm:w-72">
+          <div className="flex flex-col sm:flex-row gap-3 items-center justify-between">
+            <div className="flex flex-col sm:flex-row gap-2.5 items-center w-full">
+              <div className="relative w-full sm:w-80">
                 <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
                 <input
                   type="text"
                   placeholder="Buscar composição própria..."
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white text-xs"
+                  className="w-full pl-9 pr-3 py-1.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none bg-white text-xs text-slate-900 font-normal placeholder:text-slate-500"
                 />
               </div>
               
+              {/* Filtro por Atividade / Tipo */}
+              <select
+                value={atividadeFiltro}
+                onChange={(e) => setAtividadeFiltro(e.target.value)}
+                className="w-full sm:w-52 px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 font-normal cursor-pointer"
+              >
+                <option value="Todos" className="text-slate-900 bg-white font-normal">Todas as Atividades / Tipos</option>
+                {ATIVIDADES.filter(a => a !== 'Todos').map(a => (
+                  <option key={a} value={a} className="text-slate-900 bg-white font-normal">{a}</option>
+                ))}
+              </select>
+
               {/* Filtro por UF / Estado */}
-              <div className="flex items-center gap-1.5 w-full sm:w-auto">
-                <select
-                  value={estadoFiltro}
-                  onChange={(e) => setEstadoFiltro(e.target.value)}
-                  className="w-full sm:w-40 px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold text-slate-700 cursor-pointer"
-                >
-                  <option value="Todos">Todas as UFs</option>
-                  {estadosDisponiveis.map(uf => (
-                    <option key={uf} value={uf}>UF: {uf}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            
-            <div className="flex gap-1.5 overflow-x-auto pb-1 max-w-full">
-              {ATIVIDADES.map(a => (
-                <button
-                  key={a}
-                  onClick={() => setAtividadeFiltro(a)}
-                  className={clsx(
-                    'px-2.5 py-1 rounded-full text-[11px] font-bold transition-all whitespace-nowrap border cursor-pointer',
-                    atividadeFiltro === a
-                      ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                  )}
-                >
-                  {a}
-                </button>
-              ))}
+              <select
+                value={estadoFiltro}
+                onChange={(e) => setEstadoFiltro(e.target.value)}
+                className="w-full sm:w-40 px-2.5 py-1.5 border border-slate-300 rounded-lg bg-white text-xs outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 font-normal cursor-pointer"
+              >
+                <option value="Todos" className="text-slate-900 bg-white font-normal">Todas as UFs</option>
+                {estadosDisponiveis.map(uf => (
+                  <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">UF: {uf}</option>
+                ))}
+              </select>
             </div>
           </div>
         </div>
@@ -298,7 +291,7 @@ export default function BancoProprioComposicoes() {
                 {renderHeaderCell('codigo', 'Código')}
                 {renderHeaderCell('descricao', 'Descrição')}
                 {renderHeaderCell('atividade', 'Atividade')}
-                {renderHeaderCell('unidade', 'Unid.')}
+                {renderHeaderCell('unidade', 'UN')}
                 {renderHeaderCell('estado', 'UF')}
                 {renderHeaderCell('mat', 'MAT (R$)')}
                 {renderHeaderCell('mo', 'MO (R$)')}

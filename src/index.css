@@ -13,6 +13,25 @@
   body {
     @apply bg-background text-slate-900 font-sans antialiased;
   }
+
+  /* Garante alto contraste e visibilidade escura/preta em todos os campos, listas e opções */
+  input, select, textarea {
+    color: #0f172a !important; /* text-slate-900 */
+  }
+
+  option {
+    color: #0f172a !important; /* text-slate-900 */
+    background-color: #ffffff !important;
+  }
+
+  input::placeholder, textarea::placeholder {
+    color: #64748b !important; /* text-slate-500 */
+    opacity: 1 !important;
+  }
+
+  select:disabled, input:disabled, textarea:disabled {
+    color: #334155 !important; /* text-slate-700 */
+  }
 }
 
 /* Remove setinhas de inputs do tipo number */

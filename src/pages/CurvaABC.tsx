@@ -3,7 +3,7 @@ import { supabase } from '../lib/supabase';
 import { 
   Download, Search, Calculator, 
   BarChart3, Layers, Package, FileSpreadsheet, Check, X,
-  ChevronDown
+  ChevronDown, RefreshCw
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import * as XLSX from 'xlsx';
@@ -173,52 +173,130 @@ export default function CurvaABC() {
       }
     });
 
-    let selectedList: OrcamentoItem[] = [];
+    let candidateList: OrcamentoItem[] = [];
 
     if (nivelVisao === 'Insumo') {
       // Apenas itens folhas com valor positivo
-      selectedList = rawItems.filter(i => {
+      candidateList = rawItems.filter(i => {
         const eap = (i.item_eap || '').trim();
         const isParent = parentEaps.has(eap);
         const totalVal = (parseFloat(String(i.total || 0))) * bdiFactor;
         return !isParent && totalVal > 0;
       });
-      if (selectedList.length === 0) {
-        selectedList = rawItems.filter(i => (parseFloat(String(i.total || 0))) * bdiFactor > 0);
+      if (candidateList.length === 0) {
+        candidateList = rawItems.filter(i => (parseFloat(String(i.total || 0))) * bdiFactor > 0);
       }
     } else if (nivelVisao === 'Servico') {
       // Itens de composições ou nível intermediário de EAP
-      selectedList = rawItems.filter(i => {
+      candidateList = rawItems.filter(i => {
         const eap = (i.item_eap || '').trim();
         const parts = eap.split('.');
         const totalVal = (parseFloat(String(i.total || 0))) * bdiFactor;
         return totalVal > 0 && (parts.length >= 2 || i.composicao_id);
       });
-      if (selectedList.length === 0) {
-        selectedList = rawItems.filter(i => (parseFloat(String(i.total || 0))) * bdiFactor > 0);
+      if (candidateList.length === 0) {
+        candidateList = rawItems.filter(i => (parseFloat(String(i.total || 0))) * bdiFactor > 0);
       }
     } else {
       // Nível 1 de EAP (Pacotes principais)
-      selectedList = rawItems.filter(i => {
+      candidateList = rawItems.filter(i => {
         const eap = (i.item_eap || '').trim();
         const parts = eap.split('.');
         const totalVal = (parseFloat(String(i.total || 0))) * bdiFactor;
         return totalVal > 0 && parts.length === 1;
       });
-      if (selectedList.length === 0) {
-        selectedList = rawItems.filter(i => (parseFloat(String(i.total || 0))) * bdiFactor > 0);
+      if (candidateList.length === 0) {
+        candidateList = rawItems.filter(i => (parseFloat(String(i.total || 0))) * bdiFactor > 0);
       }
     }
 
-    const itemsWithVal = selectedList.map(item => {
-      const rawTot = parseFloat(String(item.total || 0));
-      return {
-        ...item,
-        valWithBdi: rawTot * bdiFactor
-      };
+    // --- CONSOLIDAÇÃO / AGRUPAMENTO DOS ITENS REPETIDOS (GROUP BY) ---
+    const groupedMap = new Map<string, {
+      firstItem: OrcamentoItem;
+      codigo: string;
+      descricao: string;
+      unidade: string;
+      totalQtd: number;
+      totalMat: number;
+      totalMo: number;
+      totalVal: number;
+      eaps: Set<string>;
+      occurrencesCount: number;
+    }>();
+
+    candidateList.forEach(item => {
+      const cod = (item.codigo || '').trim();
+      const desc = (item.descricao || '').trim();
+      
+      let groupKey = '';
+      if (nivelVisao === 'Pacote') {
+        groupKey = (item.item_eap || '').split('.')[0] || desc.toUpperCase();
+      } else {
+        // Agrupa por Código se existir, ou por Descrição normalizada
+        groupKey = cod ? cod.toUpperCase() : desc.toUpperCase();
+      }
+
+      const q = parseFloat(String(item.quantidade || 0));
+      const totMat = parseFloat(String(item.total_mat || 0));
+      const totMo = parseFloat(String(item.total_mo || 0));
+      const tot = parseFloat(String(item.total || 0));
+
+      if (groupedMap.has(groupKey)) {
+        const existing = groupedMap.get(groupKey)!;
+        existing.totalQtd += q;
+        existing.totalMat += totMat;
+        existing.totalMo += totMo;
+        existing.totalVal += tot;
+        existing.occurrencesCount += 1;
+        if (item.item_eap) existing.eaps.add(item.item_eap);
+      } else {
+        const eaps = new Set<string>();
+        if (item.item_eap) eaps.add(item.item_eap);
+        groupedMap.set(groupKey, {
+          firstItem: item,
+          codigo: cod,
+          descricao: desc,
+          unidade: item.unidade || 'un',
+          totalQtd: q,
+          totalMat: totMat,
+          totalMo: totMo,
+          totalVal: tot,
+          eaps,
+          occurrencesCount: 1
+        });
+      }
     });
 
-    // Ordenação decrescente por valor (Curva S Pareto)
+    // Converte os grupos consolidados em lista de OrcamentoItem
+    const itemsWithVal: (OrcamentoItem & { valWithBdi: number })[] = [];
+    groupedMap.forEach((grp, key) => {
+      const eapArray = Array.from(grp.eaps);
+      const eapLabel = grp.occurrencesCount > 1 
+        ? `${eapArray.slice(0, 2).join(', ')}${eapArray.length > 2 ? '...' : ''}` 
+        : (eapArray[0] || '');
+
+      const unitPrice = grp.totalQtd > 0 ? (grp.totalVal / grp.totalQtd) : grp.firstItem.valor_unitario;
+
+      itemsWithVal.push({
+        id: `grouped-${key}-${grp.firstItem.id}`,
+        orcamento_id: grp.firstItem.orcamento_id,
+        item_eap: eapLabel,
+        codigo: grp.codigo,
+        banco_fonte: grp.firstItem.banco_fonte,
+        descricao: grp.descricao,
+        unidade: grp.unidade,
+        quantidade: grp.totalQtd,
+        valor_unitario: unitPrice,
+        valor_unitario_com_bdi: unitPrice * bdiFactor,
+        total: grp.totalVal,
+        total_mat: grp.totalMat,
+        total_mo: grp.totalMo,
+        composicao_id: grp.firstItem.composicao_id,
+        valWithBdi: grp.totalVal * bdiFactor
+      });
+    });
+
+    // Ordenação decrescente por valor total (Curva S Pareto)
     itemsWithVal.sort((a, b) => b.valWithBdi - a.valWithBdi);
 
     const totalGeral = itemsWithVal.reduce((acc, curr) => acc + curr.valWithBdi, 0);
@@ -402,14 +480,30 @@ export default function CurvaABC() {
             </div>
           )}
 
-          <button 
-            onClick={handleExportXLSX}
-            disabled={!selectedOrcamento || abcResult.items.length === 0}
-            className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer shrink-0"
-          >
-            <Download className="w-4 h-4" />
-            <span>Exportar XLSX</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button 
+              onClick={() => {
+                if (selectedOrcamento?.id) {
+                  fetchOrcamentoItems(selectedOrcamento.id);
+                }
+              }}
+              disabled={!selectedOrcamento || loadingItems}
+              className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-700 font-bold px-3 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-2xs transition-all cursor-pointer shrink-0 disabled:opacity-50"
+              title="Recarregar dados atualizados do orçamento"
+            >
+              <RefreshCw className={clsx("w-4 h-4 text-blue-600", loadingItems && "animate-spin")} />
+              <span className="hidden sm:inline">Atualizar</span>
+            </button>
+
+            <button 
+              onClick={handleExportXLSX}
+              disabled={!selectedOrcamento || abcResult.items.length === 0}
+              className="bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold px-4 py-2.5 rounded-xl text-xs flex items-center gap-2 shadow-xs transition-all cursor-pointer shrink-0"
+            >
+              <Download className="w-4 h-4" />
+              <span>Exportar XLSX</span>
+            </button>
+          </div>
         </div>
       </div>
 

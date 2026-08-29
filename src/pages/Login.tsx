@@ -38,8 +38,12 @@ export default function Login() {
             <div className="w-16 h-16 bg-gradient-to-tr from-primary to-secondary rounded-2xl flex items-center justify-center mb-4 shadow-lg">
               <HardHat className="text-white w-8 h-8" />
             </div>
-            <h1 className="text-2xl font-bold text-white text-center">BRP Engenharia</h1>
-            <p className="text-slate-300 text-sm mt-1">Sistema Orçamentário</p>
+            <h1 className="text-3xl font-black text-white text-center tracking-tight bg-gradient-to-r from-white via-slate-100 to-sky-400 bg-clip-text text-transparent">
+              OrçaBRP
+            </h1>
+            <p className="text-sky-400/80 font-bold text-xs mt-1 uppercase tracking-widest">
+              Sistema Orçamentário
+            </p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-4">

@@ -523,18 +523,18 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                         <div>
                           <label className="block text-sm font-medium text-slate-700 mb-1">Fonte de Referência</label>
                           <select value={fonteSistema} onChange={(e) => { setFonteSistema(e.target.value); setResultadosSistema([]); setInsumoBaseSelecionado(null); setErrorBusca(null); }}
-                            className="w-full px-3 py-2 border border-purple-300 rounded-lg bg-white focus:ring-2 focus:ring-purple-400 outline-none">
-                             {fontesSistemaList.map(f => <option key={f} value={f}>{f}</option>)}
+                            className="w-full px-3 py-2 border border-purple-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-purple-400 outline-none">
+                             {fontesSistemaList.map(f => <option key={f} value={f} className="text-slate-900 bg-white font-normal">{f}</option>)}
                           </select>
                         </div>
                         <div className="flex flex-col justify-end">
                           {insumoBaseSelecionado ? (
                             <div className="flex items-center justify-between bg-white border border-purple-300 rounded-lg px-3 py-2">
-                              <span className="text-sm font-medium text-slate-700 truncate max-w-[180px]" title={insumoBaseSelecionado.descricao}>
+                              <span className="text-sm font-normal text-slate-900 truncate max-w-[180px]" title={insumoBaseSelecionado.descricao}>
                                 {insumoBaseSelecionado.descricao}
                               </span>
                               <button type="button" onClick={() => setInsumoBaseSelecionado(null)}
-                                className="text-xs text-purple-600 hover:underline whitespace-nowrap ml-2">Trocar</button>
+                                className="text-xs text-purple-600 hover:underline font-medium whitespace-nowrap ml-2">Trocar</button>
                             </div>
                           ) : (
                             <div className="flex gap-2">
@@ -542,7 +542,7 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                                 onChange={(e) => setBuscaSistema(e.target.value)}
                                 onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), handleBuscarSistema(buscaSistema, fonteSistema))}
                                 placeholder="Buscar por código ou nome..."
-                                className="flex-1 px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none text-sm" />
+                                className="flex-1 px-3 py-2 border border-purple-300 rounded-lg focus:ring-2 focus:ring-purple-400 outline-none text-sm text-slate-900 font-normal placeholder:text-slate-400 bg-white" />
                               <button type="button" onClick={() => handleBuscarSistema(buscaSistema, fonteSistema)}
                                 className="bg-purple-600 hover:bg-purple-700 text-white px-3 py-2 rounded-lg transition-colors">
                                 <Search className="w-4 h-4" />
@@ -562,8 +562,8 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                                 onClick={() => handleSelecionarInsumoBase(ins)}
                                 className="px-3 py-2.5 hover:bg-purple-50 cursor-pointer flex items-center justify-between gap-4">
                                 <div>
-                                  <p className="text-sm font-medium text-slate-800">{ins.descricao}</p>
-                                  <p className="text-xs text-slate-500">{ins.codigo} · {ins.unidade} · {ins.estado}</p>
+                                  <p className="text-sm font-normal text-slate-900">{ins.descricao}</p>
+                                  <p className="text-xs text-slate-600 font-mono">{ins.codigo} · {ins.unidade} · {ins.estado}</p>
                                 </div>
                                 <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded font-medium whitespace-nowrap">{ins.fonte_preco}</span>
                               </li>
@@ -613,37 +613,37 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                                 value={formData.fonte_preco}
                                 onChange={handleChange}
                                 disabled={!valoresModificados}
-                                className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none ${
-                                  !valoresModificados ? "bg-slate-100 text-slate-500 cursor-not-allowed" : "bg-white text-slate-700"
+                                className={`w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-slate-900 font-normal ${
+                                  !valoresModificados ? "bg-slate-100 text-slate-700 cursor-not-allowed" : "bg-white text-slate-900"
                                 }`}
                               >
                                 {!valoresModificados ? (
-                                  <option value={insumoBaseSelecionado?.fonte_preco || fonteSistema}>
+                                  <option value={insumoBaseSelecionado?.fonte_preco || fonteSistema} className="text-slate-900 bg-white font-normal">
                                     {insumoBaseSelecionado?.fonte_preco || fonteSistema}
                                   </option>
                                 ) : (
                                   <>
-                                    <option value="Cotação">Cotação</option>
-                                    <option value="Histórico">Histórico</option>
+                                    <option value="Cotação" className="text-slate-900 bg-white font-normal">Cotação</option>
+                                    <option value="Histórico" className="text-slate-900 bg-white font-normal">Histórico</option>
                                   </>
                                 )}
                               </select>
                             ) : (
                               <input type="text" value={formData.fonte_preco} readOnly disabled
-                                className="w-full px-3 py-2 border border-slate-200 bg-slate-100 text-slate-500 rounded-lg outline-none cursor-not-allowed font-medium" />
+                                className="w-full px-3 py-2 border border-slate-200 bg-slate-100 text-slate-700 rounded-lg outline-none cursor-not-allowed font-normal" />
                             )}
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">Data Base</label>
                             <input type="date" name="data_base" value={formData.data_base} onChange={handleChange}
-                              className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 outline-none" />
                           </div>
                           <div>
                             <label className="block text-sm font-medium text-slate-700 mb-1">Status</label>
                             <select name="estado_registro" value={formData.estado_registro} onChange={handleChange}
-                              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                              <option value="ativo">Ativo</option>
-                              <option value="inativo">Inativo</option>
+                              className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 outline-none">
+                              <option value="ativo" className="text-slate-900 bg-white font-normal">Ativo</option>
+                              <option value="inativo" className="text-slate-900 bg-white font-normal">Inativo</option>
                             </select>
                           </div>
                           <CamposValor formData={formData} handleChange={handleChange} />
@@ -680,21 +680,21 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Fonte do Preço</label>
                         <select name="fonte_preco" value={formData.fonte_preco} onChange={handleChange}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                          {FONTES_PROPRIO.map(f => <option key={f} value={f}>{f}</option>)}
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 outline-none">
+                          {FONTES_PROPRIO.map(f => <option key={f} value={f} className="text-slate-900 bg-white font-normal">{f}</option>)}
                         </select>
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Data Base</label>
                         <input type="date" name="data_base" value={formData.data_base} onChange={handleChange}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 outline-none" />
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-1">Status do Registro</label>
                         <select name="estado_registro" value={formData.estado_registro} onChange={handleChange}
-                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none">
-                          <option value="ativo">Ativo</option>
-                          <option value="inativo">Inativo</option>
+                          className="w-full px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-blue-500 outline-none">
+                          <option value="ativo" className="text-slate-900 bg-white font-normal">Ativo</option>
+                          <option value="inativo" className="text-slate-900 bg-white font-normal">Inativo</option>
                         </select>
                       </div>
                       <CamposValor formData={formData} handleChange={handleChange} />
@@ -805,22 +805,22 @@ const CamposBase = ({
       <div className="col-span-1 md:col-span-2">
         <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Insumo *</label>
         <select required name="tipo" value={formData.tipo} onChange={handleChange} disabled={isCopyActive}
-          className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none ${isCopyActive ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-blue-500'}`}>
-          {TIPOS_INSUMO.map(t => <option key={t} value={t}>{t}</option>)}
+          className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none text-slate-900 font-normal ${isCopyActive ? 'bg-slate-100 text-slate-700 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-blue-500'}`}>
+          {TIPOS_INSUMO.map(t => <option key={t} value={t} className="text-slate-900 bg-white font-normal">{t}</option>)}
         </select>
       </div>
 
       <div className="col-span-1">
         <label className="block text-sm font-medium text-slate-700 mb-1">Código *</label>
         <input type="text" value={formData.codigo} readOnly disabled
-          className="w-full px-3 py-2 border border-slate-200 bg-slate-100 text-slate-500 rounded-lg outline-none cursor-not-allowed font-mono font-medium" />
+          className="w-full px-3 py-2 border border-slate-200 bg-slate-100 text-slate-700 rounded-lg outline-none cursor-not-allowed font-mono font-medium" />
       </div>
 
       <div className="col-span-1">
         <label className="block text-sm font-medium text-slate-700 mb-1">Unidade *</label>
         <select required name="unidade" value={formData.unidade} onChange={handleChange} disabled={isCopyActive}
-          className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none ${isCopyActive ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-blue-500'}`}>
-          {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+          className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none text-slate-900 font-normal ${isCopyActive ? 'bg-slate-100 text-slate-700 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-blue-500'}`}>
+          {UNIDADES.map(u => <option key={u} value={u} className="text-slate-900 bg-white font-normal">{u}</option>)}
         </select>
       </div>
 
@@ -829,7 +829,7 @@ const CamposBase = ({
         <input required type="text" name="descricao" value={formData.descricao} onChange={handleChange} disabled={isCopyActive}
           onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
           onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
-          className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none ${isCopyActive ? 'bg-slate-100 text-slate-500 cursor-not-allowed' : 'focus:ring-2 focus:ring-blue-500'}`}
+          className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none text-slate-900 font-normal placeholder:text-slate-400 ${isCopyActive ? 'bg-slate-100 text-slate-700 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-blue-500'}`}
           autoComplete="off" placeholder="DESCREVA O INSUMO..." />
         {showSuggestions && (
           <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
@@ -841,8 +841,8 @@ const CamposBase = ({
                 <li key={sug.id}
                   onClick={() => { setFormData((p: any) => ({ ...p, descricao: sug.descricao })); setShowSuggestions(false); }}
                   className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center gap-4">
-                  <span className="text-sm font-medium text-slate-800">{sug.descricao}</span>
-                  <span className="text-xs text-slate-400 whitespace-nowrap">{sug.codigo} · {sug.unidade}</span>
+                  <span className="text-sm font-normal text-slate-900">{sug.descricao}</span>
+                  <span className="text-xs text-slate-500 font-mono whitespace-nowrap">{sug.codigo} · {sug.unidade}</span>
                 </li>
               ))}
             </ul>
@@ -853,9 +853,9 @@ const CamposBase = ({
       <div className="col-span-1">
         <label className="block text-sm font-medium text-slate-700 mb-1">Estado (UF)</label>
         <select name="estado" value={formData.estado} onChange={handleChange}
-          className={`w-full px-3 py-2 border rounded-lg outline-none bg-white font-medium ${isCopyActive && (formData.estado === '' || isDuplicado) ? 'border-rose-300 focus:ring-2 focus:ring-rose-500' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'}`}>
-          {isCopyActive && <option value="">Selecione...</option>}
-          {UFS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+          className={`w-full px-3 py-2 border rounded-lg outline-none bg-white text-slate-900 font-normal ${isCopyActive && (formData.estado === '' || isDuplicado) ? 'border-rose-300 focus:ring-2 focus:ring-rose-500' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'}`}>
+          {isCopyActive && <option value="" className="text-slate-900 bg-white font-normal">Selecione...</option>}
+          {UFS.map(uf => <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">{uf}</option>)}
         </select>
         {isCopyActive && isDuplicado && (
           <span className="text-[10px] text-rose-600 font-semibold block mt-1 leading-tight">Este estado já possui este insumo cadastrado ({formData.estado}).</span>

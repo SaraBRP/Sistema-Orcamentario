@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { supabase } from '../../lib/supabase';
 import { ArrowLeft, Search, Plus, Layers, Trash2, Edit2, X, ArrowUp, ArrowDown, ArrowUpDown } from 'lucide-react';
@@ -10,9 +10,8 @@ export default function ComposicaoBuilder() {
   const [itens, setItens] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // States para filtro de código e descrição na tabela de itens
-  const [searchCode, setSearchCode] = useState('');
-  const [searchDesc, setSearchDesc] = useState('');
+  // State para filtro unificado (código ou descrição) na tabela de itens
+  const [searchTerm, setSearchTerm] = useState('');
 
   // States para ordenação interativa de colunas
   const [sortField, setSortField] = useState<string | null>(null);
@@ -23,6 +22,7 @@ export default function ComposicaoBuilder() {
   const [tipoItemAdicionar, setTipoItemAdicionar] = useState<'insumo' | 'subcomposicao'>('insumo');
   const [buscaInsumo, setBuscaInsumo] = useState('');
   const [itensEncontrados, setItensEncontrados] = useState<any[]>([]);
+  const [isSearchingModal, setIsSearchingModal] = useState(false);
   const [itemSelecionado, setItemSelecionado] = useState<any>(null);
   const [coeficiente, setCoeficiente] = useState<number | ''>('');
   const [perda, setPerda] = useState<number | ''>(0);
@@ -127,30 +127,32 @@ export default function ComposicaoBuilder() {
     }
   };
 
-  const handleBuscarInsumos = async () => {
+  const normalizeText = (text: string) => {
+    return (text || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+  };
+
+  const handleBuscarInsumos = useCallback(async () => {
     const termo = buscaInsumo.trim();
     if (termo.length < 2) {
       setItensEncontrados([]);
+      setIsSearchingModal(false);
       return;
     }
 
-    const pattern = '%' + termo
-      .replace(/[aáàâãä]/gi, '%')
-      .replace(/[eéèêë]/gi, '%')
-      .replace(/[iíìîï]/gi, '%')
-      .replace(/[oóòôõö]/gi, '%')
-      .replace(/[uúùûü]/gi, '%')
-      .replace(/[cç]/gi, '%')
-      .replace(/3/g, '%')
-      .replace(/\s+/g, '%')
-      .replace(/%+/g, '%') + '%';
-    
+    setIsSearchingModal(true);
+
+    const tokens = termo.split(/\s+/).map(normalizeText).filter(Boolean);
+    const mainToken = tokens.slice().sort((a, b) => b.length - a.length)[0] || '';
+
     let query = supabase
       .schema('engenharia')
       .from(tipoItemAdicionar === 'insumo' ? 'insumos' : 'v_composicoes_cdu')
       .select('*')
-      .or(`descricao.ilike."${pattern}",codigo.ilike."%${termo}%"`)
-      .limit(100);
+      .or(`descricao.ilike."%${mainToken}%",codigo.ilike."%${mainToken}%"`)
+      .limit(300);
 
     if (tipoItemAdicionar === 'insumo') {
       query = query.in('fonte_preco', ['Cotação', 'Histórico']);
@@ -159,9 +161,16 @@ export default function ComposicaoBuilder() {
     }
     
     const { data, error } = await query;
+    setIsSearchingModal(false);
     
     if (!error && data) {
-      const sorted = [...data].sort((a, b) => {
+      // Filtra estritamente para garantir que TODAS as palavras digitadas estão no item
+      const filtered = data.filter(item => {
+        const fullText = normalizeText(`${item.codigo || ''} ${item.descricao || ''}`);
+        return tokens.every(token => fullText.includes(token));
+      });
+
+      const sorted = filtered.sort((a, b) => {
         const aSource = a.fonte_preco || a.fonte || '';
         const bSource = b.fonte_preco || b.fonte || '';
         const aProprio = ['Cotação', 'Histórico', 'Própria'].includes(aSource);
@@ -174,8 +183,24 @@ export default function ComposicaoBuilder() {
       setItensEncontrados(sorted);
     } else {
       console.error(error);
+      setItensEncontrados([]);
     }
-  };
+  }, [buscaInsumo, tipoItemAdicionar, id]);
+
+  // Efeito de busca automática conforme o orçamentista digita no modal (AutoComplete com debounce de 200ms)
+  useEffect(() => {
+    if (!isModalOpen || itemSelecionado) return;
+    const termo = buscaInsumo.trim();
+    if (termo.length < 2) {
+      setItensEncontrados([]);
+      setIsSearchingModal(false);
+      return;
+    }
+    const timer = setTimeout(() => {
+      handleBuscarInsumos();
+    }, 200);
+    return () => clearTimeout(timer);
+  }, [buscaInsumo, tipoItemAdicionar, isModalOpen, itemSelecionado, handleBuscarInsumos]);
 
   const handleAddItem = async () => {
     if (!itemSelecionado || !coeficiente) return;
@@ -351,9 +376,10 @@ export default function ComposicaoBuilder() {
     });
 
     let filtered = prepared.filter(row => {
-      const matchCode = !searchCode || row.codigo.toLowerCase().includes(searchCode.toLowerCase());
-      const matchDesc = !searchDesc || row.descricao.toLowerCase().includes(searchDesc.toLowerCase());
-      return matchCode && matchDesc;
+      if (!searchTerm.trim()) return true;
+      const tokens = searchTerm.trim().split(/\s+/).map(normalizeText).filter(Boolean);
+      const fullText = normalizeText(`${row.codigo} ${row.descricao} ${row.tipo} ${row.unidade}`);
+      return tokens.every(token => fullText.includes(token));
     });
 
     if (sortField) {
@@ -418,22 +444,23 @@ export default function ComposicaoBuilder() {
     }
 
     return filtered;
-  }, [itens, searchCode, searchDesc, sortField, sortDirection]);
+  }, [itens, searchTerm, sortField, sortDirection]);
 
-  const renderHeaderCell = (field: string, label: string, width: number) => {
+  const renderHeaderCell = (field: string, label: React.ReactNode | string, width: number) => {
     const isSorted = sortField === field;
     return (
       <th
+        key={field}
         style={{ width, minWidth: width }}
         onClick={() => handleSort(field)}
         className={clsx(
-          "px-3 py-2.5 select-none overflow-hidden whitespace-nowrap truncate font-bold text-[11px] uppercase tracking-wider text-center cursor-pointer transition-colors hover:bg-slate-200/80 group/head",
+          "px-2 py-2 select-none font-bold text-[10px] uppercase tracking-wider text-center cursor-pointer transition-colors hover:bg-slate-200/80 group/head align-middle",
           isSorted ? "text-blue-700 bg-blue-50/70" : "text-slate-600"
         )}
-        title={`Clique para ordenar por ${label}`}
+        title={`Clique para ordenar`}
       >
-        <div className="flex items-center justify-center gap-1 w-full">
-          <span className="truncate">{label}</span>
+        <div className="flex items-center justify-center gap-1 w-full leading-tight">
+          <span className="text-center whitespace-pre-line break-words">{label}</span>
           {isSorted ? (
             sortDirection === 'asc' ? (
               <ArrowUp className="w-3 h-3 text-blue-600 shrink-0" />
@@ -528,27 +555,15 @@ export default function ComposicaoBuilder() {
               Itens da Composição ({processedItens.length})
             </h3>
             
-            {/* Campo de Filtro por Código */}
-            <div className="relative w-full sm:w-36">
+            {/* Campo Único de Filtro por Código ou Descrição */}
+            <div className="relative w-full sm:w-80">
               <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input 
                 type="text"
-                placeholder="Filtro código..."
-                value={searchCode}
-                onChange={(e) => setSearchCode(e.target.value)}
-                className="w-full pl-8 pr-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 font-mono"
-              />
-            </div>
-
-            {/* Campo de Filtro por Descrição */}
-            <div className="relative w-full sm:w-64">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input 
-                type="text"
-                placeholder="Filtro descrição..."
-                value={searchDesc}
-                onChange={(e) => setSearchDesc(e.target.value)}
-                className="w-full pl-8 pr-2.5 py-1 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                placeholder="Filtro código ou descrição..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-8 pr-2.5 py-1.5 bg-white border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 text-slate-900 font-normal placeholder:text-slate-500"
               />
             </div>
           </div>
@@ -566,17 +581,17 @@ export default function ComposicaoBuilder() {
           <table className="w-full text-left text-xs text-slate-700 table-fixed border-collapse">
             <thead className="bg-slate-100/80 text-slate-600 border-b border-slate-200 select-none font-bold text-[11px] uppercase tracking-wider">
               <tr>
-                {renderHeaderCell('tipo', 'Tipo', 85)}
-                {renderHeaderCell('codigo', 'Código', 90)}
-                {renderHeaderCell('descricao', 'Descrição', 260)}
-                {renderHeaderCell('unidade', 'UNID.', 60)}
-                {renderHeaderCell('coeficiente', 'Coeficiente', 95)}
-                {renderHeaderCell('perda', 'Perda (%)', 75)}
-                {renderHeaderCell('valor_unit', 'VALOR UNIT. (R$)', 125)}
-                {renderHeaderCell('mat', 'MAT (R$)', 105)}
-                {renderHeaderCell('mo', 'MO (R$)', 105)}
-                {renderHeaderCell('custo_total', 'CUSTO TOTAL (R$)', 135)}
-                <th style={{ width: 60, minWidth: 60 }} className="px-3 py-2.5 text-center">Ações</th>
+                {renderHeaderCell('tipo', 'Tipo', 110)}
+                {renderHeaderCell('codigo', 'Código', 95)}
+                {renderHeaderCell('descricao', 'Descrição', 240)}
+                {renderHeaderCell('unidade', 'UN', 55)}
+                {renderHeaderCell('coeficiente', 'Coefic. /\nQntd.', 95)}
+                {renderHeaderCell('perda', 'Perda\n(%)', 75)}
+                {renderHeaderCell('valor_unit', 'Valor Unit.\n(R$)', 115)}
+                {renderHeaderCell('mat', 'MAT\n(R$)', 95)}
+                {renderHeaderCell('mo', 'MO\n(R$)', 95)}
+                {renderHeaderCell('custo_total', 'Custo Total\n(R$)', 120)}
+                <th style={{ width: 60, minWidth: 60 }} className="px-2 py-2 text-center text-[10px] uppercase font-bold text-slate-600 align-middle">Ações</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -591,9 +606,9 @@ export default function ComposicaoBuilder() {
               ) : processedItens.map(({ raw: item, insumo, codigo, descricao, unidade, tipo, valorUnit, coef, p, itemMat, itemMo, custoTotal }) => {
                 return (
                   <tr key={item.id} className="hover:bg-blue-50/40 transition-colors group">
-                    <td style={{ width: 85 }} className="px-3 py-2 text-center truncate">
+                    <td style={{ width: 110 }} className="px-2 py-2 text-center" title={tipo}>
                       <span className={clsx(
-                        'text-[10px] px-1.5 py-0.5 rounded font-bold border inline-block truncate max-w-full',
+                        'text-[10px] px-2 py-0.5 rounded font-bold border inline-block max-w-full leading-tight text-center',
                         insumo 
                           ? 'bg-slate-100 text-slate-700 border-slate-200' 
                           : 'bg-indigo-50 text-indigo-700 border-indigo-200'
@@ -601,12 +616,12 @@ export default function ComposicaoBuilder() {
                         {tipo}
                       </span>
                     </td>
-                    <td style={{ width: 90 }} className="px-3 py-2 font-mono font-extrabold text-blue-700 text-xs truncate text-center">{codigo}</td>
-                    <td style={{ width: 260 }} className="px-3 py-2 truncate font-semibold text-slate-900 text-xs" title={descricao}>{descricao}</td>
-                    <td style={{ width: 60 }} className="px-3 py-2 text-slate-600 font-mono text-[11px] truncate text-center">{unidade}</td>
-                    <td style={{ width: 95 }} className="px-3 py-2 text-right font-mono font-medium text-slate-700">{coef.toLocaleString('pt-BR', { minimumFractionDigits: 4 })}</td>
-                    <td style={{ width: 75 }} className="px-3 py-2 text-right text-slate-500 font-mono text-[11px]">{p > 0 ? `${p}%` : '-'}</td>
-                    <td style={{ width: 125 }} className="px-3 py-2 text-right">
+                    <td style={{ width: 95 }} className="px-2 py-2 font-mono font-extrabold text-blue-700 text-xs text-center">{codigo}</td>
+                    <td style={{ width: 240 }} className="px-3 py-2 font-normal text-slate-900 text-xs leading-snug" title={descricao}>{descricao}</td>
+                    <td style={{ width: 55 }} className="px-2 py-2 text-slate-600 font-mono text-[11px] text-center">{unidade}</td>
+                    <td style={{ width: 95 }} className="px-2 py-2 text-right font-mono font-normal text-slate-700">{coef.toLocaleString('pt-BR', { minimumFractionDigits: 4 })}</td>
+                    <td style={{ width: 75 }} className="px-2 py-2 text-right text-slate-500 font-mono text-[11px]">{p > 0 ? `${p}%` : '-'}</td>
+                    <td style={{ width: 115 }} className="px-2 py-2 text-right">
                       <div className="flex justify-between w-full select-none gap-1 text-[11px] font-mono">
                         <span className="text-slate-400 font-normal">R$</span>
                         <span className="text-slate-800 font-semibold tabular-nums">
@@ -620,7 +635,7 @@ export default function ComposicaoBuilder() {
                         <span className="text-[9px] text-slate-400 font-medium font-sans block text-right">Desonerado</span>
                       )}
                     </td>
-                    <td style={{ width: 105 }} className="px-3 py-2 text-right">
+                    <td style={{ width: 95 }} className="px-2 py-2 text-right">
                       {itemMat > 0 ? (
                         <div className="flex justify-between w-full select-none gap-1 text-[11px] font-mono">
                           <span className="text-slate-400 font-normal">R$</span>
@@ -632,7 +647,7 @@ export default function ComposicaoBuilder() {
                         <span className="text-slate-400 text-[11px] font-mono">-</span>
                       )}
                     </td>
-                    <td style={{ width: 105 }} className="px-3 py-2 text-right">
+                    <td style={{ width: 95 }} className="px-2 py-2 text-right">
                       {itemMo > 0 ? (
                         <div className="flex justify-between w-full select-none gap-1 text-[11px] font-mono">
                           <span className="text-slate-400 font-normal">R$</span>
@@ -644,7 +659,7 @@ export default function ComposicaoBuilder() {
                         <span className="text-slate-400 text-[11px] font-mono">-</span>
                       )}
                     </td>
-                    <td style={{ width: 135 }} className="px-3 py-2 text-right">
+                    <td style={{ width: 120 }} className="px-2 py-2 text-right">
                       <div className="flex justify-between w-full select-none gap-1 text-[11px] font-mono">
                         <span className="text-blue-500 font-semibold">R$</span>
                         <span className="text-slate-900 font-bold tabular-nums">
@@ -750,75 +765,106 @@ export default function ComposicaoBuilder() {
                         value={buscaInsumo}
                         onChange={(e) => setBuscaInsumo(e.target.value)}
                         onKeyDown={(e) => e.key === 'Enter' && handleBuscarInsumos()}
-                        placeholder={tipoItemAdicionar === 'insumo' ? "Buscar insumo..." : "Buscar subcomposição..."}
-                        className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-xs"
+                        placeholder={tipoItemAdicionar === 'insumo' ? "Comece a digitar o nome ou código do insumo..." : "Comece a digitar o nome ou código da subcomposição..."}
+                        className="w-full pl-10 pr-10 py-2.5 rounded-lg border border-slate-300 focus:ring-2 focus:ring-blue-500 outline-none text-xs text-slate-900 font-normal placeholder:text-slate-400 bg-white"
+                        autoFocus
                       />
+                      {isSearchingModal && (
+                        <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin absolute right-3 top-1/2 -translate-y-1/2" />
+                      )}
                     </div>
-                    <button onClick={handleBuscarInsumos} className="bg-slate-100 hover:bg-slate-200 text-slate-700 px-4 py-2 rounded-lg font-bold text-xs transition-colors cursor-pointer">
-                      Buscar
+                    <button onClick={handleBuscarInsumos} className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2.5 rounded-lg font-bold text-xs transition-colors cursor-pointer flex items-center gap-1.5 shadow-sm">
+                      <Search className="w-4 h-4" />
+                      <span>Buscar</span>
                     </button>
                   </div>
 
-                  {itensEncontrados.length > 0 && (
+                  {/* Estado da Busca Automática */}
+                  {isSearchingModal && (
+                    <div className="py-8 text-center text-slate-500 text-xs flex items-center justify-center gap-2 bg-slate-50 rounded-xl border border-slate-200 mt-4">
+                      <div className="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
+                      <span>Buscando itens correspondentes...</span>
+                    </div>
+                  )}
+
+                  {!isSearchingModal && buscaInsumo.trim().length >= 2 && itensEncontrados.length === 0 && (
+                    <div className="py-8 text-center text-slate-500 text-xs bg-slate-50 rounded-xl border border-slate-200 mt-4">
+                      Nenhum {tipoItemAdicionar === 'insumo' ? 'insumo' : 'subcomposição'} encontrado contendo <strong>"{buscaInsumo}"</strong>.
+                    </div>
+                  )}
+
+                  {!isSearchingModal && buscaInsumo.trim().length < 2 && (
+                    <div className="py-8 text-center text-slate-400 text-xs bg-slate-50/50 rounded-xl border border-slate-200/60 mt-4">
+                      💡 Digite a partir de 2 caracteres no campo acima para exibir a lista automática de opções.
+                    </div>
+                  )}
+
+                  {!isSearchingModal && itensEncontrados.length > 0 && (
                     <div className="border border-slate-200 rounded-xl overflow-hidden mt-4">
-                      <table className="w-full text-left text-xs">
-                        <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider font-bold">
-                          <tr>
-                            <th className="px-4 py-2">Código</th>
-                            <th className="px-4 py-2">Descrição</th>
-                            <th className="px-4 py-2">Und</th>
-                            <th className="px-4 py-2">Fonte</th>
-                            <th className="px-4 py-2 text-right">Valor Unit.</th>
-                            <th className="px-4 py-2 text-right">Ação</th>
-                          </tr>
-                        </thead>
-                        <tbody className="divide-y divide-slate-100">
-                          {itensEncontrados.map(item => {
-                            const val = tipoItemAdicionar === 'insumo'
-                              ? (
-                                  item.tipo === 'Equipamento'
-                                    ? (item.valor_nao_desonerado_operativo ?? item.valor ?? 0)
-                                    : (item.tipo === 'Mão de Obra'
-                                        ? (item.valor_desonerado ?? item.valor ?? 0)
-                                        : (item.valor ?? item.valor_nao_desonerado ?? 0)
-                                      )
-                                )
-                              : (item.cdu || 0);
-                            const fonte = item.fonte_preco || item.fonte || '-';
-                            return (
-                              <tr key={item.id} className="hover:bg-blue-50 text-[11px]">
-                                <td className="px-4 py-2 font-mono text-[11px] text-slate-600">{item.codigo}</td>
-                                <td className="px-4 py-2 max-w-[360px] truncate text-[11px] font-medium text-slate-800" title={item.descricao}>{item.descricao}</td>
-                                <td className="px-4 py-2 text-slate-500 text-[11px]">{item.unidade}</td>
-                                <td className="px-4 py-2 text-xs">
-                                  <span className={clsx(
-                                    'px-2 py-0.5 rounded font-semibold text-[9px] uppercase tracking-wide',
-                                    ['Cotação', 'Histórico', 'Própria'].includes(fonte)
-                                      ? 'bg-blue-100 text-blue-800'
-                                      : 'bg-purple-100 text-purple-800'
-                                  )}>
-                                    {fonte}
-                                  </span>
-                                </td>
-                                <td className="px-4 py-2 text-right font-medium text-[11px] text-slate-700">
-                                  <div>R$ {val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                                  {tipoItemAdicionar === 'insumo' && item.tipo === 'Equipamento' && (
-                                    <span className="text-[9px] text-slate-400 font-medium">Operativo</span>
-                                  )}
-                                  {tipoItemAdicionar === 'insumo' && item.tipo === 'Mão de Obra' && (
-                                    <span className="text-[9px] text-slate-400 font-medium">Desonerado</span>
-                                  )}
-                                </td>
-                                <td className="px-4 py-2 text-right">
-                                  <button onClick={() => setItemSelecionado(item)} className="text-[11px] bg-blue-100 text-blue-700 px-3 py-1 rounded font-bold hover:bg-blue-200 cursor-pointer">
-                                    Selecionar
-                                  </button>
-                                </td>
-                              </tr>
-                            );
-                          })}
-                        </tbody>
-                      </table>
+                      <div className="px-4 py-2 bg-slate-100/80 border-b border-slate-200 flex justify-between items-center text-xs font-bold text-slate-700">
+                        <span>Resultados encontrados ({itensEncontrados.length})</span>
+                        <span className="text-[10px] text-slate-400 font-normal">Clique em Selecionar no item desejado</span>
+                      </div>
+                      <div className="max-h-72 overflow-y-auto">
+                        <table className="w-full text-left text-xs">
+                          <thead className="bg-slate-50 text-slate-500 text-[10px] uppercase tracking-wider font-bold sticky top-0 border-b border-slate-200">
+                            <tr>
+                              <th className="px-4 py-2">Código</th>
+                              <th className="px-4 py-2">Descrição</th>
+                              <th className="px-4 py-2">Und</th>
+                              <th className="px-4 py-2">Fonte</th>
+                              <th className="px-4 py-2 text-right">Valor Unit.</th>
+                              <th className="px-4 py-2 text-right">Ação</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {itensEncontrados.map(item => {
+                              const val = tipoItemAdicionar === 'insumo'
+                                ? (
+                                    item.tipo === 'Equipamento'
+                                      ? (item.valor_nao_desonerado_operativo ?? item.valor ?? 0)
+                                      : (item.tipo === 'Mão de Obra'
+                                          ? (item.valor_desonerado ?? item.valor ?? 0)
+                                          : (item.valor ?? item.valor_nao_desonerado ?? 0)
+                                        )
+                                  )
+                                : (item.cdu || 0);
+                              const fonte = item.fonte_preco || item.fonte || '-';
+                              return (
+                                <tr key={item.id} className="hover:bg-blue-50/70 text-[11px] transition-colors">
+                                  <td className="px-4 py-2 font-mono text-[11px] text-slate-700 font-bold">{item.codigo}</td>
+                                  <td className="px-4 py-2 max-w-[360px] text-[11px] font-normal text-slate-900 leading-snug" title={item.descricao}>{item.descricao}</td>
+                                  <td className="px-4 py-2 text-slate-600 text-[11px] font-mono">{item.unidade}</td>
+                                  <td className="px-4 py-2 text-xs">
+                                    <span className={clsx(
+                                      'px-2 py-0.5 rounded font-semibold text-[9px] uppercase tracking-wide',
+                                      ['Cotação', 'Histórico', 'Própria'].includes(fonte)
+                                        ? 'bg-blue-100 text-blue-800'
+                                        : 'bg-purple-100 text-purple-800'
+                                    )}>
+                                      {fonte}
+                                    </span>
+                                  </td>
+                                  <td className="px-4 py-2 text-right font-medium text-[11px] text-slate-800">
+                                    <div>R$ {val.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+                                    {tipoItemAdicionar === 'insumo' && item.tipo === 'Equipamento' && (
+                                      <span className="text-[9px] text-slate-400 font-medium">Operativo</span>
+                                    )}
+                                    {tipoItemAdicionar === 'insumo' && item.tipo === 'Mão de Obra' && (
+                                      <span className="text-[9px] text-slate-400 font-medium">Desonerado</span>
+                                    )}
+                                  </td>
+                                  <td className="px-4 py-2 text-right">
+                                    <button onClick={() => setItemSelecionado(item)} className="text-[11px] bg-blue-600 hover:bg-blue-700 text-white px-3 py-1 rounded font-bold transition-colors cursor-pointer shadow-xs">
+                                      Selecionar
+                                    </button>
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                   )}
                 </>

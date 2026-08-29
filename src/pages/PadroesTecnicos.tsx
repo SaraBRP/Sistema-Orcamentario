@@ -1,86 +1,21 @@
 import { useState } from 'react';
-import { BookOpen, Search, Layers, ShieldCheck, Database } from 'lucide-react';
-
-interface TelaNBRItem {
-  id: string;
-  codigo: string;
-  tipoMalha: string;
-  espacamentoMm: string;
-  diametroMm: number;
-  pesoKgM2: number;
-  pesoPecaKg: number;
-  larguraM: number;
-  comprimentoM: number;
-}
-
-interface TrelicaItem {
-  id: string;
-  codigoGerdau: string;
-  codigoNBR: string;
-  alturaCm: number;
-  banzoSuperiorMm: number;
-  diagonaisMm: number;
-  banzoInferiorMm: number;
-  pesoLinearKgM: number;
-}
-
-interface AcoCAItem {
-  id: string;
-  bitolaMm: number;
-  categoria: 'CA-25' | 'CA-50' | 'CA-60';
-  secaoCm2: number;
-  pesoLinearKgM: number;
-  perimetroCm: number;
-  usoTipico: string;
-}
-
-// Dados Iniciais Oficiais Telas NBR 7481 (CA-60 / Gerdau)
-const TELAS_INICIAIS: TelaNBRItem[] = [
-  { id: '1', codigo: 'Q-92', tipoMalha: 'Quadrada', espacamentoMm: '150 x 150', diametroMm: 4.2, pesoKgM2: 1.48, pesoPecaKg: 21.76, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '2', codigo: 'Q-113', tipoMalha: 'Quadrada', espacamentoMm: '100 x 100', diametroMm: 3.8, pesoKgM2: 1.80, pesoPecaKg: 26.46, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '3', codigo: 'Q-138', tipoMalha: 'Quadrada', espacamentoMm: '100 x 100', diametroMm: 4.2, pesoKgM2: 2.20, pesoPecaKg: 32.34, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '4', codigo: 'Q-196', tipoMalha: 'Quadrada', espacamentoMm: '100 x 100', diametroMm: 5.0, pesoKgM2: 3.11, pesoPecaKg: 45.72, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '5', codigo: 'Q-246', tipoMalha: 'Quadrada', espacamentoMm: '100 x 100', diametroMm: 5.6, pesoKgM2: 3.91, pesoPecaKg: 57.48, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '6', codigo: 'Q-396', tipoMalha: 'Quadrada', espacamentoMm: '100 x 100', diametroMm: 7.1, pesoKgM2: 6.28, pesoPecaKg: 92.32, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '7', codigo: 'Q-503', tipoMalha: 'Quadrada', espacamentoMm: '100 x 100', diametroMm: 8.0, pesoKgM2: 7.96, pesoPecaKg: 117.01, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '8', codigo: 'R-92', tipoMalha: 'Retangular', espacamentoMm: '100 x 300', diametroMm: 4.2, pesoKgM2: 0.98, pesoPecaKg: 14.41, larguraM: 2.45, comprimentoM: 6.00 },
-  { id: '9', codigo: 'R-138', tipoMalha: 'Retangular', espacamentoMm: '100 x 300', diametroMm: 5.0, pesoKgM2: 1.47, pesoPecaKg: 21.61, larguraM: 2.45, comprimentoM: 6.00 }
-];
-
-// Dados Iniciais Oficiais Treliças NBR 14862 (Gerdau)
-const TRELICAS_INICIAIS: TrelicaItem[] = [
-  { id: '1', codigoGerdau: 'TG 8 L', codigoNBR: 'TR 08644', alturaCm: 8, banzoSuperiorMm: 6.0, diagonaisMm: 4.2, banzoInferiorMm: 4.2, pesoLinearKgM: 0.735 },
-  { id: '2', codigoGerdau: 'TG 8 M', codigoNBR: 'TR 08645', alturaCm: 8, banzoSuperiorMm: 6.0, diagonaisMm: 4.2, banzoInferiorMm: 5.0, pesoLinearKgM: 0.821 },
-  { id: '3', codigoGerdau: 'TG 12 M', codigoNBR: 'TR 12645', alturaCm: 12, banzoSuperiorMm: 6.0, diagonaisMm: 4.2, banzoInferiorMm: 5.0, pesoLinearKgM: 0.886 },
-  { id: '4', codigoGerdau: 'TG 12 R', codigoNBR: 'TR 12646', alturaCm: 12, banzoSuperiorMm: 6.0, diagonaisMm: 4.2, banzoInferiorMm: 6.0, pesoLinearKgM: 1.016 },
-  { id: '5', codigoGerdau: 'TG 16 L', codigoNBR: 'TR 16745', alturaCm: 16, banzoSuperiorMm: 7.0, diagonaisMm: 4.2, banzoInferiorMm: 5.0, pesoLinearKgM: 1.032 },
-  { id: '6', codigoGerdau: 'TG 16 R', codigoNBR: 'TR 16746', alturaCm: 16, banzoSuperiorMm: 7.0, diagonaisMm: 4.2, banzoInferiorMm: 6.0, pesoLinearKgM: 1.168 },
-  { id: '7', codigoGerdau: 'TG 20 L', codigoNBR: 'TR 20745', alturaCm: 20, banzoSuperiorMm: 7.0, diagonaisMm: 4.2, banzoInferiorMm: 5.0, pesoLinearKgM: 1.111 },
-  { id: '8', codigoGerdau: 'TG 20 R', codigoNBR: 'TR 20756', alturaCm: 20, banzoSuperiorMm: 7.0, diagonaisMm: 5.0, banzoInferiorMm: 6.0, pesoLinearKgM: 1.446 },
-  { id: '9', codigoGerdau: 'TG 25 L', codigoNBR: 'TR 25856', alturaCm: 25, banzoSuperiorMm: 8.0, diagonaisMm: 5.0, banzoInferiorMm: 6.0, pesoLinearKgM: 1.686 },
-  { id: '10', codigoGerdau: 'TG 25 R', codigoNBR: 'TR 25857', alturaCm: 25, banzoSuperiorMm: 8.0, diagonaisMm: 5.0, banzoInferiorMm: 7.0, pesoLinearKgM: 1.855 }
-];
-
-// Dados Iniciais Barras Aço CA-25 / CA-50 / CA-60 (NBR 7480)
-const BARRAS_ACO_INICIAIS: AcoCAItem[] = [
-  { id: '1', bitolaMm: 5.0, categoria: 'CA-60', secaoCm2: 0.196, pesoLinearKgM: 0.154, perimetroCm: 1.57, usoTipico: 'Estribos / Telas' },
-  { id: '2', bitolaMm: 6.3, categoria: 'CA-50', secaoCm2: 0.312, pesoLinearKgM: 0.245, perimetroCm: 1.98, usoTipico: 'Armação Secundária / Estribos' },
-  { id: '3', bitolaMm: 8.0, categoria: 'CA-50', secaoCm2: 0.503, pesoLinearKgM: 0.395, perimetroCm: 2.51, usoTipico: 'Caranguejos / Armação Pilares' },
-  { id: '4', bitolaMm: 10.0, categoria: 'CA-50', secaoCm2: 0.785, pesoLinearKgM: 0.617, perimetroCm: 3.14, usoTipico: 'Armação Principal / Vigas' },
-  { id: '5', bitolaMm: 12.5, categoria: 'CA-50', secaoCm2: 1.227, pesoLinearKgM: 0.963, perimetroCm: 3.93, usoTipico: 'Barras de Transferência / Pilares' },
-  { id: '6', bitolaMm: 16.0, categoria: 'CA-50', secaoCm2: 2.011, pesoLinearKgM: 1.578, perimetroCm: 5.03, usoTipico: 'Barras de Transferência / Vigas Pesadas' },
-  { id: '7', bitolaMm: 20.0, categoria: 'CA-50', secaoCm2: 3.142, pesoLinearKgM: 2.466, perimetroCm: 6.28, usoTipico: 'Barras de Transferência / Fundações' },
-  { id: '8', bitolaMm: 25.0, categoria: 'CA-50', secaoCm2: 4.909, pesoLinearKgM: 3.853, perimetroCm: 7.85, usoTipico: 'Barras de Transferência Piso / Pilares' },
-  { id: '9', bitolaMm: 32.0, categoria: 'CA-25', secaoCm2: 8.042, pesoLinearKgM: 6.313, perimetroCm: 10.05, usoTipico: 'Barras de Transferência Pesadas' }
-];
+import { BookOpen, Layers, Search, ShieldCheck, Database } from 'lucide-react';
+import { 
+  TELAS_SOLDADAS_MASTER, 
+  TRELICAS_MASTER, 
+  BARRAS_ACO_MASTER,
+  type TelaNBRItem,
+  type TrelicaItem,
+  type AcoCAItem 
+} from '../data/padroesTecnicosData';
 
 export default function PadroesTecnicosPage() {
   const [activeSubTab, setActiveSubTab] = useState<'telas' | 'trelicas' | 'barras'>('telas');
   const [searchTerm, setSearchTerm] = useState('');
 
-  const [telas] = useState<TelaNBRItem[]>(TELAS_INICIAIS);
-  const [trelicas] = useState<TrelicaItem[]>(TRELICAS_INICIAIS);
-  const [barras] = useState<AcoCAItem[]>(BARRAS_ACO_INICIAIS);
+  const [telas] = useState<TelaNBRItem[]>(TELAS_SOLDADAS_MASTER);
+  const [trelicas] = useState<TrelicaItem[]>(TRELICAS_MASTER);
+  const [barras] = useState<AcoCAItem[]>(BARRAS_ACO_MASTER);
 
   // Filtros
   const telasFiltradas = telas.filter(t => t.codigo.toLowerCase().includes(searchTerm.toLowerCase()) || t.tipoMalha.toLowerCase().includes(searchTerm.toLowerCase()));

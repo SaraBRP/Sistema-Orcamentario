@@ -10,6 +10,10 @@ import { VedacoesForm } from './modules/VedacoesForm';
 import { PitsReservatoriosForm } from './modules/PitsReservatoriosForm';
 import { InstalacoesForm } from './modules/InstalacoesForm';
 
+import { CadernoQuantitativos } from './CadernoQuantitativos';
+import { DimensionamentoEquipeModal } from './DimensionamentoEquipeModal';
+import type { LinhaMedicaoQuantitativo, DimensionamentoEquipeData } from '../../types/calculos';
+
 interface OrcamentoItemSimple {
   id: string;
   item_eap: string;
@@ -46,6 +50,11 @@ export const CalculoDrawer: React.FC<Props> = ({
   const [vinculos, setVinculos] = useState<VinculoEAP[]>([]);
   const [currentModuloId, setCurrentModuloId] = useState<ModuloCalculoId>(moduloId);
 
+  const [linhasMedicao, setLinhasMedicao] = useState<LinhaMedicaoQuantitativo[]>([]);
+  const [dimensionamentoData, setDimensionamentoData] = useState<DimensionamentoEquipeData | undefined>(undefined);
+  const [showDimensionamentoModal, setShowDimensionamentoModal] = useState<boolean>(false);
+  const [drawerTab, setDrawerTab] = useState<'modulo' | 'caderno'>('modulo');
+
   // Sync state when calculo or moduloId changes
   useEffect(() => {
     if (calculo) {
@@ -55,6 +64,8 @@ export const CalculoDrawer: React.FC<Props> = ({
       setResultados(calculo.resultados || {});
       setVinculos(calculo.vinculos || []);
       setCurrentModuloId(calculo.modulo_id);
+      setLinhasMedicao(calculo.linhasMedicao || []);
+      setDimensionamentoData(calculo.dimensionamentoEquipe);
     } else {
       setNome('');
       setPredioSetor('');
@@ -62,6 +73,8 @@ export const CalculoDrawer: React.FC<Props> = ({
       setResultados({});
       setVinculos([]);
       setCurrentModuloId(moduloId);
+      setLinhasMedicao([]);
+      setDimensionamentoData(undefined);
     }
   }, [calculo, moduloId, isOpen]);
 
@@ -102,7 +115,9 @@ export const CalculoDrawer: React.FC<Props> = ({
       dataAtualizacao: new Date().toISOString(),
       parametros,
       resultados,
-      vinculos
+      vinculos,
+      linhasMedicao,
+      dimensionamentoEquipe: dimensionamentoData
     };
     onSaveCalculo(itemToSave);
     onClose();
@@ -210,11 +225,64 @@ export const CalculoDrawer: React.FC<Props> = ({
             </div>
           </div>
 
-          {/* Módulo Form */}
-          <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
-            <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">Parâmetros de Entrada & Geometria</h4>
-            {renderModuleForm()}
+          {/* Sub-Abas do Drawer (Parâmetros Paramétricos vs Caderno Métrico) */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-200 pb-2">
+            <div className="flex items-center space-x-2 bg-slate-100 p-1 rounded-xl border border-slate-200">
+              <button
+                type="button"
+                onClick={() => setDrawerTab('modulo')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                  drawerTab === 'modulo'
+                    ? 'bg-white text-slate-900 shadow-2xs border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                1. Parâmetros Paramétricos
+              </button>
+              <button
+                type="button"
+                onClick={() => setDrawerTab('caderno')}
+                className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                  drawerTab === 'caderno'
+                    ? 'bg-white text-blue-700 shadow-2xs border border-slate-200'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <span>2. Caderno de Medição Métrico & Fórmulas</span>
+                {linhasMedicao.length > 0 && (
+                  <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-blue-600 text-white">
+                    {linhasMedicao.length}
+                  </span>
+                )}
+              </button>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setShowDimensionamentoModal(true)}
+              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 rounded-xl text-xs font-bold transition-colors border border-blue-200 flex items-center gap-1.5 cursor-pointer shadow-2xs shrink-0"
+            >
+              <span>👷 Dimensionar Equipe / RUP</span>
+              {dimensionamentoData?.resultadoPrazoDias && (
+                <span className="px-1.5 py-0.2 rounded-full text-[10px] font-extrabold bg-blue-700 text-white">
+                  {dimensionamentoData.resultadoPrazoDias}d
+                </span>
+              )}
+            </button>
           </div>
+
+          {drawerTab === 'modulo' ? (
+            <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+              <h4 className="text-xs font-bold text-slate-900 uppercase tracking-wider mb-3">Parâmetros de Entrada & Geometria</h4>
+              {renderModuleForm()}
+            </div>
+          ) : (
+            <CadernoQuantitativos
+              linhas={linhasMedicao}
+              onChange={setLinhasMedicao}
+              unidadePadrao="m³"
+            />
+          )}
 
           {/* Quadro de Resultados Calculados */}
           <div className="bg-white text-slate-900 p-5 rounded-xl border border-slate-200 shadow-2xs space-y-3">
@@ -465,6 +533,17 @@ export const CalculoDrawer: React.FC<Props> = ({
         </div>
 
       </div>
+
+      {showDimensionamentoModal && (
+        <DimensionamentoEquipeModal
+          nomeAtividade={nome || 'Atividade'}
+          quantidadeTotal={resultados.volumeConcretoM3 || resultados.areaFormaM2 || resultados.areaLiquidaM2 || 100}
+          unidade="m³"
+          data={dimensionamentoData}
+          onSave={setDimensionamentoData}
+          onClose={() => setShowDimensionamentoModal(false)}
+        />
+      )}
     </div>
   );
 };

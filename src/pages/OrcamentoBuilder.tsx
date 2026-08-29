@@ -2,14 +2,17 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
+import * as XLSX from 'xlsx';
 import { 
   ArrowLeft, ArrowRight, Save, Plus, Search, Trash2, Import, Calculator, 
   Settings2, FileSpreadsheet, Layers, X, Check, ChevronDown, ChevronRight,
-  Indent, Outdent, GripVertical, AlertCircle, Send, Lock, CheckCircle2, XCircle, Clock, ChevronUp, MessageSquare, AlertTriangle, BarChart3
+  Indent, Outdent, GripVertical, AlertCircle, Send, Lock, CheckCircle2, XCircle, Clock, ChevronUp, MessageSquare, AlertTriangle, BarChart3, Users,
+  Download, FileText
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
-import { CalculosHub } from '../components/calculos/CalculosHub';
+import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemorialOficial';
+import DistribuiçãoEquipeTab from '../components/calculos/DistribuiçãoEquipeTab';
 import type { CalculoItem } from '../types/calculos';
 
 type OrcamentoItem = {
@@ -82,31 +85,71 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
     if (!eap) continue;
 
     const hasCode = item.codigo && item.codigo.trim() !== '';
-    const prefix = eap + '.';
+    const parts = eap.split('.').filter(Boolean);
+    const isSectionHeader = parts.length === 1 || (parts.length === 2 && parts[1] === '0') || (item as any).isSecao;
 
-    // Filhos DIRETOS (apenas um nível abaixo)
-    const directChildren = computed.filter(other => {
-      const otherEap = (other.item_eap || '').trim();
-      if (!otherEap.startsWith(prefix)) return false;
-      const rest = otherEap.slice(prefix.length);
-      return rest.length > 0 && !rest.includes('.');
-    });
+    let directChildren: typeof computed = [];
+
+    if (isSectionHeader) {
+      const rootNum = parts[0];
+
+      // Busca filhos Nível 1 da seção (ex: '2.1', '2.2')
+      directChildren = computed.filter(other => {
+        const otherEap = (other.item_eap || '').trim();
+        if (!otherEap || otherEap === eap) return false;
+        const otherParts = otherEap.split('.').filter(Boolean);
+        return otherParts[0] === rootNum && (otherParts.length === 2 && otherParts[1] !== '0');
+      });
+
+      // Se não houver itens Nível 1 explícitos (ex: de '1.0' direto para '1.1.1', '1.1.2'),
+      // pega os de menor profundidade sob essa seção
+      if (directChildren.length === 0) {
+        const allDescendants = computed.filter(other => {
+          const otherEap = (other.item_eap || '').trim();
+          if (!otherEap || otherEap === eap) return false;
+          const otherParts = otherEap.split('.').filter(Boolean);
+          return otherParts[0] === rootNum;
+        });
+
+        if (allDescendants.length > 0) {
+          const minDepth = Math.min(...allDescendants.map(d => (d.item_eap || '').split('.').filter(Boolean).length));
+          directChildren = allDescendants.filter(other => {
+            const oParts = (other.item_eap || '').split('.').filter(Boolean);
+            return oParts.length === minDepth;
+          });
+        }
+      }
+    } else {
+      const prefix = eap + '.';
+      directChildren = computed.filter(other => {
+        const otherEap = (other.item_eap || '').trim();
+        if (!otherEap.startsWith(prefix)) return false;
+        const rest = otherEap.slice(prefix.length);
+        return rest.length > 0 && !rest.includes('.');
+      });
+    }
 
     if (directChildren.length === 0) {
       // Folha: sem filhos
       item.isSummary = false;
-      if (hasCode) {
-        const q = item.quantidade === 0 ? 1 : item.quantidade;
-        item.total_mat = q * item.valor_unitario_mat * item.effectiveMultiplier;
-        item.total_mo  = q * item.valor_unitario_mo  * item.effectiveMultiplier;
-        item.total     = q * (item.valor_unitario_mat + item.valor_unitario_mo) * item.effectiveMultiplier;
-      } else {
-        item.total_mat = item.quantidade * item.valor_unitario_mat;
-        item.total_mo  = item.quantidade * item.valor_unitario_mo;
-        item.total     = item.quantidade * (item.valor_unitario_mat + item.valor_unitario_mo);
+      let calcQtd = item.quantidade || 0;
+      const coef = (item as any).coeficiente;
+
+      if (coef && coef > 0 && item.effectiveMultiplier > 1) {
+        calcQtd = coef * item.effectiveMultiplier;
+      } else if (item.effectiveMultiplier > 1) {
+        // Se a quantidade armazenada foi multiplicada por erro de multiplicador redundante, desfaz a dupla multiplicação
+        if (calcQtd > item.effectiveMultiplier && (calcQtd / item.effectiveMultiplier) > 0) {
+          calcQtd = calcQtd / item.effectiveMultiplier;
+        }
       }
+
+      (item as any).displayQuantidade = calcQtd;
+      item.total_mat = calcQtd * (item.valor_unitario_mat || 0);
+      item.total_mo  = calcQtd * (item.valor_unitario_mo || 0);
+      item.total     = item.total_mat + item.total_mo;
     } else {
-      // Pai: soma filhos diretos já processados (bottom-up garante que estão calculados)
+      // Pai (Seção ou Composição/Atividade com filhos): soma filhos diretos já processados (bottom-up garante que estão calculados)
       const sumMat   = directChildren.reduce((s, d) => s + d.total_mat, 0);
       const sumMo    = directChildren.reduce((s, d) => s + d.total_mo,  0);
       const sumTotal = directChildren.reduce((s, d) => s + d.total,     0);
@@ -117,7 +160,6 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
         item.total_mat = sumMat;
         item.total_mo  = sumMo;
         item.total     = sumTotal;
-        // Mantém valores unitários do cadastro para referência (mat/mo unit)
       } else {
         // Etapa/atividade manual com filhos: é summary → zera campos editáveis
         item.isSummary = true;
@@ -334,86 +376,44 @@ export default function OrcamentoBuilder() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
+  const [searchParams, setSearchParams] = useSearchParams();
+
   const [orcamento, setOrcamento] = useState<any>(null);
   const [itens, setItens] = useState<OrcamentoItem[]>([]);
   const [calculos, setCalculos] = useState<CalculoItem[]>([]);
-  const [activeSubTab, setActiveSubTab] = useState<'planilha' | 'memoria_calculo'>('planilha');
+
+  const initialSubTab = useMemo<'planilha' | 'memoria_calculo' | 'distribuicao_equipe'>(() => {
+    const tabParam = searchParams.get('aba');
+    if (tabParam === 'planilha' || tabParam === 'memoria_calculo' || tabParam === 'distribuicao_equipe') {
+      return tabParam;
+    }
+    if (id) {
+      const savedTab = localStorage.getItem(`orc_tab_${id}`);
+      if (savedTab === 'planilha' || savedTab === 'memoria_calculo' || savedTab === 'distribuicao_equipe') {
+        return savedTab;
+      }
+    }
+    return 'planilha';
+  }, [id, searchParams]);
+
+  const [activeSubTab, setActiveSubTabState] = useState<'planilha' | 'memoria_calculo' | 'distribuicao_equipe'>(initialSubTab);
+
+  const setActiveSubTab = (tab: 'planilha' | 'memoria_calculo' | 'distribuicao_equipe') => {
+    setActiveSubTabState(tab);
+    if (id) {
+      localStorage.setItem(`orc_tab_${id}`, tab);
+    }
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set('aba', tab);
+      return p;
+    }, { replace: true });
+  };
   const [higherRevisionObj, setHigherRevisionObj] = useState<any>(null);
   const [showStatusEnvioModal, setShowStatusEnvioModal] = useState(false);
   const [_pendingStatusEnvio, _setPendingStatusEnvio] = useState<string>('Ag. Retorno');
 
-  const handleSaveCalculo = (novoCalculo: CalculoItem) => {
-    setCalculos(prev => {
-      const idx = prev.findIndex(c => c.id === novoCalculo.id);
-      let nextList: CalculoItem[];
-      if (idx >= 0) {
-        nextList = [...prev];
-        nextList[idx] = novoCalculo;
-      } else {
-        nextList = [...prev, novoCalculo];
-      }
-      if (id) {
-        try {
-          localStorage.setItem(`orcamento_calculos_${id}`, JSON.stringify(nextList));
-        } catch (e) { console.error(e); }
-      }
-      return nextList;
-    });
 
-    if (novoCalculo.vinculos && novoCalculo.vinculos.length > 0) {
-      setItens(prevItens => {
-        const copy = [...prevItens];
-        let updatedAny = false;
-
-        novoCalculo.vinculos.forEach(vinc => {
-          const itemIdx = copy.findIndex(i => (i.item_eap || '').trim() === vinc.item_eap.trim());
-          if (itemIdx >= 0) {
-            const fator = vinc.fatorMultiplicativo || 1;
-            let valBase = 0;
-            const chave = vinc.chaveResultado || (vinc as any).campoResultado;
-            if (chave === 'volumeConcretoM3') valBase = novoCalculo.resultados.volumeConcretoM3 || 0;
-            else if (chave === 'areaFormaM2') valBase = novoCalculo.resultados.areaFormaM2 || 0;
-            else if (chave === 'pesoAcoKg') valBase = novoCalculo.resultados.pesoAcoKg || 0;
-            else if (chave === 'areaLiquidaM2') valBase = novoCalculo.resultados.areaLiquidaM2 || 0;
-            else if (chave === 'escavacaoM3') valBase = novoCalculo.resultados.escavacaoM3 || 0;
-
-            const novaQtd = Math.round(valBase * fator * 100) / 100;
-            if (copy[itemIdx].quantidade !== novaQtd) {
-              const targetItem = copy[itemIdx];
-              const total_mat = novaQtd * (targetItem.valor_unitario_mat || 0);
-              const total_mo = novaQtd * (targetItem.valor_unitario_mo || 0);
-              const total = novaQtd * (targetItem.valor_unitario || 0);
-              copy[itemIdx] = { 
-                ...targetItem, 
-                quantidade: novaQtd,
-                total_mat,
-                total_mo,
-                total 
-              };
-              updatedAny = true;
-            }
-          }
-        });
-
-        if (updatedAny) {
-          setHasUnsavedChanges(true);
-        }
-        return copy;
-      });
-    }
-  };
-
-  const handleDeleteCalculo = (calcId: string) => {
-    setCalculos(prev => {
-      const next = prev.filter(c => c.id !== calcId);
-      if (id) {
-        try {
-          localStorage.setItem(`orcamento_calculos_${id}`, JSON.stringify(next));
-        } catch (e) { console.error(e); }
-      }
-      return next;
-    });
-  };
 
   const isReadOnly = useMemo(() => {
     return higherRevisionObj !== null;
@@ -468,6 +468,21 @@ export default function OrcamentoBuilder() {
     }
   }, [collapsedEaps, id]);
 
+  // Carrega os parâmetros de seções salvos do Memorial de Cálculo
+  const [memorialParamItens] = useState<any[]>(() => {
+    try {
+      if (id) {
+        const saved = localStorage.getItem(`orcamento_parametros_${id}`);
+        return saved ? JSON.parse(saved) : [];
+      }
+    } catch (e) {
+      console.error(e);
+    }
+    return [];
+  });
+
+  const [activeParamBindingIndex, setActiveParamBindingIndex] = useState<number | null>(null);
+
   // Sistema de Desfazer (Ctrl + Z)
   const historyRef = useRef<OrcamentoItem[][]>([]);
 
@@ -491,12 +506,24 @@ export default function OrcamentoBuilder() {
 
   // Alterna o colapso/expansão de um item EAP
   const toggleCollapse = (eap: string) => {
+    if (!eap) return;
     setCollapsedEaps(prev => {
       const copy = new Set(prev);
-      if (copy.has(eap)) {
-        copy.delete(eap);
+      const clean = eap.replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      const parts = clean.split('.').filter(Boolean);
+
+      const variants = [clean];
+      if (parts.length === 1) {
+        variants.push(`${parts[0]}.0`);
+      } else if (parts.length === 2 && parts[1] === '0') {
+        variants.push(parts[0]);
+      }
+
+      const isCollapsed = variants.some(v => copy.has(v));
+      if (isCollapsed) {
+        variants.forEach(v => copy.delete(v));
       } else {
-        copy.add(eap);
+        copy.add(clean);
       }
       return copy;
     });
@@ -526,19 +553,29 @@ export default function OrcamentoBuilder() {
     setShowOutlineMenu(false);
   };
 
-  // Verifica se uma linha deve ser ocultada (se algum ascendente estiver colapsado)
+  // Verifica se uma linha deve ser ocultada (se algum ascendente estritamente acima estiver colapsado)
   const isRowHidden = (eap: string) => {
     if (!eap) return false;
-    const parts = eap.split('.');
+    const cleanEap = eap.replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+    const parts = cleanEap.split('.').filter(Boolean);
+
+    // Seção Nível 0 (ex: '1', '2', '1.0', '2.0') nunca esconde a si mesma
+    if (parts.length === 1 || (parts.length === 2 && parts[1] === '0')) {
+      return false;
+    }
+
     for (let i = 1; i < parts.length; i++) {
       const ancestor = parts.slice(0, i).join('.');
       if (collapsedEaps.has(ancestor)) {
         return true;
       }
+      // Se for subitem sob uma seção (ex: '1.1', '1.1.1'), verifica se a seção ('1' ou '1.0') está colapsada
+      if (collapsedEaps.has(parts[0]) || collapsedEaps.has(`${parts[0]}.0`)) {
+        return true;
+      }
     }
     return false;
   };
-  const [searchParams] = useSearchParams();
   const isGestorMode = searchParams.get('modo') === 'validacao' || searchParams.get('gestor') === 'true';
 
   const [saving, setSaving] = useState(false);
@@ -692,6 +729,268 @@ export default function OrcamentoBuilder() {
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
   const [targetImportRowIndex, setTargetImportRowIndex] = useState<number | null>(null);
+
+  const [equipeDuracoesMap, setEquipeDuracoesMap] = useState<Record<string, string>>(() => {
+    if (id) {
+      try {
+        const saved = localStorage.getItem(`orcamento_equipe_${id}`);
+        if (saved) return JSON.parse(saved).duracoes || {};
+      } catch (e) {}
+    }
+    return {};
+  });
+
+  const [equipeJornadasMap, setEquipeJornadasMap] = useState<Record<string, string>>(() => {
+    if (id) {
+      try {
+        const saved = localStorage.getItem(`orcamento_equipe_${id}`);
+        if (saved) return JSON.parse(saved).jornadas || {};
+      } catch (e) {}
+    }
+    return {};
+  });
+
+  // Estados para Modal de Exportação do Orçamento
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [exportScope, setExportScope] = useState<'full' | 'active'>('full');
+  const [exportFormat, setExportFormat] = useState<'xlsx' | 'pdf'>('xlsx');
+
+  const handleConfirmExport = () => {
+    setShowExportModal(false);
+
+    if (exportFormat === 'pdf') {
+      if (exportScope === 'full') {
+        setActiveSubTab('memoria_calculo');
+      }
+      setTimeout(() => {
+        window.print();
+      }, 150);
+      return;
+    }
+
+    // Exportação para Excel (.xlsx)
+    try {
+      const wb = XLSX.utils.book_new();
+      const cleanName = (configData.nome || 'Orcamento').replace(/[^a-zA-Z0-9_-]/g, '_');
+      const filename = `${cleanName}_${exportScope === 'full' ? 'Completo' : activeSubTab}.xlsx`;
+
+      // 1. Planilha Orçamentária
+      if (exportScope === 'full' || activeSubTab === 'planilha') {
+        const planilhaData = computedItens
+          .filter(i => (i.item_eap || '').trim() !== '' || (i.descricao || '').trim() !== '')
+          .map(i => ({
+            'Item EAP': i.item_eap,
+            'Código': i.codigo || '-',
+            'Descrição do Serviço / Seção': i.descricao,
+            'Unidade': i.isSummary ? '' : i.unidade,
+            'Quantidade': i.isSummary ? 0 : i.quantidade,
+            'Valor Mat. Unit (R$)': i.isSummary ? 0 : i.valor_unitario_mat,
+            'Valor M.O. Unit (R$)': i.isSummary ? 0 : i.valor_unitario_mo,
+            'Valor Unitário (R$)': i.isSummary ? 0 : i.valor_unitario,
+            'Total Material (R$)': i.total_mat,
+            'Total Mão de Obra (R$)': i.total_mo,
+            'Total Geral (R$)': i.total
+          }));
+
+        const wsPlanilha = XLSX.utils.json_to_sheet(planilhaData);
+        XLSX.utils.book_append_sheet(wb, wsPlanilha, 'Planilha Orçamentária');
+      }
+
+      // 2. Memória de Cálculo
+      if (exportScope === 'full' || activeSubTab === 'memoria_calculo') {
+        const memoriaData = itens
+          .filter(i => (i.item_eap || '').trim() !== '' || (i.descricao || '').trim() !== '')
+          .map(i => ({
+            'Item EAP': i.item_eap,
+            'Tipo': (i as any).isSecao || (i as any).is_secao ? 'Seção / Tópico' : (i.composicao_id ? 'Composição' : 'Insumo'),
+            'Descrição do Serviço': i.descricao,
+            'Unidade': i.unidade,
+            'Quantidade': i.quantidade,
+            'Equação Literal': (i as any).equacaoLiteral || (i as any).equacao_literal || '',
+            'Substituição Numérica': (i as any).substituicaoNumerica || (i as any).substituicao_numerica || '',
+            'Observação / Memória': (i as any).observacaoMemoria || (i as any).observacao_memoria || ''
+          }));
+
+        const wsMemoria = XLSX.utils.json_to_sheet(memoriaData);
+        XLSX.utils.book_append_sheet(wb, wsMemoria, 'Memória de Cálculo');
+      }
+
+      // 3. Distribuição de Equipe (Hierarquia e Cálculos Féis ao Componente DistribuiçãoEquipeTab)
+      if (exportScope === 'full' || activeSubTab === 'distribuicao_equipe') {
+        const isMaoDeObra = (item: OrcamentoItem) => {
+          const cod = (item.codigo || '').trim().toLowerCase();
+          if (cod.startsWith('mo.') || cod.startsWith('mo') || cod.includes('mo.')) return true;
+          const fonte = (item.banco_fonte || '').trim().toUpperCase();
+          if (fonte.includes('MO') || fonte.includes('MÃO DE OBRA')) return true;
+          const un = (item.unidade || '').trim().toLowerCase();
+          if ((un === 'h' || un === 'hs' || un === 'hr' || un === 'hrs') && (item.valor_unitario_mo > 0 || (item as any).total_mo > 0)) return true;
+          return false;
+        };
+
+        const getDirectParentEap = (eap: string): string => {
+          const parts = (eap || '').trim().split('.').filter(Boolean);
+          if (parts.length <= 1) return '';
+          return parts.slice(0, -1).join('.');
+        };
+
+        const compareEap = (a: string, b: string) => {
+          const partsA = (a || '').split('.').map(n => parseInt(n, 10) || 0);
+          const partsB = (b || '').split('.').map(n => parseInt(n, 10) || 0);
+          const maxLen = Math.max(partsA.length, partsB.length);
+          for (let i = 0; i < maxLen; i++) {
+            const valA = partsA[i] ?? 0;
+            const valB = partsB[i] ?? 0;
+            if (valA !== valB) return valA - valB;
+          }
+          return 0;
+        };
+
+        const eapMap = new Map<string, OrcamentoItem>();
+        computedItens.forEach(i => {
+          if (i.item_eap) eapMap.set(i.item_eap.trim(), i);
+        });
+
+        const findItemInMap = (targetEap: string): OrcamentoItem | undefined => {
+          const trimmed = targetEap.trim();
+          if (eapMap.has(trimmed)) return eapMap.get(trimmed);
+          if (eapMap.has(trimmed + '.0')) return eapMap.get(trimmed + '.0');
+          if (eapMap.has(trimmed.replace(/\.0$/, ''))) return eapMap.get(trimmed.replace(/\.0$/, ''));
+          for (const [key, item] of eapMap.entries()) {
+            if (((item as any).isSecao || (item as any).is_secao || !item.unidade) && (key === trimmed || key.startsWith(trimmed + '.'))) {
+              return item;
+            }
+          }
+          return undefined;
+        };
+
+        const getSectionForItem = (itemEap: string): { eap: string; descricao: string } => {
+          const parts = itemEap.trim().split('.').filter(Boolean);
+          const rootNum = parts[0] || '1';
+          if (parts.length <= 1) {
+            const item = findItemInMap(rootNum);
+            return { eap: rootNum, descricao: item?.descricao || rootNum };
+          }
+          for (let len = parts.length - 1; len >= 1; len--) {
+            const ancestorEap = parts.slice(0, len).join('.');
+            const ancestorItem = findItemInMap(ancestorEap);
+            if (ancestorItem && ((ancestorItem as any).isSecao || (ancestorItem as any).is_secao || !ancestorItem.unidade) && ancestorItem.descricao) {
+              return { eap: ancestorEap, descricao: ancestorItem.descricao };
+            }
+          }
+          const rootItem = findItemInMap(rootNum);
+          return { eap: rootNum, descricao: rootItem?.descricao || rootNum };
+        };
+
+        const compsWithLaborMap = new Map<string, {
+          comp: OrcamentoItem;
+          laborInsumos: Array<{ insumo: OrcamentoItem; totalHoras: number }>;
+        }>();
+
+        computedItens.forEach(item => {
+          const itemEap = (item.item_eap || '').trim();
+          if (!itemEap) return;
+
+          const directLaborChildren = computedItens.filter(child => {
+            const parentEap = getDirectParentEap(child.item_eap);
+            return parentEap === itemEap && isMaoDeObra(child);
+          });
+
+          if (directLaborChildren.length > 0) {
+            directLaborChildren.sort((a, b) => compareEap(a.item_eap, b.item_eap));
+            compsWithLaborMap.set(itemEap, {
+              comp: item,
+              laborInsumos: directLaborChildren.map(ins => ({
+                insumo: ins,
+                totalHoras: (ins as any).displayQuantidade !== undefined ? (ins as any).displayQuantidade : (ins.quantidade || 0)
+              }))
+            });
+          }
+        });
+
+        const sectionsMap = new Map<string, {
+          eap: string;
+          descricao: string;
+          compositions: Array<{
+            comp: OrcamentoItem;
+            laborInsumos: Array<{ insumo: OrcamentoItem; totalHoras: number }>;
+          }>;
+        }>();
+
+        compsWithLaborMap.forEach(({ comp, laborInsumos }) => {
+          const { eap: sectionEap, descricao: sectionDesc } = getSectionForItem(comp.item_eap);
+          if (!sectionsMap.has(sectionEap)) {
+            sectionsMap.set(sectionEap, { eap: sectionEap, descricao: sectionDesc, compositions: [] });
+          }
+          sectionsMap.get(sectionEap)!.compositions.push({ comp, laborInsumos });
+        });
+
+        const sections = Array.from(sectionsMap.values());
+        sections.sort((a, b) => compareEap(a.eap, b.eap));
+
+        const equipeExportRows: any[] = [];
+
+        sections.forEach(sec => {
+          // Linha de Seção
+          equipeExportRows.push({
+            'Item EAP': sec.eap,
+            'Estrutura / Seção / Atividade / Mão de Obra': `SEÇÃO: ${sec.descricao}`,
+            'Tipo': 'SEÇÃO',
+            'Unidade': '',
+            'Qtd / Horas Totais': '',
+            'Duração (Dias)': '',
+            'Carga Horária (h/dia)': '',
+            'Horas Disponíveis / Pessoa': '',
+            'Equipe Necessária': ''
+          });
+
+          sec.compositions.sort((a, b) => compareEap(a.comp.item_eap, b.comp.item_eap));
+
+          sec.compositions.forEach(({ comp, laborInsumos }) => {
+            const dur = parseFloat(equipeDuracoesMap[comp.id] || '0') || 0;
+            const jor = parseFloat(equipeJornadasMap[comp.id] || '0') || 0;
+            const hrsDisp = dur * jor;
+
+            // Linha de Composição
+            equipeExportRows.push({
+              'Item EAP': comp.item_eap,
+              'Estrutura / Seção / Atividade / Mão de Obra': comp.descricao,
+              'Tipo': 'COMPOSIÇÃO',
+              'Unidade': comp.unidade || '',
+              'Qtd / Horas Totais': comp.quantidade || 0,
+              'Duração (Dias)': dur > 0 ? dur : '-',
+              'Carga Horária (h/dia)': jor > 0 ? jor : '-',
+              'Horas Disponíveis / Pessoa': hrsDisp > 0 ? hrsDisp : '-',
+              'Equipe Necessária': '-'
+            });
+
+            // Linhas de Insumo Mão de Obra
+            laborInsumos.forEach(({ insumo, totalHoras }) => {
+              const eqNecessaria = (hrsDisp > 0 && totalHoras > 0) ? Math.ceil(totalHoras / hrsDisp) : 0;
+
+              equipeExportRows.push({
+                'Item EAP': insumo.item_eap,
+                'Estrutura / Seção / Atividade / Mão de Obra': `  ↳ ${insumo.descricao}`,
+                'Tipo': 'MÃO DE OBRA',
+                'Unidade': insumo.unidade || 'H',
+                'Qtd / Horas Totais': totalHoras,
+                'Duração (Dias)': dur > 0 ? dur : '-',
+                'Carga Horária (h/dia)': jor > 0 ? jor : '-',
+                'Horas Disponíveis / Pessoa': hrsDisp > 0 ? hrsDisp : '-',
+                'Equipe Necessária': eqNecessaria > 0 ? `${eqNecessaria} Colaborador(es)` : '-'
+              });
+            });
+          });
+        });
+
+        const wsEquipe = XLSX.utils.json_to_sheet(equipeExportRows.length > 0 ? equipeExportRows : [{ 'Mensagem': 'Nenhum item de mão de obra cadastrado' }]);
+        XLSX.utils.book_append_sheet(wb, wsEquipe, 'Distribuição de Equipe');
+      }
+
+      XLSX.writeFile(wb, filename);
+    } catch (err: any) {
+      alert('Erro ao gerar arquivo Excel: ' + err.message);
+    }
+  };
 
   // Controle de Navegação por Células (Grid Excel Style)
   const [activeCell, setActiveCell] = useState<{ rowIndex: number; colIndex: number } | null>(null);
@@ -894,26 +1193,79 @@ export default function OrcamentoBuilder() {
     }
   };
 
-  // Controle de redimensionamento da coluna "Descrição"
-  const [descColWidth, setDescColWidth] = useState(380);
+  // Controle de redimensionamento dinâmico de todas as colunas do Orçamento
+  const [colWidths, setColWidths] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('brp_orcamento_col_widths');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return {
+      item: 105,
+      descricao: 380,
+      unidade: 65,
+      quantidade: 90,
+      matUnit: 120,
+      moUnit: 120,
+      unit: 120,
+      matTotal: 130,
+      moTotal: 130,
+      total: 140
+    };
+  });
 
-  const handleResizeMouseDown = (e: React.MouseEvent) => {
+  const startColumnResize = (colKey: string, e: React.MouseEvent) => {
     e.preventDefault();
+    e.stopPropagation();
     const startX = e.clientX;
-    const startWidth = descColWidth;
+    const startWidth = colWidths[colKey] || 100;
 
-    const handleMouseMove = (moveEvent: MouseEvent) => {
-      const newWidth = Math.max(200, startWidth + (moveEvent.clientX - startX));
-      setDescColWidth(newWidth);
+    const MIN_WIDTHS: Record<string, number> = {
+      item: 80,
+      descricao: 200,
+      unidade: 55,
+      quantidade: 75,
+      matUnit: 95,
+      moUnit: 95,
+      unit: 95,
+      matTotal: 105,
+      moTotal: 105,
+      total: 115
     };
 
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
+    const MAX_WIDTHS: Record<string, number> = {
+      item: 180,
+      descricao: 600,
+      unidade: 100,
+      quantidade: 160,
+      matUnit: 220,
+      moUnit: 220,
+      unit: 220,
+      matTotal: 250,
+      moTotal: 250,
+      total: 260
     };
 
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+    const minW = MIN_WIDTHS[colKey] || 60;
+    const maxW = MAX_WIDTHS[colKey] || 350;
+
+    const doDrag = (moveEvent: MouseEvent) => {
+      const newWidth = Math.min(maxW, Math.max(minW, startWidth + (moveEvent.clientX - startX)));
+      setColWidths(prev => {
+        const updated = { ...prev, [colKey]: newWidth };
+        try {
+          localStorage.setItem('brp_orcamento_col_widths', JSON.stringify(updated));
+        } catch {}
+        return updated;
+      });
+    };
+
+    const stopDrag = () => {
+      document.removeEventListener('mousemove', doDrag);
+      document.removeEventListener('mouseup', stopDrag);
+    };
+
+    document.addEventListener('mousemove', doDrag);
+    document.addEventListener('mouseup', stopDrag);
   };
 
   // Insere uma nova linha em branco sobre a linha selecionada
@@ -938,7 +1290,7 @@ export default function OrcamentoBuilder() {
   // Calcula o EAP sequencial de acordo com a posição da linha
   // Para itens de texto digitado (sem código), não coloca dentro de composições
   const getSequentialEapForIndex = (index: number, currentList: OrcamentoItem[]): string => {
-    if (index === 0) return '1';
+    if (index === 0) return '1.0';
     
     // Procura o último item preenchido acima do index atual
     let lastValidItem = null;
@@ -950,142 +1302,41 @@ export default function OrcamentoBuilder() {
       }
     }
 
-    if (!lastValidItem || !lastValidItem.item_eap) return '1';
+    if (!lastValidItem || !lastValidItem.item_eap) return '1.0';
 
+    const lastEapClean = (lastValidItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
     const lastHasCode = lastValidItem.codigo && lastValidItem.codigo.trim() !== '';
-    const lastLevel = getEapLevel(lastValidItem.item_eap);
 
-    // Itens de texto digitado após composições/insumos vão para o nível da atividade-pai
-    // (nunca entram automaticamente dentro da composição)
     if (lastHasCode) {
-      // Sobe na hierarquia até encontrar um item sem código (atividade descritiva)
-      // ou retorna ao nível 0 (raiz)
-      if (lastLevel === 0) {
-        // Próximo item raiz
-        const rootNum = parseInt(lastValidItem.item_eap.split('.')[0], 10) || 1;
-        return String(rootNum + 1);
-      }
-      // Está dentro de algo: sobe para o nível da composição-raiz do bloco
-      const rootNum = parseInt((lastValidItem.item_eap || '').split('.')[0], 10) || 1;
-      return String(rootNum + 1);
+      const rootNum = parseInt(lastEapClean.split('.')[0], 10) || 1;
+      return `${rootNum + 1}.0`;
     }
 
-    // Item anterior sem código: segue na sequência
-    const parts = lastValidItem.item_eap.split('.');
+    const parts = lastEapClean.split('.').filter(Boolean);
     const lastNum = parseInt(parts[parts.length - 1], 10);
     if (!isNaN(lastNum)) {
       parts[parts.length - 1] = String(lastNum + 1);
       return parts.join('.');
     }
-    return lastValidItem.item_eap + '.1';
+    return `${lastEapClean}.1`.replace(/\.+/g, '.');
   };
+
+
 
   // Reconstrói todos os códigos EAP baseados nos níveis hierárquicos após reordenação
   // Regras:
   // 1. Itens com código após itens sem código são auto-indentados (+1 nível)
   // 2. Filhos de um item promovido recebem o mesmo offset do pai
   // 3. Novos itens sem código e sem EAP após itens com código vão para nível 0
-  const rebuildEapCodes = (list: OrcamentoItem[]): OrcamentoItem[] => {
-    const copy = list.map(item => ({ ...item }));
-    const counters: number[] = [];
-
-    let prevItem: OrcamentoItem | null = null;
-    let prevLevel = 0;
-
-    // Rastreia quando um item é promovido (auto-indentado) e qual é o offset
-    // para que seus filhos também sejam promovidos pelo mesmo valor
-    let promotedOriginalEap: string | null = null;
-    let promotedOffset = 0;
-
-    for (let i = 0; i < copy.length; i++) {
-      const item = copy[i];
-      if ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '') {
-        continue;
-      }
-
-      const originalEap = (item.item_eap || '').trim();
-      const hasCode = item.codigo && item.codigo.trim() !== '';
-
-      let level = 0;
-      if (originalEap !== '') {
-        level = getEapLevel(originalEap);
-      }
-
-      // Verifica se está dentro da árvore do item promovido
-      if (promotedOriginalEap !== null) {
-        if (!item._manualLevel && originalEap.startsWith(promotedOriginalEap + '.')) {
-          // Filho de um item promovido: aplica o mesmo offset
-          level = level + promotedOffset;
-        } else {
-          // Saíu da árvore promovida (ou item marcado com nível manual explícito)
-          promotedOriginalEap = null;
-          promotedOffset = 0;
-        }
-      }
-
-      // Regra de auto-indentação: item com código após item sem código
-      // _manualLevel=true: usuário recuou explicitamente → não re-promover
-      if (prevItem && promotedOriginalEap === null && !item._manualLevel) {
-        const prevHasCode = prevItem.codigo && prevItem.codigo.trim() !== '';
-
-        // Se o item anterior pertence a uma composição, não promove o item atual a seu filho
-        const isPrevChildOfComposition = (() => {
-          if (!prevItem) return false;
-          const prevEap = (prevItem.item_eap || '').trim();
-          if (!prevEap) return false;
-          for (let k = i - 1; k >= 0; k--) {
-            const possibleParent = copy[k];
-            if (possibleParent.codigo && possibleParent.codigo.trim() !== '') {
-              if (prevEap.startsWith(possibleParent.item_eap + '.')) {
-                return true;
-              }
-            }
-          }
-          return false;
-        })();
-
-        if (hasCode && !prevHasCode && level <= prevLevel && !isPrevChildOfComposition) {
-          const newLevel = prevLevel + 1;
-          const offset = newLevel - level;
-          // Registra a promoção para propagar aos filhos
-          if (originalEap !== '') {
-            promotedOriginalEap = originalEap;
-            promotedOffset = offset;
-          }
-          level = newLevel;
-        }
-
-        // Novo item sem código e sem EAP após item com código: vai para nível 0
-        if (!hasCode && prevHasCode && !originalEap) {
-          level = 0;
-        }
-      }
-
-      // Limpa a flag após ter sido respeitada nesta passagem
-      if (item._manualLevel) {
-        delete item._manualLevel;
-      }
-
-      counters.length = level + 1;
-      
-      if (counters[level] === undefined) {
-        counters[level] = 1;
-      } else {
-        counters[level]++;
-      }
-
-      const parts = [];
-      for (let j = 0; j <= level; j++) {
-        parts.push(counters[j] || 1);
-      }
-      item.item_eap = parts.join('.');
-
-      prevItem = item;
-      prevLevel = level;
-    }
-
-    return copy;
+  const getEapLevel = (eap: string) => {
+    const clean = String(eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+    if (!clean) return 0;
+    const parts = clean.split('.').filter(Boolean);
+    if (parts.length === 2 && parts[1] === '0') return 0;
+    return Math.max(0, parts.length - 1);
   };
+
+
 
   // Manipuladores de Drag and Drop (Reordenação de Linhas)
   const handleDragStart = (e: React.DragEvent, index: number) => {
@@ -1103,15 +1354,102 @@ export default function OrcamentoBuilder() {
     e.preventDefault();
   };
 
+  const getParentCompositionRange = (childIndex: number, list: OrcamentoItem[]): { parentIndex: number; siblingIndices: number[] } | null => {
+    const child = list[childIndex];
+    if (!child) return null;
+
+    const childEap = (child.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+
+    let parentIndex = -1;
+    let parentEap = '';
+
+    for (let k = childIndex - 1; k >= 0; k--) {
+      const candidate = list[k];
+      const candidateEap = (candidate.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      if (candidateEap && (childEap.startsWith(candidateEap + '.') || candidate.id === child.composicao_id || (candidate.codigo && candidate.hasChildren))) {
+        parentIndex = k;
+        parentEap = candidateEap;
+        break;
+      }
+    }
+
+    if (parentIndex === -1) return null;
+
+    const siblingIndices: number[] = [];
+    const prefix = parentEap ? parentEap + '.' : '';
+
+    for (let k = parentIndex + 1; k < list.length; k++) {
+      const kEap = (list[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      if (prefix && kEap.startsWith(prefix)) {
+        siblingIndices.push(k);
+      } else if (list[k].composicao_id === list[parentIndex].id || (list[parentIndex].composicao_id && list[k].composicao_id === list[parentIndex].composicao_id)) {
+        siblingIndices.push(k);
+      } else {
+        break;
+      }
+    }
+
+    return { parentIndex, siblingIndices };
+  };
+
   const handleDrop = (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
     if (draggedRowIndex === null || draggedRowIndex === targetIndex) return;
 
     setItens(prev => {
+      pushUndoSnapshot(prev);
       const copy = [...prev];
-      const [draggedItem] = copy.splice(draggedRowIndex, 1);
-      copy.splice(targetIndex, 0, draggedItem);
-      return rebuildEapCodes(copy);
+      const draggedItem = copy[draggedRowIndex];
+      if (!draggedItem) return prev;
+
+      const isChild = isChildOfComposition(draggedRowIndex, copy) || Boolean(draggedItem.composicao_id);
+
+      if (isChild) {
+        const compRange = getParentCompositionRange(draggedRowIndex, copy);
+        if (compRange && compRange.siblingIndices.length > 0) {
+          const { siblingIndices } = compRange;
+          const minAllowedIndex = siblingIndices[0];
+          const maxAllowedIndex = siblingIndices[siblingIndices.length - 1];
+
+          if (targetIndex < minAllowedIndex || targetIndex > maxAllowedIndex) {
+            return prev;
+          }
+
+          const [movedInsumo] = copy.splice(draggedRowIndex, 1);
+          copy.splice(targetIndex, 0, movedInsumo);
+
+          const rebuilt = rebuildEapCodes(copy);
+          return ensureSingleTrailingBlankRow(rebuilt, id!);
+        }
+      }
+
+      const draggedEap = (draggedItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      const childIndices: number[] = [];
+      if (draggedEap) {
+        const prefix = draggedEap + '.';
+        for (let k = draggedRowIndex + 1; k < copy.length; k++) {
+          const kEap = (copy[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+          if (kEap.startsWith(prefix)) {
+            childIndices.push(k);
+          } else {
+            break;
+          }
+        }
+      }
+
+      const blockLength = 1 + childIndices.length;
+      const block = copy.splice(draggedRowIndex, blockLength);
+
+      let insertIndex = targetIndex;
+      if (draggedRowIndex < targetIndex) {
+        insertIndex = targetIndex - blockLength + 1;
+      }
+      insertIndex = Math.max(0, Math.min(copy.length, insertIndex));
+
+      copy.splice(insertIndex, 0, ...block);
+
+      const rebuilt = rebuildEapCodes(copy);
+      return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
     setDraggedRowIndex(null);
     setHasUnsavedChanges(true);
@@ -1157,18 +1495,6 @@ export default function OrcamentoBuilder() {
     return copy;
   };
 
-  // Busca o nível máximo permitido para o item na linha 'index'
-  const getMaxAllowedLevel = (index: number, list: OrcamentoItem[]): number => {
-    for (let i = index - 1; i >= 0; i--) {
-      const item = list[i];
-      if (item.codigo && item.codigo.trim() !== '') {
-        return getEapLevel(item.item_eap || '1');
-      }
-    }
-    return index;
-  };
-
-  // Indentar linha (Recuar para a direita -> Torna-se subitem)
   const getTopLevelSelectedIndices = (indices: Set<number>, list: OrcamentoItem[]): number[] => {
     const sorted = Array.from(indices).sort((a, b) => a - b);
     const result: number[] = [];
@@ -1176,11 +1502,11 @@ export default function OrcamentoBuilder() {
     for (const idx of sorted) {
       const item = list[idx];
       if (!item) continue;
+      const eap = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
 
-      // Verifica se este item é descendente de outro item já selecionado
       const hasSelectedAncestor = result.some(parentIdx => {
         const parent = list[parentIdx];
-        return parent && item.item_eap.startsWith(parent.item_eap + '.');
+        return parent && eap.startsWith(parent.item_eap + '.');
       });
 
       if (!hasSelectedAncestor) {
@@ -1193,7 +1519,6 @@ export default function OrcamentoBuilder() {
 
   const handleRowClick = (index: number, e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
-    // Evita selecionar se o clique foi em um botão ou elemento interativo
     if (target.closest('button') || target.closest('a')) return;
 
     if (activeCell && activeCell.rowIndex !== index) {
@@ -1208,14 +1533,12 @@ export default function OrcamentoBuilder() {
     setSelectedRowIndices(prev => {
       const copy = new Set(prev);
       if (e.ctrlKey || e.metaKey) {
-        // Seleção múltipla com CTRL
         if (copy.has(index)) {
           copy.delete(index);
         } else {
           copy.add(index);
         }
       } else if (e.shiftKey && selectedRowIndex !== null) {
-        // Seleção de intervalo com SHIFT
         copy.clear();
         const start = Math.min(selectedRowIndex, index);
         const end = Math.max(selectedRowIndex, index);
@@ -1223,12 +1546,99 @@ export default function OrcamentoBuilder() {
           copy.add(i);
         }
       } else {
-        // Seleção única comum
         copy.clear();
         copy.add(index);
       }
       return copy;
     });
+  };
+
+  // Reconstrói todos os códigos EAP baseados nos níveis hierárquicos fiéis às ramificações (1.1 -> 1.1.1 -> 1.1.3 -> 1.1.3.1)
+  const rebuildEapCodes = (list: OrcamentoItem[]): OrcamentoItem[] => {
+    const copy = list.map(item => ({ ...item }));
+    const counters: number[] = [];
+
+    for (let i = 0; i < copy.length; i++) {
+      const item = copy[i];
+      if ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '') {
+        continue;
+      }
+
+      let originalEap = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      if (!originalEap && i > 0 && copy[i - 1]?.item_eap) {
+        originalEap = (copy[i - 1].item_eap || '').trim();
+      }
+
+      const origParts = originalEap.split('.').filter(Boolean);
+
+      let level = 0;
+
+      const isSecaoHeader = Boolean(
+        (item as any).isSecao || 
+        (item as any).is_secao ||
+        (item.descricao && (item.descricao.toUpperCase().trim() === 'SAPATAS' || item.descricao.toUpperCase().trim() === 'ESTACAS')) ||
+        (!item.composicao_id && !(item as any).parentCompositionId && !(item as any).isChildInsumoOfComposition && (origParts.length <= 1 || originalEap.endsWith('.0')))
+      );
+
+      if ((item as any).level !== undefined && (item as any).level > 0) {
+        level = (item as any).level;
+      } else if (isSecaoHeader) {
+        level = 0;
+      } else {
+        // Verifica se o item pertence a uma composição pai localizada acima dele na tabela
+        let parentCompLevel = -1;
+        if (item.composicao_id) {
+          for (let k = i - 1; k >= 0; k--) {
+            if (copy[k].id === item.composicao_id) {
+              const parentEap = (copy[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+              const pParts = parentEap.split('.').filter(Boolean);
+              parentCompLevel = pParts.length > 0 ? (pParts.length === 2 && pParts[1] === '0' ? 0 : Math.max(0, pParts.length - 1)) : 1;
+              break;
+            }
+          }
+        }
+
+        if (parentCompLevel >= 0 && origParts.length <= 2) {
+          level = parentCompLevel + 1;
+        } else {
+          level = Math.max(1, origParts.length > 0 ? origParts.length - 1 : 1);
+        }
+      }
+
+      // Proteção de Nível: impede salto de níveis desnecessários em relação ao item anterior (ex: evita 1.3.0.1)
+      if (i > 0) {
+        const prevItem = copy[i - 1];
+        const prevEap = (prevItem?.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+        const prevParts = prevEap.split('.').filter(Boolean);
+        const prevLevel = prevParts.length > 0 ? (prevParts.length === 2 && prevParts[1] === '0' ? 0 : Math.max(0, prevParts.length - 1)) : 0;
+
+        if (level > prevLevel + 1) {
+          level = prevLevel + 1;
+        }
+      }
+
+      counters.length = level + 1;
+      
+      if (counters[level] === undefined) {
+        counters[level] = 1;
+      } else {
+        counters[level]++;
+      }
+
+      if (level === 0) {
+        item.item_eap = `${counters[0]}`;
+      } else {
+        const parts = [];
+        for (let j = 0; j <= level; j++) {
+          parts.push(counters[j] || 1);
+        }
+        item.item_eap = parts.join('.');
+      }
+
+      item.item_eap = item.item_eap.replace(/\.+/g, '.');
+    }
+
+    return copy;
   };
 
   const handleInputFocus = (index: number) => {
@@ -1240,9 +1650,12 @@ export default function OrcamentoBuilder() {
   };
 
   const indentMultipleRows = () => {
-    const targets = Array.from(selectedRowIndices);
+    let targets = Array.from(selectedRowIndices);
     if (targets.length === 0 && selectedRowIndex !== null) {
       targets.push(selectedRowIndex);
+    }
+    if (targets.length === 0 && activeCell?.rowIndex !== undefined && activeCell?.rowIndex !== null) {
+      targets.push(activeCell.rowIndex);
     }
     if (targets.length === 0) return;
 
@@ -1253,34 +1666,39 @@ export default function OrcamentoBuilder() {
 
       let altered = false;
       for (const index of topSelected) {
-        if (index === 0) continue; // Primeira linha não pode ser indentada
-
-        // Insumos/subcomposições que pertencem a uma composição não podem ser desvinculados/indentados individualmente
-        if (isChildOfComposition(index, copy)) {
-          continue;
-        }
-
+        if (index === 0) continue;
         const current = { ...copy[index] };
-        const oldEap = (current.item_eap || '').trim();
-        const currentLevel = getEapLevel(oldEap || '1');
-        const maxLevel = getMaxAllowedLevel(index, copy);
+        const oldEap = (current.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+        if (!oldEap) continue;
 
-        if (currentLevel >= maxLevel) {
+        const prevItem = index > 0 ? copy[index - 1] : null;
+        const prevEap = prevItem ? (prevItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim() : '';
+        const prevLevel = prevEap ? prevEap.split('.').filter(Boolean).length : 0;
+        const currentParts = oldEap.split('.').filter(Boolean);
+        const currentLevel = currentParts.length;
+
+        // Proteção: não permite recuar além de prevLevel + 1
+        if (currentLevel >= prevLevel + 1) {
           continue;
         }
 
-        current.item_eap = (current.item_eap || '1') + '.1';
+        // Recua exatamente +1 nível no código EAP
+        const newMotherEap = oldEap + '.1';
+        current.item_eap = newMotherEap;
         copy[index] = current;
         altered = true;
 
+        // Atualiza todos os itens filhos reais da composição/seção
         if (oldEap) {
           const prefix = oldEap + '.';
           for (let j = index + 1; j < copy.length; j++) {
-            const itemEap = (copy[j].item_eap || '').trim();
-            if (itemEap.startsWith(prefix)) {
+            const childItem = copy[j];
+            const childEap = (childItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+            if (childEap.startsWith(prefix)) {
+              const suffix = childEap.slice(oldEap.length);
               copy[j] = {
                 ...copy[j],
-                item_eap: itemEap + '.1'
+                item_eap: newMotherEap + suffix
               };
             } else {
               break;
@@ -1296,9 +1714,12 @@ export default function OrcamentoBuilder() {
   };
 
   const outdentMultipleRows = () => {
-    const targets = Array.from(selectedRowIndices);
+    let targets = Array.from(selectedRowIndices);
     if (targets.length === 0 && selectedRowIndex !== null) {
       targets.push(selectedRowIndex);
+    }
+    if (targets.length === 0 && activeCell?.rowIndex !== undefined && activeCell?.rowIndex !== null) {
+      targets.push(activeCell.rowIndex);
     }
     if (targets.length === 0) return;
 
@@ -1309,49 +1730,36 @@ export default function OrcamentoBuilder() {
 
       let altered = false;
       for (const index of topSelected) {
-        // Insumos/subcomposições que pertencem a uma composição não podem ser desvinculados/recuados individualmente
-        if (isChildOfComposition(index, copy)) {
-          continue;
-        }
-
         const current = { ...copy[index] };
-        const oldEap = (current.item_eap || '').trim();
+        const oldEap = (current.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
         if (!oldEap) continue;
 
-        const parts = oldEap.split('.');
-        const hasCode = !!(current.codigo && current.codigo.trim() !== '');
-
-        if (parts.length <= 1) {
-          if (!hasCode) continue; // atividade manual já raiz → não faz nada
-          // item com código no nível raiz: marca _manualLevel e continua
-          // (rebuildEapCodes vai mantê-lo no nível 0 sem re-promover)
-          copy[index] = { ...current, _manualLevel: true };
-          altered = true;
-          continue;
+        const parts = oldEap.split('.').filter(Boolean);
+        if (parts.length <= 1 || (parts.length === 2 && parts[1] === '0')) {
+          continue; // Já está no nível de raiz (ex: "1" ou "1.0")
         }
 
         parts.pop();
-        const newEap = parts.join('.');
-        current.item_eap = newEap;
-        current._manualLevel = true; // Sempre marca _manualLevel ao recuar manualmente
+        const newMotherEap = parts.join('.');
+        current.item_eap = newMotherEap;
         copy[index] = current;
         altered = true;
 
-        // Propaga o recuo para os filhos desta subárvore
-        const prefix = oldEap + '.';
-        for (let j = index + 1; j < copy.length; j++) {
-          const itemEap = (copy[j].item_eap || '').trim();
-          if (itemEap.startsWith(prefix)) {
-            const cParts = itemEap.split('.');
-            if (cParts.length > 1) {
-              cParts.pop();
+        // Atualiza todos os itens filhos da composição/seção em conjunto ao recuar para a esquerda
+        if (oldEap) {
+          const prefix = oldEap + '.';
+          for (let j = index + 1; j < copy.length; j++) {
+            const childItem = copy[j];
+            const childEap = (childItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+            if (childEap.startsWith(prefix)) {
+              const suffix = childEap.slice(oldEap.length);
               copy[j] = {
                 ...copy[j],
-                item_eap: cParts.join('.')
+                item_eap: newMotherEap + suffix
               };
+            } else {
+              break;
             }
-          } else {
-            break;
           }
         }
       }
@@ -1413,7 +1821,7 @@ export default function OrcamentoBuilder() {
     return () => {
       window.removeEventListener('keydown', handleGlobalKeyDown);
     };
-  }, [selectedRowIndices, selectedRowIndex, itens]);
+  }, [selectedRowIndices, selectedRowIndex, activeCell, itens]);
 
   const loadOrcamento = async () => {
     setLoading(true);
@@ -1429,9 +1837,31 @@ export default function OrcamentoBuilder() {
       if (orcError) throw orcError;
       const localObs = id ? localStorage.getItem(`orcamento_obs_gestor_${id}`) : null;
       const effectiveObs = orcData.observacao_gestor || localObs || '';
+
+      const localDC = id ? localStorage.getItem(`orcamento_dados_comp_${id}`) : null;
+      let effectiveDC = orcData.dadosComplementares || orcData.dados_complementares || [];
+      if (localDC) {
+        try { effectiveDC = JSON.parse(localDC); } catch (e) {}
+      }
+
+      // Restaura mapeamento da distribuição de equipe do localStorage ou do banco de dados
+      const localEquipe = id ? localStorage.getItem(`orcamento_equipe_${id}`) : null;
+      let dbEquipe = (orcData.dados_complementares as any)?.equipe_config || null;
+      if (localEquipe) {
+        try {
+          const parsed = JSON.parse(localEquipe);
+          if (parsed.duracoes) setEquipeDuracoesMap(parsed.duracoes);
+          if (parsed.jornadas) setEquipeJornadasMap(parsed.jornadas);
+        } catch (e) {}
+      } else if (dbEquipe) {
+        if (dbEquipe.duracoes) setEquipeDuracoesMap(dbEquipe.duracoes);
+        if (dbEquipe.jornadas) setEquipeJornadasMap(dbEquipe.jornadas);
+      }
+
       setOrcamento({
         ...orcData,
-        observacao_gestor: effectiveObs
+        observacao_gestor: effectiveObs,
+        dadosComplementares: effectiveDC
       });
       if (effectiveObs) {
         setObservacaoGestorInput(effectiveObs);
@@ -1486,6 +1916,7 @@ export default function OrcamentoBuilder() {
       // Ordenar por EAP lexicograficamente
       const sorted = (itensData || []).map((i: any) => ({
         ...i,
+        item_eap: (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim(),
         quantidade: parseFloat(i.quantidade || 0),
         valor_unitario_mat: parseFloat(i.valor_unitario_mat || 0),
         valor_unitario_mo: parseFloat(i.valor_unitario_mo || 0),
@@ -1493,11 +1924,13 @@ export default function OrcamentoBuilder() {
         valor_unitario_com_bdi: parseFloat(i.valor_unitario_com_bdi || 0),
         total_mat: parseFloat(i.total_mat || 0),
         total_mo: parseFloat(i.total_mo || 0),
-        total: parseFloat(i.total || 0)
+        total: parseFloat(i.total || 0),
+        observacaoMemoria: i.observacao_memoria || i.observacaoMemoria || '',
+        formulasLista: Array.isArray(i.formulas_lista) ? i.formulas_lista : (Array.isArray(i.formulasLista) ? i.formulasLista : [])
       })).sort(sortEap);
 
-      // Garante exatamente 1 linha em branco no final da planilha
-      setItens(ensureSingleTrailingBlankRow(sorted, id!));
+      const rebuilt = rebuildEapCodes(sorted);
+      setItens(ensureSingleTrailingBlankRow(rebuilt, id!));
 
       // Carrega memórias de cálculo associadas do LocalStorage
       if (id) {
@@ -1517,8 +1950,10 @@ export default function OrcamentoBuilder() {
   };
 
   const sortEap = (a: any, b: any) => {
-    const aParts = String(a.item_eap || '').split('.').map(x => parseInt(x, 10) || 0);
-    const bParts = String(b.item_eap || '').split('.').map(x => parseInt(x, 10) || 0);
+    const aClean = (a.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+    const bClean = (b.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+    const aParts = aClean.split('.').filter(Boolean).map((x: string) => parseInt(x, 10) || 0);
+    const bParts = bClean.split('.').filter(Boolean).map((x: string) => parseInt(x, 10) || 0);
     for (let i = 0; i < Math.max(aParts.length, bParts.length); i++) {
       const aVal = aParts[i] !== undefined ? aParts[i] : -1;
       const bVal = bParts[i] !== undefined ? bParts[i] : -1;
@@ -1531,22 +1966,21 @@ export default function OrcamentoBuilder() {
     const hasValues = (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '';
     if (!hasValues) {
       return {
-        textClass: "text-xs font-normal text-slate-400",
+        textClass: "text-[11px] font-medium text-slate-400",
         rowBgClass: "bg-white border-l-transparent"
       };
     }
 
-    // 1. Atividade descritiva/manual (sem código) → Sempre Negrito, tamanho padrão
+    // 1. Atividade descritiva/manual (sem código) → Negrito, cor preta/escura
     if (!item.codigo) {
       return {
-        textClass: "text-xs font-bold text-slate-800",
-        rowBgClass: "bg-slate-300/60 hover:bg-slate-300/80 border-l-slate-400"
+        textClass: "text-[11.5px] font-bold text-slate-900",
+        rowBgClass: "bg-slate-200/80 hover:bg-slate-300/80 border-l-slate-500"
       };
     }
 
-    // 2. Composição com filhos (hasChildren === true)
+    // 2. Composição com filhos (hasChildren === true) → Semi-negrito
     if (item.codigo && item.hasChildren) {
-      // Verifica se ela ou algum filho dela está ativo
       const isActive = selectedRowIndex !== null && (
         selectedRowIndex === index || 
         (itens[selectedRowIndex]?.item_eap || '').startsWith(item.item_eap + '.')
@@ -1554,22 +1988,20 @@ export default function OrcamentoBuilder() {
 
       return {
         textClass: isActive 
-          ? "text-xs font-bold text-slate-900" 
-          : "text-xs font-medium text-slate-750",
-        rowBgClass: "bg-slate-50 hover:bg-slate-100/80 border-l-blue-300"
+          ? "text-[11.5px] font-bold text-slate-900" 
+          : "text-[11px] font-semibold text-slate-900",
+        rowBgClass: "bg-slate-50 hover:bg-slate-100/80 border-l-blue-400"
       };
     }
 
-    // 3. Insumos e subcomposições folhas (sem filhos, com código) → Fonte menor e peso normal
+    // 3. Insumos e subcomposições folhas (sem filhos, com código) → Fonte normal legível
     return {
-      textClass: "text-[11px] font-normal text-slate-650",
+      textClass: "text-[11px] font-normal text-slate-800",
       rowBgClass: "bg-white hover:bg-slate-50 border-l-transparent"
     };
   };
 
-  const getEapLevel = (eap: string) => {
-    return (String(eap).match(/\./g) || []).length;
-  };
+
 
   const isChildOfComposition = (index: number, list: OrcamentoItem[]): boolean => {
     const item = list[index];
@@ -2097,6 +2529,20 @@ export default function OrcamentoBuilder() {
   const handleSavePlanilha = async () => {
     setSaving(true);
     try {
+      if (id) {
+        try {
+          localStorage.setItem(`orcamento_equipe_${id}`, JSON.stringify({
+            duracoes: equipeDuracoesMap,
+            jornadas: equipeJornadasMap
+          }));
+        } catch (e) {}
+      }
+
+      const rawDC = orcamento?.dadosComplementares || [];
+      const updatedDCPayload = Array.isArray(rawDC)
+        ? { items: rawDC, equipe_config: { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap } }
+        : { ...(typeof rawDC === 'object' ? rawDC : {}), equipe_config: { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap } };
+
       // 1. Atualizar cabeçalho se houver mudanças nas configs/BDI
       const { error: orcError } = await supabase
         .schema('engenharia')
@@ -2108,6 +2554,7 @@ export default function OrcamentoBuilder() {
           projeto: configData.projeto,
           gestor_cliente: configData.gestor_cliente,
           status: configData.status,
+          dados_complementares: updatedDCPayload,
           bdi_ac: configData.bdi_ac / 100,
           bdi_s: configData.bdi_s / 100,
           bdi_g: configData.bdi_g / 100,
@@ -2295,10 +2742,14 @@ export default function OrcamentoBuilder() {
             total: item.total,
             total_mat: item.total_mat,
             total_mo: item.total_mo,
-            composicao_id: item.composicao_id || null
+            composicao_id: item.composicao_id || null,
+            observacao_memoria: (item as any).observacao_memoria || (item as any).observacaoMemoria || null,
+            formulas_lista: (item as any).formulas_lista || (item as any).formulasLista || []
           };
 
-          if (item.id && !item.id.startsWith('temp-') && !item.id.startsWith('blank-')) {
+          const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
+
+          if (item.id && isValidUUID(item.id)) {
             payload.id = item.id;
             itemsToUpdate.push(payload);
           } else {
@@ -2375,82 +2826,81 @@ export default function OrcamentoBuilder() {
     }
   };
 
+  // Determina o índice de destino e o código EAP correto ao importar um item para a planilha
   const getImportTarget = (targetIndex: number | null, list: OrcamentoItem[]): { index: number; eap: string } => {
-    if (targetIndex !== null && list[targetIndex]) {
-      return { index: targetIndex, eap: list[targetIndex].item_eap || '1' };
+    if (!list || list.length === 0) {
+      return { index: 0, eap: '1.1' };
     }
 
     let index = targetIndex;
-    if (index === null) {
+    if (index === null || index < 0) {
       index = list.findIndex(item => (item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '');
       if (index === -1) index = list.length;
     }
 
-    if (index === 0 || list.length === 0) {
-      return { index, eap: '1' };
+    if (index === 0) {
+      return { index: 0, eap: '1.1' };
     }
+
     let prevIndex = index - 1;
     while (prevIndex >= 0 && (list[prevIndex].item_eap || '').trim() === '' && (list[prevIndex].descricao || '').trim() === '') {
       prevIndex--;
     }
 
     if (prevIndex < 0) {
-      return { index, eap: '1' };
+      return { index, eap: '1.1' };
     }
 
     const prevItem = list[prevIndex];
+    const prevEap = (prevItem.item_eap || '1').trim();
+    const prevParts = prevEap.split('.').filter(Boolean);
 
-    // Encontra se o prevItem ou algum de seus pais/ancestrais na árvore EAP tem código (insumo/composição)
-    let parentCompIndex = -1;
+    // Se o item anterior é uma Seção Nível 0 (ex: "1" ESTACAS)
+    const isPrevSecao = Boolean(
+      (prevItem as any).isSecao || 
+      (!prevItem.codigo && !prevItem.composicao_id && prevParts.length <= 1)
+    );
+
+    if (isPrevSecao) {
+      return { index, eap: `${prevEap}.1` };
+    }
+
+    // Se o item anterior não é seção (ex: 1.1 ou 1.1.6):
+    // Encontra a Seção Nível 0 à qual ele pertence (ex: "1")
+    let sectionEap = '1';
     for (let k = prevIndex; k >= 0; k--) {
       const item = list[k];
-      if (item.codigo && item.codigo.trim() !== '') {
-        const prefix = item.item_eap + '.';
-        if (prevItem.item_eap === item.item_eap || prevItem.item_eap.startsWith(prefix)) {
-          parentCompIndex = k;
+      const kEap = (item.item_eap || '').trim();
+      const kParts = kEap.split('.').filter(Boolean);
+      const isSecao = Boolean(
+        (item as any).isSecao || 
+        (!item.codigo && !item.composicao_id && kParts.length <= 1)
+      );
+      if (isSecao) {
+        sectionEap = kEap;
+        break;
+      }
+    }
+
+    const prefix = sectionEap + '.';
+
+    // Encontra o maior Nível 1 sob esta Seção (ex: se já existe 1.1, o próximo é 1.2)
+    let maxLevel1Num = 0;
+    for (let k = 0; k < list.length; k++) {
+      const kEap = (list[k].item_eap || '').trim();
+      if (kEap.startsWith(prefix)) {
+        const sub = kEap.slice(prefix.length);
+        const firstNum = parseInt(sub.split('.')[0], 10);
+        if (!isNaN(firstNum) && firstNum > maxLevel1Num) {
+          maxLevel1Num = firstNum;
         }
       }
     }
 
-    if (parentCompIndex !== -1) {
-      // O item anterior faz parte de uma composição.
-      // O novo item deve ser inserido após o último filho/descendente dessa composição.
-      const parentItem = list[parentCompIndex];
-      const prefix = parentItem.item_eap + '.';
-      
-      let lastChildIndex = parentCompIndex;
-      for (let k = parentCompIndex + 1; k < list.length; k++) {
-        if ((list[k].item_eap || '').trim().startsWith(prefix)) {
-          lastChildIndex = k;
-        } else {
-          break;
-        }
-      }
+    const nextLevel1Num = maxLevel1Num + 1;
+    const newEap = `${sectionEap}.${nextLevel1Num}`;
 
-      const targetInsertIndex = lastChildIndex + 1;
-
-      // O EAP deve ser irmão do parentItem (mesmo nível da composição pai)
-      const parts = parentItem.item_eap.split('.');
-      const lastNum = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(lastNum)) {
-        parts[parts.length - 1] = String(lastNum + 1);
-      } else {
-        parts.push('1');
-      }
-
-      return { index: targetInsertIndex, eap: parts.join('.') };
-    }
-
-    // Caso contrário, herda o nível do item anterior e avança o sequencial
-    const parts = prevItem.item_eap.split('.');
-    const lastNum = parseInt(parts[parts.length - 1], 10);
-    if (!isNaN(lastNum)) {
-      parts[parts.length - 1] = String(lastNum + 1);
-    } else {
-      parts.push('1');
-    }
-
-    return { index, eap: parts.join('.') };
+    return { index, eap: newEap };
   };
 
   // Importar item selecionado do painel lateral para a planilha
@@ -2544,28 +2994,45 @@ export default function OrcamentoBuilder() {
     }, 2000);
   };
 
-  // Calcular totais gerais da planilha (somente linhas mãe de 1º nível: 1, 2, 3... para não duplicar somas das filhas)
+  // Calcular totais gerais da planilha (somente seções raízes 1.0, 2.0, 3.0 ou Nível 1 para evitar duplicar somas)
   const totals = useMemo(() => {
+    // 1. Procura Seções Nível 0 (ex: '1', '2', '3' ou '1.0', '2.0')
+    const secaoRows = computedItens.filter(item => {
+      const eap = (item.item_eap || '').trim();
+      if (!eap) return false;
+      const parts = eap.split('.').filter(Boolean);
+      return parts.length === 1 || (parts.length === 2 && parts[1] === '0');
+    });
+
+    // Se existem seções Nível 0 (1.0, 2.0, 3.0), o Custo Geral é a soma exata das seções
+    if (secaoRows.length > 0) {
+      return secaoRows.reduce((acc, item) => {
+        acc.mat += item.total_mat || 0;
+        acc.mo += item.total_mo || 0;
+        acc.total += item.total || 0;
+        return acc;
+      }, { mat: 0, mo: 0, total: 0 });
+    }
+
+    // Caso contrário (se não houver seções Nível 0), soma todas as composições de Nível 1 (ex: 1.1, 1.2, 2.1)
     const eapSet = new Set(computedItens.map(i => (i.item_eap || '').trim()).filter(Boolean));
 
     return computedItens.reduce((acc, item) => {
       const eap = (item.item_eap || '').trim();
-      const hasContent = eap !== '' || (item.descricao || '').trim() !== '';
-      if (!hasContent) return acc;
+      if (!eap) return acc;
 
-      // Se o EAP não possui ponto (ex: "1", "2", "3"), é uma linha mãe raiz de 1º nível.
-      // Se tem ponto (ex: "2.1"), verifica se o pai ("2") existe na planilha. Se o pai existir, ele já engloba o total.
-      let isRoot = false;
-      if (!eap.includes('.')) {
-        isRoot = true;
-      } else {
-        const parentEap = eap.substring(0, eap.lastIndexOf('.'));
+      const parts = eap.split('.').filter(Boolean);
+      let isRootLevel1 = false;
+      if (parts.length === 2) {
+        isRootLevel1 = true;
+      } else if (parts.length > 2) {
+        const parentEap = parts.slice(0, parts.length - 1).join('.');
         if (!eapSet.has(parentEap)) {
-          isRoot = true;
+          isRootLevel1 = true;
         }
       }
 
-      if (isRoot) {
+      if (isRootLevel1) {
         acc.mat += item.total_mat || 0;
         acc.mo += item.total_mo || 0;
         acc.total += item.total || 0;
@@ -2723,8 +3190,22 @@ export default function OrcamentoBuilder() {
                 </div>
               );
             })()}
-            <p className="text-slate-400 text-xs mt-0.5">
-              Cliente: <span className="font-semibold text-slate-600">{orcamento?.cliente || 'Não informado'}</span> · Gestor: <span className="font-semibold text-slate-600">{orcamento?.gestor_cliente || 'Não informado'}</span>
+            <p className="text-slate-400 text-xs mt-0.5 flex flex-wrap items-center gap-x-2">
+              <span>Cliente: <span className="font-semibold text-slate-600">{orcamento?.cliente || 'Não informado'}</span></span>
+              <span>·</span>
+              <span>Gestor: <span className="font-semibold text-slate-600">{orcamento?.gestor_cliente || 'Não informado'}</span></span>
+              {(orcamento as any)?.responsavel && (
+                <>
+                  <span>·</span>
+                  <span>Orçamentista: <span className="font-semibold text-slate-600">{(orcamento as any)?.responsavel}</span></span>
+                </>
+              )}
+              {((orcamento as any)?.cidade || (orcamento as any)?.estado) && (
+                <>
+                  <span>·</span>
+                  <span>Local: <span className="font-semibold text-slate-600">{[(orcamento as any)?.cidade, (orcamento as any)?.estado || 'GO'].filter(Boolean).join(' - ')}</span></span>
+                </>
+              )}
             </p>
           </div>
         </div>
@@ -2833,16 +3314,27 @@ export default function OrcamentoBuilder() {
           </div>
 
 
-          {/* Atalho para Curva ABC do Orçamento */}
+          {/* Atalho para Curva ABC e Exportar Orçamento */}
           <div className="flex flex-col gap-1">
-            <button 
-              onClick={() => navigate(`/curva-abc?id=${id}`)}
-              className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-              title="Abrir a Curva ABC deste orçamento"
-            >
-              <BarChart3 className="w-4 h-4 text-purple-600" />
-              <span>Curva ABC</span>
-            </button>
+            <div className="flex items-center gap-1.5">
+              <button 
+                onClick={() => navigate(`/curva-abc?id=${id}`)}
+                className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="Abrir a Curva ABC deste orçamento"
+              >
+                <BarChart3 className="w-4 h-4 text-purple-600" />
+                <span>Curva ABC</span>
+              </button>
+
+              <button 
+                onClick={() => setShowExportModal(true)}
+                className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 px-3.5 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+                title="Exportar Orçamento Completo ou por Aba (Excel .xlsx / PDF)"
+              >
+                <Download className="w-4 h-4 text-emerald-700" />
+                <span>Exportar</span>
+              </button>
+            </div>
 
             {/* Botão de workflow — aparece abaixo de Importar conforme status */}
             {(() => {
@@ -3255,87 +3747,115 @@ export default function OrcamentoBuilder() {
         );
       })()}
 
-
-      {/* \u2500\u2500 Painel de Configura\u00e7\u00f5es / BDI \u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500 */}
+      {/* ── Painel de Configurações / BDI ────────────────────────────────────── */}
       {showConfig && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
-            <h3 className="font-bold text-slate-800 flex items-center gap-2 text-base">
+            <h3 className="font-bold text-slate-900 flex items-center gap-2 text-base">
               <Settings2 className="w-5 h-5 text-blue-600" />
               Configurações e Parâmetros de BDI
             </h3>
-            <button onClick={() => setShowConfig(false)} className="text-slate-400 hover:text-slate-600">
+            <button onClick={() => setShowConfig(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
               <X className="w-5 h-5" />
             </button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Nome do Orçamento</label>
-              <input type="text" value={configData.nome} onChange={e => { setConfigData(p => ({ ...p, nome: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs font-bold text-slate-800 mb-1">Nome do Orçamento</label>
+              <input type="text" value={configData.nome} 
+                onFocus={e => e.target.select()}
+                onChange={e => { setConfigData(p => ({ ...p, nome: e.target.value })); setHasUnsavedChanges(true); }}
+                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Nome do Projeto (Obra)</label>
-              <input type="text" value={configData.projeto} onChange={e => { setConfigData(p => ({ ...p, projeto: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs font-bold text-slate-800 mb-1">Nome do Projeto (Obra)</label>
+              <input type="text" value={configData.projeto} 
+                onFocus={e => e.target.select()}
+                onChange={e => { setConfigData(p => ({ ...p, projeto: e.target.value })); setHasUnsavedChanges(true); }}
+                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Cliente</label>
-              <input type="text" value={configData.cliente} onChange={e => { setConfigData(p => ({ ...p, cliente: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs font-bold text-slate-800 mb-1">Cliente</label>
+              <input type="text" value={configData.cliente} 
+                onFocus={e => e.target.select()}
+                onChange={e => { setConfigData(p => ({ ...p, cliente: e.target.value })); setHasUnsavedChanges(true); }}
+                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Gestor do Cliente</label>
-              <input type="text" value={configData.gestor_cliente} onChange={e => { setConfigData(p => ({ ...p, gestor_cliente: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500" />
+              <label className="block text-xs font-bold text-slate-800 mb-1">Gestor do Cliente</label>
+              <input type="text" value={configData.gestor_cliente} 
+                onFocus={e => e.target.select()}
+                onChange={e => { setConfigData(p => ({ ...p, gestor_cliente: e.target.value })); setHasUnsavedChanges(true); }}
+                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
             </div>
           </div>
 
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <h4 className="font-bold text-slate-700 text-xs uppercase tracking-wider mb-3">Composição do BDI (%)</h4>
+            <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider mb-3">Composição do BDI (%)</h4>
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-4">
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Adm. Central (AC)</label>
-                <input type="number" step="0.0001" value={configData.bdi_ac} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_ac: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Adm. Central (AC)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_ac === 0 ? '' : configData.bdi_ac} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_ac: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Seguro (S)</label>
-                <input type="number" step="0.0001" value={configData.bdi_s} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_s: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Seguro (S)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_s === 0 ? '' : configData.bdi_s} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_s: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Garantia (G)</label>
-                <input type="number" step="0.0001" value={configData.bdi_g} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_g: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Garantia (G)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_g === 0 ? '' : configData.bdi_g} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_g: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Risco (R)</label>
-                <input type="number" step="0.0001" value={configData.bdi_r} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_r: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Risco (R)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_r === 0 ? '' : configData.bdi_r} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_r: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Desp. Finan. (DF)</label>
-                <input type="number" step="0.0001" value={configData.bdi_df} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_df: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Desp. Finan. (DF)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_df === 0 ? '' : configData.bdi_df} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_df: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Lucro (L)</label>
-                <input type="number" step="0.0001" value={configData.bdi_l} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_l: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Lucro (L)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_l === 0 ? '' : configData.bdi_l} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_l: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
-                <label className="block text-[10px] font-bold text-slate-500 mb-1">Impostos (I)</label>
-                <input type="number" step="0.0001" value={configData.bdi_i} 
-                  onChange={e => { setConfigData(p => ({ ...p, bdi_i: parseFloat(e.target.value) || 0 })); setHasUnsavedChanges(true); }}
-                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-medium outline-none focus:ring-2 focus:ring-blue-500" />
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">Impostos (I)</label>
+                <input type="number" step="0.0001" 
+                  value={configData.bdi_i === 0 ? '' : configData.bdi_i} 
+                  placeholder="0"
+                  onFocus={e => e.target.select()}
+                  onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_i: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
+                  className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
             </div>
             
@@ -3351,12 +3871,12 @@ export default function OrcamentoBuilder() {
         </div>
       )}
 
-      {/* ── Sub-Abas do Orçamento (Planilha Orçamentária vs Memória de Cálculo) ── */}
-      <div className="flex items-center space-x-2 border-b border-slate-200 pb-2">
+      {/* ── Sub-Abas do Orçamento (Planilha Orçamentária vs Memória de Cálculo vs Distribuição de Equipe) ── */}
+      <div className="flex items-center space-x-2 border-b border-slate-200 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveSubTab('planilha')}
           className={clsx(
-            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer",
+            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0",
             activeSubTab === 'planilha'
               ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
               : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
@@ -3369,7 +3889,7 @@ export default function OrcamentoBuilder() {
         <button
           onClick={() => setActiveSubTab('memoria_calculo')}
           className={clsx(
-            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative",
+            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
             activeSubTab === 'memoria_calculo'
               ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
               : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
@@ -3386,52 +3906,366 @@ export default function OrcamentoBuilder() {
             </span>
           )}
         </button>
+
+        <button
+          onClick={() => setActiveSubTab('distribuicao_equipe')}
+          className={clsx(
+            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+            activeSubTab === 'distribuicao_equipe'
+              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+          )}
+        >
+          <Users className="w-4 h-4" />
+          Distribuição de Equipe
+        </button>
       </div>
 
       {activeSubTab === 'memoria_calculo' ? (
-        <CalculosHub
-          orcamentoId={id!}
-          calculos={calculos}
-          itensEap={computedItens.map(i => ({
-            id: i.id,
-            item_eap: i.item_eap,
-            descricao: i.descricao,
-            unidade: i.unidade,
-            quantidade: i.quantidade
-          }))}
-          onSaveCalculo={handleSaveCalculo}
-          onDeleteCalculo={handleDeleteCalculo}
+        <DocumentoMemorialOficial
+          header={{
+            codigoOrcamento: orcamento?.codigo || `ORC-${id}`,
+            nomeProjeto: orcamento?.projeto || orcamento?.nome || '',
+            obra: orcamento?.nome || '',
+            cliente: orcamento?.cliente || '',
+            gestorCliente: orcamento?.gestor_cliente || '',
+            responsavel: orcamento?.responsavel || '',
+            cidade: orcamento?.cidade || '',
+            estado: orcamento?.estado || 'GO',
+            objeto: '',
+            local: '',
+            trecho: '',
+            dadosComplementares: orcamento?.dadosComplementares || (orcamento as any)?.dados_complementares || []
+          }}
+          onChangeHeader={(newHeader) => {
+            if (orcamento) {
+              const updatedDC = newHeader.dadosComplementares || [];
+              if (id) {
+                localStorage.setItem(`orcamento_dados_comp_${id}`, JSON.stringify(updatedDC));
+              }
+              setOrcamento({
+                ...orcamento,
+                projeto: newHeader.nomeProjeto || orcamento.projeto,
+                nome: newHeader.nomeProjeto || orcamento.nome,
+                cliente: newHeader.cliente,
+                gestor_cliente: newHeader.gestorCliente,
+                responsavel: newHeader.responsavel,
+                cidade: newHeader.cidade,
+                estado: newHeader.estado,
+                dadosComplementares: updatedDC
+              });
+              setHasUnsavedChanges(true);
+            }
+          }}
+          itens={computedItens.map((i: any) => {
+            const eapClean = (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+            const eapParts = eapClean.split('.').filter(Boolean);
+
+            const isExplicitChildInsumoOrSubComp = Boolean(
+              i.composicao_id ||
+              i.parentCompositionId ||
+              i.isChildInsumoOfComposition
+            );
+
+            let isSecao = false;
+            if (isExplicitChildInsumoOrSubComp) {
+              isSecao = false;
+            } else if (i.descricao && (i.descricao.toUpperCase().trim() === 'SAPATAS' || i.descricao.toUpperCase().trim() === 'ESTACAS')) {
+              isSecao = true;
+            } else if (i.isSecao === false || i.is_secao === false) {
+              isSecao = false;
+            } else if (i.isSecao === true || i.is_secao === true || Boolean((i as any).isTextLine)) {
+              isSecao = true;
+            } else if (!i.codigo && !i.banco_fonte && (eapParts.length <= 1 || eapClean.endsWith('.0'))) {
+              isSecao = true;
+            } else {
+              isSecao = false;
+            }
+
+            const level = i.level !== undefined ? i.level : (isSecao ? 0 : Math.max(1, eapParts.length - 1));
+            const isCollapsed = i.collapsed !== undefined ? i.collapsed : (collapsedEaps ? collapsedEaps.has(eapClean) : false);
+
+            return {
+              id: i.id,
+              item_eap: i.item_eap,
+              descricao: i.descricao,
+              unidade: isSecao ? '' : (i.unidade || 'UN'),
+              quantidade: i.quantidade || 0,
+              isSecao: isSecao,
+              level: level,
+              collapsed: isCollapsed,
+              codigo: i.codigo || '',
+              banco_fonte: i.banco_fonte || '',
+              composicao_id: i.composicao_id || '',
+              isChildInsumoOfComposition: Boolean(i.isChildInsumoOfComposition),
+              parentCompositionId: i.parentCompositionId || '',
+              parametrosLocais: i.parametrosLocais || i.parametros_locais || [],
+              formulasLista: i.formulasLista || i.formulas_lista || [],
+              equacaoLiteral: i.equacaoLiteral || i.equacao_literal || '',
+              substituicaoNumerica: i.substituicaoNumerica || i.substituicao_numerica || '',
+              observacaoMemoria: i.observacaoMemoria || i.observacao_memoria || ''
+            };
+          })}
+          onChangeItens={(newMemItens) => {
+            const nextCollapsed = new Set<string>();
+            newMemItens.forEach(mi => {
+              const eapClean = (mi.item_eap || '').trim();
+              if (mi.collapsed && eapClean) {
+                nextCollapsed.add(eapClean);
+              }
+            });
+            setCollapsedEaps(nextCollapsed);
+            if (id) {
+              try {
+                localStorage.setItem(`orcamento_collapsed_${id}`, JSON.stringify(Array.from(nextCollapsed)));
+              } catch (e) {
+                console.error(e);
+              }
+            }
+
+            setItens(prev => {
+              const prevMap = new Map(prev.map(item => [item.id, item]));
+              return newMemItens.map(mi => {
+                const existing = prevMap.get(mi.id);
+                if (existing) {
+                  return {
+                    ...existing,
+                    item_eap: mi.item_eap,
+                    descricao: mi.descricao,
+                    unidade: mi.unidade,
+                    quantidade: mi.quantidade,
+                    isSecao: mi.isSecao,
+                    is_secao: mi.isSecao,
+                    level: mi.level,
+                    collapsed: Boolean(mi.collapsed),
+                    parametrosLocais: mi.parametrosLocais || [],
+                    parametros_locais: mi.parametrosLocais || [],
+                    formulasLista: mi.formulasLista || [],
+                    formulas_lista: mi.formulasLista || [],
+                    equacao_literal: mi.equacaoLiteral || '',
+                    substituicao_numerica: mi.substituicaoNumerica || '',
+                    observacao_memoria: mi.observacaoMemoria || ''
+                  };
+                }
+                const novoItem: any = {
+                  id: mi.id,
+                  orcamento_id: id || '',
+                  item_eap: mi.item_eap,
+                  descricao: mi.descricao,
+                  unidade: mi.unidade,
+                  quantidade: mi.quantidade,
+                  isSecao: mi.isSecao,
+                  is_secao: mi.isSecao,
+                  level: mi.level,
+                  codigo: (mi as any).codigo || '',
+                  banco_fonte: (mi as any).banco_fonte || '',
+                  composicao_id: (mi as any).composicao_id || '',
+                  isChildInsumoOfComposition: Boolean((mi as any).isChildInsumoOfComposition),
+                  parentCompositionId: (mi as any).parentCompositionId || '',
+                  collapsed: Boolean(mi.collapsed),
+                  valor_unitario_mat: 0,
+                  valor_unitario_mo: 0,
+                  valor_unitario: 0,
+                  valor_unitario_com_bdi: 0,
+                  total_mat: 0,
+                  total_mo: 0,
+                  total: 0,
+                  parametrosLocais: mi.parametrosLocais || [],
+                  parametros_locais: mi.parametrosLocais || [],
+                  formulasLista: mi.formulasLista || [],
+                  formulas_lista: mi.formulasLista || [],
+                  equacao_literal: mi.equacaoLiteral || '',
+                  substituicao_numerica: mi.substituicaoNumerica || '',
+                  observacao_memoria: mi.observacaoMemoria || ''
+                };
+                return novoItem;
+              });
+            });
+            setHasUnsavedChanges(true);
+          }}
+        />
+      ) : activeSubTab === 'distribuicao_equipe' ? (
+        <DistribuiçãoEquipeTab 
+          orcamentoId={id} 
+          itens={computedItens} 
+          duracoesMap={equipeDuracoesMap} 
+          jornadasMap={equipeJornadasMap}
+          onChangeEquipeConfig={(dur, jor) => {
+            setEquipeDuracoesMap(dur);
+            setEquipeJornadasMap(jor);
+            setHasUnsavedChanges(true);
+          }}
         />
       ) : (
       /* ── Tabela Orçamentária ────────────────────────────────────────── */
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
         <div className="overflow-x-auto">
-          <table className="w-full border-collapse">
+          <table className="w-max min-w-full border-collapse">
             <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">
-                <th className="border border-slate-200/80 px-4 py-2 w-24">Item</th>
+              <tr className="bg-slate-50 border-b border-slate-200 text-center text-xs font-bold text-slate-500 uppercase tracking-wider select-none">
+                {/* Item */}
                 <th 
-                  className="border border-slate-200/80 px-6 py-2 relative select-none"
-                  style={{ width: `${descColWidth}px`, minWidth: `${descColWidth}px`, maxWidth: `${descColWidth}px` }}
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.item}px`, minWidth: `${colWidths.item}px`, maxWidth: `${colWidths.item}px` }}
                 >
-                  <div className="flex items-center justify-between">
-                    <span>Descrição</span>
+                  <div className="flex items-center justify-center">
+                    <span className="truncate w-full text-center">ITEM</span>
                     <div
-                      onMouseDown={handleResizeMouseDown}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200 hover:bg-blue-500 transition-colors z-30"
-                      title="Arraste para ajustar o tamanho da coluna"
+                      onMouseDown={(e) => startColumnResize('item', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura da coluna Item"
                     />
                   </div>
                 </th>
-                <th className="border border-slate-200/80 px-4 py-2 w-20 text-center">Und.</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-24 text-right">Qtde.</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-32 text-right">Mat. Unit (R$)</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-32 text-right">M.O. Unit (R$)</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-32 text-right">Unit (R$)</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-36 text-right">Mat. Total (R$)</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-36 text-right">M.O. Total (R$)</th>
-                <th className="border border-slate-200/80 px-4 py-2 w-36 text-right">Total (R$)</th>
-                <th className="border border-slate-200/80 px-2 py-2 w-12 text-center"></th>
+
+                {/* Descrição */}
+                <th 
+                  className="border border-slate-200/80 px-4 py-2 text-center relative"
+                  style={{ width: `${colWidths.descricao}px`, minWidth: `${colWidths.descricao}px`, maxWidth: `${colWidths.descricao}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="truncate w-full text-center">DESCRIÇÃO</span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('descricao', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura da coluna Descrição"
+                    />
+                  </div>
+                </th>
+
+                {/* Unidade */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.unidade}px`, minWidth: `${colWidths.unidade}px`, maxWidth: `${colWidths.unidade}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="truncate w-full text-center">UND.</span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('unidade', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura da coluna Unidade"
+                    />
+                  </div>
+                </th>
+
+                {/* Quantidade */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.quantidade}px`, minWidth: `${colWidths.quantidade}px`, maxWidth: `${colWidths.quantidade}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="truncate w-full text-center">QTDE.</span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('quantidade', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura da coluna Quantidade"
+                    />
+                  </div>
+                </th>
+
+                {/* Mat Unit */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.matUnit}px`, minWidth: `${colWidths.matUnit}px`, maxWidth: `${colWidths.matUnit}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
+                      MAT. UNIT<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    </span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('matUnit', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura"
+                    />
+                  </div>
+                </th>
+
+                {/* M.O Unit */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.moUnit}px`, minWidth: `${colWidths.moUnit}px`, maxWidth: `${colWidths.moUnit}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
+                      M.O. UNIT<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    </span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('moUnit', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura"
+                    />
+                  </div>
+                </th>
+
+                {/* Unit */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.unit}px`, minWidth: `${colWidths.unit}px`, maxWidth: `${colWidths.unit}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
+                      UNIT<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    </span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('unit', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura"
+                    />
+                  </div>
+                </th>
+
+                {/* Mat Total */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.matTotal}px`, minWidth: `${colWidths.matTotal}px`, maxWidth: `${colWidths.matTotal}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
+                      MAT. TOTAL<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    </span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('matTotal', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura"
+                    />
+                  </div>
+                </th>
+
+                {/* M.O Total */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.moTotal}px`, minWidth: `${colWidths.moTotal}px`, maxWidth: `${colWidths.moTotal}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
+                      M.O. TOTAL<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    </span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('moTotal', e)}
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      title="Arraste para ajustar a largura"
+                    />
+                  </div>
+                </th>
+
+                {/* Total */}
+                <th 
+                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px`, maxWidth: `${colWidths.total}px` }}
+                >
+                  <div className="flex items-center justify-center">
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-extrabold text-blue-900">
+                      TOTAL<br/><span className="text-[10px] text-blue-600 font-normal">(R$)</span>
+                    </span>
+                  </div>
+                </th>
+
+                {/* Ações */}
+                <th 
+                  className="border border-slate-200/80 px-1 py-2 text-center relative w-12 min-w-[48px] max-w-[48px]"
+                >
+                  <span className="truncate w-full text-center text-[10px] font-bold text-slate-400">AÇÕES</span>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -3449,20 +4283,22 @@ export default function OrcamentoBuilder() {
                   const level = getEapLevel(item.item_eap);
                   const factor = exibirBdi ? bdiFactor : 1;
 
-                  // Valores calculados multiplicados pelo fator BDI
-                  const valMat = item.valor_unitario_mat * factor;
-                  const valMo = item.valor_unitario_mo * factor;
-                  const valUnit = item.valor_unitario * factor;
+                  // Valores calculados multiplicados pelo fator BDI (arredondados para 2 casas decimais)
+                  const valMat = Math.round(item.valor_unitario_mat * factor * 100) / 100;
+                  const valMo = Math.round(item.valor_unitario_mo * factor * 100) / 100;
+                  const valUnit = Math.round(item.valor_unitario * factor * 100) / 100;
                   const styles = getRowStyles(item, index);
-                  const totMat = item.total_mat * factor;
-                  const totMo = item.total_mo * factor;
-                  const totGrand = item.total * factor;
+                  const totMat = Math.round(item.total_mat * factor * 100) / 100;
+                  const totMo = Math.round(item.total_mo * factor * 100) / 100;
+                  const totGrand = Math.round(item.total * factor * 100) / 100;
                   const hasValues = (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '';
 
                   const isCompActive = item.codigo && item.hasChildren && selectedRowIndex !== null && (
                     selectedRowIndex === index || 
                     (itens[selectedRowIndex]?.item_eap || '').startsWith(item.item_eap + '.')
                   );
+
+                  const isSectionRow = Boolean((item as any).isTextLine || (item as any).isSecao || (!item.codigo && !item.composicao_id));
 
                   return (
                     <tr 
@@ -3477,7 +4313,6 @@ export default function OrcamentoBuilder() {
                       className={clsx(
                         "transition-all group select-none border-l-4",
                         styles.rowBgClass,
-                        // Linha selecionada sobrepõe
                         selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
                       )}
                     >
@@ -3494,12 +4329,13 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(true);
                           }
                         }}
+                        style={{ width: `${colWidths.item}px`, minWidth: `${colWidths.item}px`, maxWidth: `${colWidths.item}px` }}
                         className={clsx(
                           "border border-slate-200/60 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 0 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                       >
-                        <div className="flex items-center gap-1 px-1.5 w-full h-full bg-transparent">
+                        <div className="flex items-center gap-0.5 px-1 w-full h-full bg-transparent overflow-hidden">
                           {hasValues ? (
                             <GripVertical className="w-3.5 h-3.5 text-slate-300 cursor-grab active:cursor-grabbing hover:text-slate-500 transition-colors shrink-0" />
                           ) : (
@@ -3513,7 +4349,7 @@ export default function OrcamentoBuilder() {
                             onKeyDown={(e) => handleInputKeyDownInCell(e, index, 0)}
                             onChange={(e) => handleCellChange(index, 'item_eap', e.target.value)}
                             className={clsx(
-                              "w-full h-full bg-transparent py-2 outline-none border border-transparent focus:border-blue-500 focus:bg-white font-mono transition-all",
+                              "w-full h-full bg-transparent py-2 outline-none border border-transparent focus:border-blue-500 focus:bg-white font-mono text-xs transition-all min-w-0 pr-1",
                               styles.textClass,
                               (item.isSummary || item.hasChildren) && hasValues ? "cursor-pointer" : ""
                             )}
@@ -3538,7 +4374,7 @@ export default function OrcamentoBuilder() {
                           "border border-slate-200/60 p-0 relative align-middle outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 1 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
-                        style={{ width: `${descColWidth}px`, minWidth: `${descColWidth}px`, maxWidth: `${descColWidth}px` }}
+                        style={{ width: `${colWidths.descricao}px`, minWidth: `${colWidths.descricao}px`, maxWidth: `${colWidths.descricao}px` }}
                       >
                         <div className="flex items-center w-full h-full relative">
                           <div style={{ width: `${level * 16}px` }} className="shrink-0" />
@@ -3548,7 +4384,7 @@ export default function OrcamentoBuilder() {
                               onClick={() => toggleCollapse(item.item_eap)}
                               className="p-1 hover:bg-slate-150 hover:text-slate-700 rounded text-slate-500 mr-1 shrink-0 cursor-pointer"
                             >
-                              {collapsedEaps.has(item.item_eap) ? (
+                              {collapsedEaps.has(item.item_eap) || (item.item_eap && collapsedEaps.has(`${item.item_eap}.0`)) ? (
                                 <ChevronRight className="w-3.5 h-3.5 text-slate-600 font-bold" />
                               ) : (
                                 <ChevronDown className="w-3.5 h-3.5 text-slate-600 font-bold" />
@@ -3561,14 +4397,12 @@ export default function OrcamentoBuilder() {
                           {item.codigo ? (
                             <div
                               id={`cell-input-${index}-1`}
-                              onClick={() => (item.isSummary || item.hasChildren) && hasValues ? toggleCollapse(item.item_eap) : undefined}
                               onFocus={() => handleInputFocus(index)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                               tabIndex={0}
                               className={clsx(
                                 "w-full bg-transparent pr-10 pl-1 py-2 outline-none break-words whitespace-normal leading-normal select-text",
-                                styles.textClass,
-                                (item.isSummary || item.hasChildren) && hasValues ? "cursor-pointer" : ""
+                                styles.textClass
                               )}
                               title={item.descricao}
                             >
@@ -3582,12 +4416,10 @@ export default function OrcamentoBuilder() {
                               onFocus={() => handleInputFocus(index)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                               onKeyDown={(e) => handleInputKeyDownInCell(e, index, 1)}
-                              onClick={() => (item.isSummary || item.hasChildren) && hasValues ? toggleCollapse(item.item_eap) : undefined}
                               onChange={(e) => handleCellChange(index, 'descricao', e.target.value)}
                               className={clsx(
                                 "w-full h-full bg-transparent pr-10 py-2 outline-none border border-transparent focus:border-blue-500 focus:bg-white transition-all",
-                                styles.textClass,
-                                (item.isSummary || item.hasChildren) && hasValues ? "cursor-pointer" : ""
+                                styles.textClass
                               )}
                             />
                           )}
@@ -3634,6 +4466,7 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(true);
                           }
                         }}
+                        style={{ width: `${colWidths.unidade}px`, minWidth: `${colWidths.unidade}px`, maxWidth: `${colWidths.unidade}px` }}
                         className={clsx(
                           "border border-slate-200/60 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 2 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
@@ -3642,9 +4475,9 @@ export default function OrcamentoBuilder() {
                         <input
                           type="text"
                           id={`cell-input-${index}-2`}
-                          disabled={item.isSummary}
+                          disabled={isSectionRow || item.isSummary}
                           readOnly={!!item.codigo}
-                          value={item.isSummary ? '' : item.unidade}
+                          value={isSectionRow || item.isSummary ? '' : item.unidade}
                           onFocus={() => handleInputFocus(index)}
                           onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                           onKeyDown={(e) => handleInputKeyDownInCell(e, index, 2)}
@@ -3652,7 +4485,7 @@ export default function OrcamentoBuilder() {
                           className={clsx(
                             "w-full h-full bg-transparent text-center px-2 py-2 outline-none border border-transparent transition-all",
                             styles.textClass,
-                            item.isSummary ? "cursor-not-allowed bg-slate-50/50 text-slate-400" : "focus:border-blue-500 focus:bg-white",
+                            (isSectionRow || item.isSummary) ? "cursor-not-allowed bg-slate-50/50 text-slate-400" : "focus:border-blue-500 focus:bg-white",
                             item.codigo && !item.isSummary ? "cursor-not-allowed text-slate-500/80" : ""
                           )}
                         />
@@ -3671,14 +4504,15 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(true);
                           }
                         }}
+                        style={{ width: `${colWidths.quantidade}px`, minWidth: `${colWidths.quantidade}px`, maxWidth: `${colWidths.quantidade}px` }}
                         className={clsx(
                           "border border-slate-200/60 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 3 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
-                          hasValues && !item.isSummary && item.quantidade === 0 ? "bg-rose-50/60 ring-1 ring-rose-400" : ""
+                          hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 ? "bg-rose-50/60 ring-1 ring-rose-400" : ""
                         )}
                       >
                         {/* Balão de alerta flutuante quando a quantidade está vazia/zerada */}
-                        {hasValues && !item.isSummary && item.quantidade === 0 && (
+                        {hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 && (
                           <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-md shadow-xl flex items-center gap-1.5 z-40 whitespace-nowrap pointer-events-none animate-pulse">
                             <div className="absolute -top-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-b-rose-600 w-0 h-0" />
                             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -3688,14 +4522,13 @@ export default function OrcamentoBuilder() {
 
                         {(() => {
                           const isChildOfComp = item.effectiveMultiplier > 1;
-                          const displayQtd = isChildOfComp
-                            ? item.baseQuantidade * item.effectiveMultiplier
-                            : item.quantidade;
-                          if (item.isSummary) {
+                          const displayQtd = (item as any).displayQuantidade !== undefined
+                            ? (item as any).displayQuantidade
+                            : (isChildOfComp ? item.baseQuantidade * item.effectiveMultiplier : item.quantidade);
+                          if (isSectionRow || item.isSummary) {
                             return <div className="w-full h-full bg-slate-50/50 cursor-not-allowed" />;
                           }
                           
-                          // Se estiver editando de fato a célula de quantidade
                           if (activeCell?.rowIndex === index && activeCell?.colIndex === 3 && isEditingCell) {
                             return (
                               <input
@@ -3729,15 +4562,78 @@ export default function OrcamentoBuilder() {
                               </div>
                             );
                           }
+                          // Encontra os parâmetros da seção pai no Memorial salvos
+                          const itemEap = (item.item_eap || '').trim();
+                          const parentEap = itemEap.includes('.') ? itemEap.split('.').slice(0, -1).join('.') : itemEap;
+                          const sectionMemoriaItem = memorialParamItens.find((m: any) => (m.item_eap || '').trim() === parentEap || (m.item_eap || '').trim() === itemEap);
+                          const availableParams = sectionMemoriaItem?.parametrosLocais || [];
+
                           return (
-                            <div
-                              className={clsx(
-                                "w-full h-full text-right px-3 py-2 select-none cursor-pointer",
-                                styles.textClass,
-                                item.quantidade === 0 ? "text-rose-600 font-semibold" : ""
+                            <div className="relative w-full h-full flex items-center justify-between group">
+                              {(availableParams.length > 0 || (sectionMemoriaItem && sectionMemoriaItem.quantidade > 0)) && (
+                                <div className="relative">
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setActiveParamBindingIndex(activeParamBindingIndex === index ? null : index);
+                                    }}
+                                    className="p-1 hover:bg-blue-100 text-blue-600 rounded transition-colors ml-1 cursor-pointer shrink-0"
+                                    title="Vincular a um parâmetro ou quantidade pré-calculada do Memorial de Cálculo"
+                                  >
+                                    <Calculator className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  {activeParamBindingIndex === index && (
+                                    <div className="absolute top-full left-0 mt-1 w-64 bg-white border border-slate-200 rounded-xl shadow-xl p-2 z-50 animate-in fade-in duration-150">
+                                      <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wide block mb-1.5 px-1">
+                                        Parâmetros do Memorial (Seção {parentEap}):
+                                      </span>
+                                      <div className="space-y-1 max-h-40 overflow-y-auto">
+                                        {sectionMemoriaItem && sectionMemoriaItem.quantidade > 0 && (
+                                          <button
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleCellChange(index, 'quantidade', String(sectionMemoriaItem.quantidade));
+                                              setActiveParamBindingIndex(null);
+                                            }}
+                                            className="w-full text-left px-2 py-1.5 hover:bg-blue-50 rounded-lg flex items-center justify-between text-xs cursor-pointer border border-transparent hover:border-blue-200"
+                                          >
+                                            <span className="font-semibold text-slate-800">Qtd. Total do Memorial</span>
+                                            <span className="font-mono font-bold text-blue-700">{sectionMemoriaItem.quantidade} {sectionMemoriaItem.unidade}</span>
+                                          </button>
+                                        )}
+                                        {availableParams.map((p: any) => (
+                                          <button
+                                            key={p.id}
+                                            type="button"
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              handleCellChange(index, 'quantidade', String(p.valor));
+                                              setActiveParamBindingIndex(null);
+                                            }}
+                                            className="w-full text-left px-2 py-1.5 hover:bg-blue-50 rounded-lg flex items-center justify-between text-xs cursor-pointer border border-transparent hover:border-blue-200"
+                                          >
+                                            <span className="font-semibold text-slate-800">{p.label}</span>
+                                            <span className="font-mono font-bold text-blue-700">{p.valor} {p.unidade}</span>
+                                          </button>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+                                </div>
                               )}
-                            >
-                              {hasValues && item.quantidade !== 0 ? item.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 6 }) : ''}
+
+                              <div
+                                className={clsx(
+                                  "w-full h-full text-right px-3 py-2 select-none cursor-pointer",
+                                  styles.textClass,
+                                  item.quantidade === 0 ? "text-rose-600 font-semibold" : ""
+                                )}
+                              >
+                                {hasValues && item.quantidade !== 0 ? item.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 6 }) : ''}
+                              </div>
                             </div>
                           );
                         })()}
@@ -3756,6 +4652,7 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(true);
                           }
                         }}
+                        style={{ width: `${colWidths.matUnit}px`, minWidth: `${colWidths.matUnit}px`, maxWidth: `${colWidths.matUnit}px` }}
                         className={clsx(
                           "border border-slate-200/60 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 4 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
@@ -3765,8 +4662,8 @@ export default function OrcamentoBuilder() {
                           type="number"
                           step="0.01"
                           id={`cell-input-${index}-4`}
-                          disabled={exibirBdi || item.isSummary}
-                          value={item.isSummary ? '' : (!hasValues ? '' : valMat)}
+                          disabled={isSectionRow || exibirBdi || item.isSummary}
+                          value={isSectionRow || item.isSummary ? '' : (!hasValues ? '' : valMat)}
                           onFocus={() => handleInputFocus(index)}
                           onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                           onKeyDown={(e) => handleInputKeyDownInCell(e, index, 4)}
@@ -3774,7 +4671,7 @@ export default function OrcamentoBuilder() {
                           className={clsx(
                             "w-full h-full bg-transparent text-right px-3 py-2 outline-none border border-transparent transition-all",
                             styles.textClass,
-                            (exibirBdi || item.isSummary) ? "cursor-not-allowed bg-slate-50/30 text-slate-400" : "focus:border-blue-500 focus:bg-white"
+                            (isSectionRow || exibirBdi || item.isSummary) ? "cursor-not-allowed bg-slate-50/30 text-slate-400" : "focus:border-blue-500 focus:bg-white"
                           )}
                         />
                       </td>
@@ -3792,6 +4689,7 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(true);
                           }
                         }}
+                        style={{ width: `${colWidths.moUnit}px`, minWidth: `${colWidths.moUnit}px`, maxWidth: `${colWidths.moUnit}px` }}
                         className={clsx(
                           "border border-slate-200/60 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 5 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
@@ -3801,8 +4699,8 @@ export default function OrcamentoBuilder() {
                           type="number"
                           step="0.01"
                           id={`cell-input-${index}-5`}
-                          disabled={exibirBdi || item.isSummary}
-                          value={item.isSummary ? '' : (!hasValues ? '' : valMo)}
+                          disabled={isSectionRow || exibirBdi || item.isSummary}
+                          value={isSectionRow || item.isSummary ? '' : (!hasValues ? '' : valMo)}
                           onFocus={() => handleInputFocus(index)}
                           onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                           onKeyDown={(e) => handleInputKeyDownInCell(e, index, 5)}
@@ -3810,7 +4708,7 @@ export default function OrcamentoBuilder() {
                           className={clsx(
                             "w-full h-full bg-transparent text-right px-3 py-2 outline-none border border-transparent transition-all",
                             styles.textClass,
-                            (exibirBdi || item.isSummary) ? "cursor-not-allowed bg-slate-50/30 text-slate-400" : "focus:border-blue-500 focus:bg-white"
+                            (isSectionRow || exibirBdi || item.isSummary) ? "cursor-not-allowed bg-slate-50/30 text-slate-400" : "focus:border-blue-500 focus:bg-white"
                           )}
                         />
                       </td>
@@ -3826,13 +4724,14 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(false);
                           }
                         }}
+                        style={{ width: `${colWidths.unit}px`, minWidth: `${colWidths.unit}px`, maxWidth: `${colWidths.unit}px` }}
                         className={clsx(
                           "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none",
                           styles.textClass,
                           activeCell?.rowIndex === index && activeCell?.colIndex === 6 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                       >
-                        {hasValues && !item.isSummary && valUnit > 0 ? valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : hasValues && item.isSummary ? '' : hasValues ? valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
+                        {isSectionRow ? '' : (hasValues && !item.isSummary && valUnit > 0 ? valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : hasValues && item.isSummary ? '' : hasValues ? valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '')}
                       </td>
 
                       {/* Material Total */}
@@ -3846,11 +4745,12 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(false);
                           }
                         }}
+                        style={{ width: `${colWidths.matTotal}px`, minWidth: `${colWidths.matTotal}px`, maxWidth: `${colWidths.matTotal}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none",
-                          item.isSummary && hasValues ? "font-bold text-slate-700" :
+                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden truncate",
+                          (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-800" :
                           isCompActive ? "font-bold text-slate-800" :
-                          item.hasChildren && hasValues ? "font-semibold text-slate-650" :
+                          item.hasChildren && hasValues ? "font-semibold text-slate-800" :
                           styles.textClass,
                           activeCell?.rowIndex === index && activeCell?.colIndex === 7 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
@@ -3869,11 +4769,12 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(false);
                           }
                         }}
+                        style={{ width: `${colWidths.moTotal}px`, minWidth: `${colWidths.moTotal}px`, maxWidth: `${colWidths.moTotal}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none",
-                          item.isSummary && hasValues ? "font-bold text-slate-700" :
+                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden truncate",
+                          (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-800" :
                           isCompActive ? "font-bold text-slate-800" :
-                          item.hasChildren && hasValues ? "font-semibold text-slate-650" :
+                          item.hasChildren && hasValues ? "font-semibold text-slate-800" :
                           styles.textClass,
                           activeCell?.rowIndex === index && activeCell?.colIndex === 8 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
@@ -3892,9 +4793,10 @@ export default function OrcamentoBuilder() {
                             setIsEditingCell(false);
                           }
                         }}
+                        style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px`, maxWidth: `${colWidths.total}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none",
-                          item.isSummary && hasValues ? "font-extrabold text-slate-800 text-sm" :
+                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden truncate",
+                          (isSectionRow || item.isSummary) && hasValues ? "font-extrabold text-slate-800 text-sm" :
                           isCompActive ? "font-bold text-blue-700" :
                           item.hasChildren && item.codigo && hasValues ? "font-semibold text-blue-600" :
                           styles.textClass,
@@ -4303,6 +5205,147 @@ export default function OrcamentoBuilder() {
             await handleUpdateStatus('Enviada', selectedStatusEnvio);
           }}
         />
+      )}
+
+      {/* MODAL ELEGANTE DE EXPORTAÇÃO DO ORÇAMENTO (XLSX / PDF) */}
+      {showExportModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl max-w-md w-full border border-slate-200 shadow-2xl overflow-hidden font-sans">
+            {/* Header Modal */}
+            <div className="p-4 bg-slate-900 text-white flex items-center justify-between">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-600/30 text-blue-400 rounded-xl border border-blue-500/30">
+                  <Download className="w-5 h-5 text-blue-400" />
+                </div>
+                <div>
+                  <h3 className="font-bold text-sm text-white">Exportar Orçamento</h3>
+                  <p className="text-[11px] text-slate-400">Escolha o escopo e o formato para download</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="p-1 hover:bg-slate-800 rounded-lg text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Body Modal */}
+            <div className="p-5 space-y-5">
+              {/* 1. Escolha do Escopo */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2">
+                  1. Escopo da Exportação:
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setExportScope('full')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      exportScope === 'full' 
+                        ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 text-blue-950 font-bold' 
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="text-xs font-extrabold">Orçamento Completo</span>
+                      <span className="text-blue-600 font-bold">{exportScope === 'full' && '✓'}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-normal">
+                      Inclui Planilha, Memória de Cálculo e Distribuição de Equipe.
+                    </p>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setExportScope('active')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                      exportScope === 'active' 
+                        ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 text-blue-950 font-bold' 
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between w-full mb-1">
+                      <span className="text-xs font-extrabold">Apenas Aba Atual</span>
+                      <span className="text-blue-600 font-bold">{exportScope === 'active' && '✓'}</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 font-normal">
+                      Exporta somente ({
+                        activeSubTab === 'memoria_calculo' ? 'Memória de Cálculo' :
+                        activeSubTab === 'distribuicao_equipe' ? 'Distribuição de Equipe' : 'Planilha Orçamentária'
+                      }).
+                    </p>
+                  </button>
+                </div>
+              </div>
+
+              {/* 2. Escolha do Formato */}
+              <div>
+                <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2">
+                  2. Formato do Arquivo:
+                </label>
+                <div className="grid grid-cols-2 gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('xlsx')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                      exportFormat === 'xlsx' 
+                        ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-500/20 text-emerald-950 font-bold' 
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                    }`}
+                  >
+                    <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
+                      <FileSpreadsheet className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-extrabold block">Excel (.xlsx)</span>
+                      <span className="text-[10px] text-slate-500 font-normal">Planilha editável</span>
+                    </div>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => setExportFormat('pdf')}
+                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                      exportFormat === 'pdf' 
+                        ? 'border-rose-600 bg-rose-50/50 ring-2 ring-rose-500/20 text-rose-950 font-bold' 
+                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                    }`}
+                  >
+                    <div className="p-2 bg-rose-100 text-rose-700 rounded-lg">
+                      <FileText className="w-5 h-5" />
+                    </div>
+                    <div>
+                      <span className="text-xs font-extrabold block">PDF / Imprimir</span>
+                      <span className="text-[10px] text-slate-500 font-normal">Relatório oficial</span>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Footer Modal */}
+            <div className="p-4 bg-slate-50 border-t border-slate-200 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowExportModal(false)}
+                className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-100 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+
+              <button
+                type="button"
+                onClick={handleConfirmExport}
+                className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-extrabold transition-colors cursor-pointer flex items-center gap-1.5 shadow-md"
+              >
+                <Download className="w-4 h-4" />
+                <span>Baixar Arquivo</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

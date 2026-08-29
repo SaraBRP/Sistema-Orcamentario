@@ -5,6 +5,7 @@ import {
   Ruler, PieChart as PieChartIcon, Building2, Calculator, Layers
 } from 'lucide-react';
 import { supabase } from '../../../lib/supabase';
+import { TabelaVigasBaldrames, type VigaBaldrameItem, type VigasBaldramesHeaderGlobal, calcularVigaBaldrameLinha } from '../TabelaVigasBaldrames';
 
 interface Props {
   parametros: Record<string, any>;
@@ -75,6 +76,37 @@ export const FundacoesForm: React.FC<Props> = ({
   const taxaAcoProfundaKgM = parseFloat(taxaAcoProfundaKgMRaw.replace(',', '.')) || 0;
   const sobreconsumoConcretoPerc = parseFloat(sobreconsumoConcretoPercRaw.replace(',', '.')) || 10;
 
+  // --- VIGAS BALDRAMES (TABELA MULTI-ITEM MODELO BRP INFRAESTRUTURA) ---
+  const headerVigasBaldrames: VigasBaldramesHeaderGlobal = parametros.headerVigasBaldrames || {
+    taxaArmacaoKgM3: 90,
+    empolamentoBotaForaPerc: 30,
+    taxaArmacaoIndicadaPor: 'Engenharia / Projeto Estrutural',
+    folgaValaM: 0.50,
+    lastroEspessuraM: 0.05
+  };
+
+  const vigasBaldramesList: VigaBaldrameItem[] = parametros.vigasBaldramesList || [
+    {
+      id: 'vb-1',
+      nome: 'VB-01',
+      localizacao: 'Eixo Principal',
+      cotaSolo: 0.00,
+      cotaTopo: -0.30,
+      talude: 1,
+      quantidade: 1,
+      largura: 0.20,
+      altura: 0.40,
+      comprimento: 15.00
+    }
+  ];
+
+  const resultadosVigas = vigasBaldramesList.map(v => calcularVigaBaldrameLinha(v, headerVigasBaldrames));
+  const volConcretoVigasM3 = resultadosVigas.reduce((acc, r) => acc + r.concretoM3, 0);
+  const areaFormaVigasM2 = resultadosVigas.reduce((acc, r) => acc + r.formaM2, 0);
+  const volEscavacaoVigasM3 = resultadosVigas.reduce((acc, r) => acc + r.escavacaoM3, 0);
+  const volLastroVigasM3 = resultadosVigas.reduce((acc, r) => acc + r.lastroM3, 0);
+  const pesoAcoVigasKg = resultadosVigas.reduce((acc, r) => acc + r.armacaoKg, 0);
+
   // --------------------------------------------------------------------------
   // CÁLCULOS FÍSICO-GEOMÉTRICOS DA ABA "Sapatas" & "Bloco" (MODELO INFRAESTRUTURA_R0)
   // --------------------------------------------------------------------------
@@ -87,22 +119,32 @@ export const FundacoesForm: React.FC<Props> = ({
   const volPiramideM3 = (alturaPiramideH2 / 3) * (areaBaseSapata + areaTopoPilar + Math.sqrt(areaBaseSapata * areaTopoPilar));
   const volSapataUnitarioM3 = tipoSuperficial === 'sapata_tronco' ? (volBaseRodapeM3 + volPiramideM3) : (areaBaseSapata * alturaTotalSapata);
 
-  const volConcretoSuperficialTotalM3 = Math.round(volSapataUnitarioM3 * qtdSuperficial * 100) / 100;
+  const volConcretoSuperficialTotalM3 = tipoSuperficial === 'viga_baldrame' 
+    ? volConcretoVigasM3 
+    : Math.round(volSapataUnitarioM3 * qtdSuperficial * 100) / 100;
 
   // Fôrmas Laterais das Sapatas/Blocos = 2*(B + L)*h1 * Qtd
   const areaFormaSapataUnitariaM2 = 2 * (larguraSuperficial + comprimentoSuperficial) * alturaRodapeH1;
-  const areaFormaSuperficialTotalM2 = Math.round(areaFormaSapataUnitariaM2 * qtdSuperficial * 100) / 100;
+  const areaFormaSuperficialTotalM2 = tipoSuperficial === 'viga_baldrame'
+    ? areaFormaVigasM2
+    : Math.round(areaFormaSapataUnitariaM2 * qtdSuperficial * 100) / 100;
 
   // Lastro de Brita/Concreto Magro e=5cm: (B+0.10)*(L+0.10)*0.05 * Qtd
   const volLastroSapataUnitarioM3 = (larguraSuperficial + 0.10) * (comprimentoSuperficial + 0.10) * 0.05;
-  const volLastroSuperficialTotalM3 = Math.round(volLastroSapataUnitarioM3 * qtdSuperficial * 100) / 100;
+  const volLastroSuperficialTotalM3 = tipoSuperficial === 'viga_baldrame'
+    ? volLastroVigasM3
+    : Math.round(volLastroSapataUnitarioM3 * qtdSuperficial * 100) / 100;
 
   // Escavação da Cava com Folga de 30cm: (B+0.60)*(L+0.60)*H_cava * Qtd
   const volEscavacaoSapataUnitariaM3 = (larguraSuperficial + 0.60) * (comprimentoSuperficial + 0.60) * profundidadeCava;
-  const volEscavacaoSuperficialTotalM3 = Math.round(volEscavacaoSapataUnitariaM3 * qtdSuperficial * 100) / 100;
+  const volEscavacaoSuperficialTotalM3 = tipoSuperficial === 'viga_baldrame'
+    ? volEscavacaoVigasM3
+    : Math.round(volEscavacaoSapataUnitariaM3 * qtdSuperficial * 100) / 100;
 
   // Aço CA-50 Superficial (kg)
-  const pesoAcoSuperficialTotalKg = Math.round(volConcretoSuperficialTotalM3 * taxaAcoSuperficial * 100) / 100;
+  const pesoAcoSuperficialTotalKg = tipoSuperficial === 'viga_baldrame'
+    ? pesoAcoVigasKg
+    : Math.round(volConcretoSuperficialTotalM3 * taxaAcoSuperficial * 100) / 100;
 
   // --------------------------------------------------------------------------
   // CÁLCULOS FÍSICO-GEOMÉTRICOS DAS ESTACAS (HELISE / ESCAVADA)
@@ -558,133 +600,142 @@ export const FundacoesForm: React.FC<Props> = ({
               </h3>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Geometria da Fundação</label>
-                <select
-                  value={tipoSuperficial}
-                  onChange={(e) => updateParam('tipoSuperficial', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-slate-800 outline-none focus:border-slate-700 shadow-2xs cursor-pointer"
-                >
-                  <option value="sapata_tronco">Sapata Tronco-Piramidal (B×L×h1+h2)</option>
-                  <option value="sapata_reta">Sapata Prismática Reta (B×L×H)</option>
-                  <option value="bloco_coroamento">Bloco de Coroamento para Estacas</option>
-                  <option value="viga_baldrame">Viga Baldrame de Travamento</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Quantidade de Peças</label>
-                <input
-                  type="number"
-                  min="1"
-                  placeholder="8"
-                  value={qtdSuperficialRaw}
-                  onChange={(e) => updateParam('qtdSuperficial', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Largura B (m)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="1.80"
-                  value={larguraSuperficialRaw}
-                  onChange={(e) => updateParam('larguraSuperficial', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Comprimento L (m)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="1.80"
-                  value={comprimentoSuperficialRaw}
-                  onChange={(e) => updateParam('comprimentoSuperficial', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Altura Rodapé h1 (m)</label>
-                <input
-                  type="number"
-                  step="0.05"
-                  placeholder="0.30"
-                  value={alturaRodapeH1Raw}
-                  onChange={(e) => updateParam('alturaRodapeH1', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                />
-              </div>
-
-              {tipoSuperficial === 'sapata_tronco' && (
-                <>
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">Altura Pirâmide h2 (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      placeholder="0.40"
-                      value={alturaPiramideH2Raw}
-                      onChange={(e) => updateParam('alturaPiramideH2', e.target.value)}
-                      className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">b topo pilar (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      placeholder="0.40"
-                      value={pilarBesteRaw}
-                      onChange={(e) => updateParam('pilarBeste', e.target.value)}
-                      className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block font-bold text-slate-700 mb-1">l topo pilar (m)</label>
-                    <input
-                      type="number"
-                      step="0.05"
-                      placeholder="0.40"
-                      value={pilarLesteRaw}
-                      onChange={(e) => updateParam('pilarLeste', e.target.value)}
-                      className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                    />
-                  </div>
-                </>
-              )}
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Profundidade da Cava (m)</label>
-                <input
-                  type="number"
-                  step="0.1"
-                  placeholder="1.50"
-                  value={profundidadeCavaRaw}
-                  onChange={(e) => updateParam('profundidadeCava', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Taxa de Aço CA-50 (kg/m³)</label>
-                <input
-                  type="number"
-                  step="5"
-                  placeholder="75"
-                  value={taxaAcoSuperficialRaw}
-                  onChange={(e) => updateParam('taxaAcoSuperficial', e.target.value)}
-                  className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
-                />
-              </div>
+            <div className="mb-4">
+              <label className="block font-bold text-slate-700 mb-1 text-xs">Geometria da Fundação Superficial</label>
+              <select
+                value={tipoSuperficial}
+                onChange={(e) => updateParam('tipoSuperficial', e.target.value)}
+                className="w-full md:w-1/2 h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-bold text-slate-800 text-xs outline-none focus:border-slate-700 shadow-2xs cursor-pointer"
+              >
+                <option value="sapata_tronco">Sapata Tronco-Piramidal (B×L×h1+h2)</option>
+                <option value="sapata_reta">Sapata Prismática Reta (B×L×H)</option>
+                <option value="bloco_coroamento">Bloco de Coroamento para Estacas</option>
+                <option value="viga_baldrame">Viga Baldrame de Travamento (Tabela Completa Modelo BRP)</option>
+              </select>
             </div>
+
+            {tipoSuperficial === 'viga_baldrame' ? (
+              <TabelaVigasBaldrames
+                header={headerVigasBaldrames}
+                onChangeHeader={(h) => updateParam('headerVigasBaldrames', h)}
+                vigas={vigasBaldramesList}
+                onChangeVigas={(v) => updateParam('vigasBaldramesList', v)}
+              />
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Quantidade de Peças</label>
+                  <input
+                    type="number"
+                    min="1"
+                    placeholder="8"
+                    value={qtdSuperficialRaw}
+                    onChange={(e) => updateParam('qtdSuperficial', e.target.value)}
+                    className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Largura B (m)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="1.80"
+                    value={larguraSuperficialRaw}
+                    onChange={(e) => updateParam('larguraSuperficial', e.target.value)}
+                    className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Comprimento L (m)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="1.80"
+                    value={comprimentoSuperficialRaw}
+                    onChange={(e) => updateParam('comprimentoSuperficial', e.target.value)}
+                    className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Altura Rodapé h1 (m)</label>
+                  <input
+                    type="number"
+                    step="0.05"
+                    placeholder="0.30"
+                    value={alturaRodapeH1Raw}
+                    onChange={(e) => updateParam('alturaRodapeH1', e.target.value)}
+                    className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                  />
+                </div>
+
+                {tipoSuperficial === 'sapata_tronco' && (
+                  <>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">Altura Pirâmide h2 (m)</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        placeholder="0.40"
+                        value={alturaPiramideH2Raw}
+                        onChange={(e) => updateParam('alturaPiramideH2', e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">b topo pilar (m)</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        placeholder="0.40"
+                        value={pilarBesteRaw}
+                        onChange={(e) => updateParam('pilarBeste', e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">l topo pilar (m)</label>
+                      <input
+                        type="number"
+                        step="0.05"
+                        placeholder="0.40"
+                        value={pilarLesteRaw}
+                        onChange={(e) => updateParam('pilarLeste', e.target.value)}
+                        className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                      />
+                    </div>
+                  </>
+                )}
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Profundidade da Cava (m)</label>
+                  <input
+                    type="number"
+                    step="0.1"
+                    placeholder="1.50"
+                    value={profundidadeCavaRaw}
+                    onChange={(e) => updateParam('profundidadeCava', e.target.value)}
+                    className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Taxa de Aço CA-50 (kg/m³)</label>
+                  <input
+                    type="number"
+                    step="5"
+                    placeholder="75"
+                    value={taxaAcoSuperficialRaw}
+                    onChange={(e) => updateParam('taxaAcoSuperficial', e.target.value)}
+                    className="w-full h-9 px-3 py-1.5 border border-slate-300 rounded-lg bg-white font-mono text-slate-900 font-extrabold outline-none focus:border-slate-700 shadow-2xs"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}

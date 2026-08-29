@@ -12,6 +12,7 @@ import FluxoAprovacao from './pages/FluxoAprovacao';
 import PadroesTecnicosPage from './pages/PadroesTecnicos';
 import Cotacoes from './pages/Cotacoes';
 import Configuracoes from './pages/Configuracoes';
+import AprendizadoPage from './pages/AprendizadoPage';
 
 // Banco Próprio
 import BancoProprioInsumos from './pages/banco-proprio/Insumos';
@@ -75,6 +76,7 @@ export default function App() {
             <Route path="cotacoes" element={<Cotacoes />} />
             <Route path="fluxo-aprovacao" element={<FluxoAprovacao />} />
             <Route path="padroes-tecnicos" element={<PadroesTecnicosPage />} />
+            <Route path="aprendizado" element={<AprendizadoPage />} />
             <Route path="configuracoes" element={<Configuracoes />} />
             <Route path="*" element={
               <div className="flex flex-col items-center justify-center py-24 text-slate-400">

@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, Plus, Trash2, CheckCircle2, 
   Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X, Edit3, Type,
   ChevronDown, ChevronRight, Folder, FolderOpen, Strikethrough, Download, Sparkles, PlusCircle, GripVertical,
-  UserCheck
+  FilePlus, FileMinus
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -71,6 +71,52 @@ const isDesdobradoEap = (itemEap: string, allItems: ImportadoItem[]) => {
     }
   }
   return false;
+};
+
+const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
+  const copy = list.map(item => ({ ...item }));
+  let sectionSeq = 0;
+  let compSeq = 0;
+  let childSeq = 0;
+
+  let currentSectionEap = '1';
+  let currentCompEap = '1.1';
+
+  for (let i = 0; i < copy.length; i++) {
+    const item = copy[i];
+    if (item.status_linha === 'inativo') continue;
+
+    const origParts = (item.item_eap || '').split('.').filter(Boolean);
+    const isDesdobrado = item.status_linha === 'desdobrado';
+    const isExplicitSection = item.tipo_vinculo === 'texto' || (origParts.length === 1 && (item.quantidade === 0 || !item.quantidade));
+
+    let level = 1;
+    if (isExplicitSection) {
+      level = 0;
+    } else if (isDesdobrado || (item as any).isSubitem || origParts.length >= 3) {
+      level = 2;
+    } else {
+      level = 1;
+    }
+
+    if (level === 0) {
+      sectionSeq++;
+      compSeq = 0;
+      childSeq = 0;
+      item.item_eap = String(sectionSeq);
+      currentSectionEap = item.item_eap;
+    } else if (level === 1) {
+      compSeq++;
+      childSeq = 0;
+      item.item_eap = `${currentSectionEap}.${compSeq}`;
+      currentCompEap = item.item_eap;
+    } else if (level === 2) {
+      childSeq++;
+      item.item_eap = `${currentCompEap}.${childSeq}`;
+    }
+  }
+
+  return copy;
 };
 
 export default function OrcamentoDeParaStudio() {
@@ -223,6 +269,7 @@ export default function OrcamentoDeParaStudio() {
 
   // Refs e Estados para Sincronização do Scroll Horizontal Fixo/Sticky
   const tableContainerRef = useRef<HTMLDivElement>(null);
+  const headerTableRef = useRef<HTMLDivElement>(null);
   const stickyScrollRef = useRef<HTMLDivElement>(null);
   const [scrollWidth, setScrollWidth] = useState(0);
   const [clientWidth, setClientWidth] = useState(0);
@@ -254,35 +301,33 @@ export default function OrcamentoDeParaStudio() {
   useEffect(() => {
     const tableEl = tableContainerRef.current;
     const scrollEl = stickyScrollRef.current;
-    if (!tableEl || !scrollEl) return;
+    const headerEl = headerTableRef.current;
+    if (!tableEl) return;
 
-    let isSyncingTable = false;
-    let isSyncingScroll = false;
+    let isSyncing = false;
 
     const handleTableScroll = () => {
-      if (isSyncingScroll) {
-        isSyncingScroll = false;
-        return;
-      }
-      isSyncingTable = true;
-      scrollEl.scrollLeft = tableEl.scrollLeft;
+      if (isSyncing) return;
+      isSyncing = true;
+      if (scrollEl) scrollEl.scrollLeft = tableEl.scrollLeft;
+      if (headerEl) headerEl.scrollLeft = tableEl.scrollLeft;
+      isSyncing = false;
     };
 
     const handleStickyScroll = () => {
-      if (isSyncingTable) {
-        isSyncingTable = false;
-        return;
-      }
-      isSyncingScroll = true;
-      tableEl.scrollLeft = scrollEl.scrollLeft;
+      if (isSyncing || !scrollEl) return;
+      isSyncing = true;
+      if (tableEl) tableEl.scrollLeft = scrollEl.scrollLeft;
+      if (headerEl) headerEl.scrollLeft = scrollEl.scrollLeft;
+      isSyncing = false;
     };
 
     tableEl.addEventListener('scroll', handleTableScroll, { passive: true });
-    scrollEl.addEventListener('scroll', handleStickyScroll, { passive: true });
+    if (scrollEl) scrollEl.addEventListener('scroll', handleStickyScroll, { passive: true });
 
     return () => {
       tableEl.removeEventListener('scroll', handleTableScroll);
-      scrollEl.removeEventListener('scroll', handleStickyScroll);
+      if (scrollEl) scrollEl.removeEventListener('scroll', handleStickyScroll);
     };
   }, [scrollWidth, clientWidth]);
 
@@ -680,8 +725,22 @@ export default function OrcamentoDeParaStudio() {
 
       setItems(prev => {
         const copy = [...prev];
-        copy.splice(targetIndex + 1, 0, newItem);
-        return copy.sort((a, b) => sortEap(a.item_eap, b.item_eap));
+        // Encontra a posição após o target e todos os seus filhos desdobrados
+        let insertPos = targetIndex + 1;
+        while (insertPos < copy.length && copy[insertPos].item_eap.startsWith(targetItem.item_eap + '.')) {
+          insertPos++;
+        }
+        copy.splice(insertPos, 0, newItem);
+        const rebuilt = rebuildStudioEaps(copy);
+        
+        // Atualiza os EAPs reconstruídos de fundo no Supabase
+        rebuilt.forEach(it => {
+          if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+            supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+          }
+        });
+
+        return rebuilt;
       });
     } catch (err: any) {
       console.error(err);
@@ -848,6 +907,14 @@ export default function OrcamentoDeParaStudio() {
         }
 
         if (compItens && compItens.length > 0) {
+          // Busca sub-itens inseridos existentes sob esta EAP para evitar colisões de numeração EAP
+          const existingChildren = items.filter(i => (i.item_eap || '').startsWith(`${selectedItemForLink.item_eap}.`) && i.status_linha !== 'desdobrado');
+          const existingPartNumbers = existingChildren.map(c => {
+            const parts = c.item_eap.split('.');
+            return parseInt(parts[parts.length - 1], 10);
+          }).filter(n => !isNaN(n));
+          const startSeq = existingPartNumbers.length > 0 ? Math.max(...existingPartNumbers) + 1 : 1;
+
           childRows = compItens.map((ci: any, index: number) => {
             const refObj = ci.insumo || ci.sub_composicao || {};
             const itemCode = refObj.codigo || ci.codigo || '';
@@ -867,7 +934,7 @@ export default function OrcamentoDeParaStudio() {
             return {
               id: `inserted-comp-${Date.now()}-${index}`,
               orcamento_importado_id: importId!,
-              item_eap: `${selectedItemForLink.item_eap}.${index + 1}`,
+              item_eap: `${selectedItemForLink.item_eap}.${startSeq + index}`,
               descricao: '', // O lado cliente fica limpo! Sem texto de sub-item
               unidade: itemUnit,
               quantidade: q,
@@ -941,7 +1008,7 @@ export default function OrcamentoDeParaStudio() {
           copy.splice(parentIdx + 1, 0, ...childRows);
         }
 
-        return copy.sort((a, b) => sortEap(a.item_eap, b.item_eap));
+        return rebuildStudioEaps(copy);
       });
 
       updateImportStatus();
@@ -1176,16 +1243,19 @@ export default function OrcamentoDeParaStudio() {
   const handleExportExcel = () => {
     if (!items || items.length === 0) return;
 
-    const exportRows = items.map(i => ({
-      EAP: i.item_eap,
-      'Descrição Cliente': i.status_linha === 'inativo' ? `[INATIVADO / RISCADO] ${i.descricao}` : i.descricao,
-      Unidade: i.unidade,
-      Quantidade: i.quantidade,
-      'Preço Cliente (R$)': i.status_linha === 'inativo' ? 0 : i.total_orig,
-      'Referência Empresa': i.composicao?.descricao || i.insumo?.descricao || (i.status_linha === 'inserido_empresa' ? '[ITEM INSERIDO PELA EMPRESA]' : i.tipo_vinculo === 'texto' ? '[TÍTULO CUSTOMIZADO]' : '-'),
-      'Preço Empresa (R$)': i.status_linha === 'inativo' ? 0 : i.total_empresa,
-      Status: i.status_linha === 'inativo' ? 'INATIVADO' : i.status_linha === 'inserido_empresa' ? 'INSERIDO PELA EMPRESA (EM DESTAQUE)' : 'VINCULADO'
-    }));
+    const exportRows = items.map(i => {
+      const isHiddenOnClient = i.status_linha === 'inserido_empresa' || i.status_linha === 'desdobrado';
+      return {
+        EAP: i.item_eap,
+        'Descrição Cliente': i.status_linha === 'inativo' ? `[INATIVADO / RISCADO] ${i.descricao}` : isHiddenOnClient ? '' : i.descricao,
+        Unidade: isHiddenOnClient ? '' : i.unidade,
+        Quantidade: isHiddenOnClient ? 0 : i.quantidade,
+        'Preço Cliente (R$)': (i.status_linha === 'inativo' || isHiddenOnClient) ? 0 : i.total_orig,
+        'Referência Empresa': i.composicao?.descricao || i.insumo?.descricao || (i.status_linha === 'inserido_empresa' ? '[ITEM INSERIDO APENAS NA EMPRESA]' : i.tipo_vinculo === 'texto' ? '[TÍTULO CUSTOMIZADO]' : '-'),
+        'Preço Empresa (R$)': i.status_linha === 'inativo' ? 0 : i.total_empresa,
+        Status: i.status_linha === 'inativo' ? 'INATIVADO' : i.status_linha === 'inserido_empresa' ? 'INSERIDO APENAS NA EMPRESA' : i.status_linha === 'inserido_empresa_e_cliente' ? 'INSERIDO NA PLANILHA DO CLIENTE' : 'VINCULADO'
+      };
+    });
 
     const ws = XLSX.utils.json_to_sheet(exportRows);
     const wb = XLSX.utils.book_new();
@@ -1251,7 +1321,8 @@ export default function OrcamentoDeParaStudio() {
 
       setImportHeader((prev: any) => ({ ...prev, status: 'Concluído' }));
 
-      const validItems = items.filter(i => i.status_linha !== 'inativo');
+      // Filtra apenas itens válidos (ignora linhas inativas E ignora desdobrados internos de composição do preview)
+      const validItems = items.filter(i => i.status_linha !== 'inativo' && i.status_linha !== 'desdobrado');
 
       const itensPayload = validItems.map((item: any) => {
         const role = getItemEapRole(item);
@@ -1264,7 +1335,7 @@ export default function OrcamentoDeParaStudio() {
             item_eap: item.item_eap,
             codigo: null,
             banco_fonte: null,
-            descricao: item.descricao,
+            descricao: (item.descricao && item.descricao.trim() !== '') ? item.descricao : 'SEÇÃO / TÍTULO',
             unidade: '',
             quantidade: 0,
             valor_unitario_mat: 0,
@@ -1280,22 +1351,23 @@ export default function OrcamentoDeParaStudio() {
 
         const matVal = item.tipo_vinculo === 'insumo' ? item.valor_unitario_empresa : item.valor_unitario_empresa * 0.7;
         const moVal = item.tipo_vinculo === 'insumo' ? 0 : item.valor_unitario_empresa * 0.3;
+        const itemDesc = (item.descricao && item.descricao.trim() !== '') ? item.descricao : (linkedRef?.descricao || 'Item sem descrição');
 
         return {
           orcamento_id: newOrc.id,
           item_eap: item.item_eap,
           codigo: linkedRef?.codigo || null,
           banco_fonte: 'Própria',
-          descricao: linkedRef?.descricao || item.descricao,
-          unidade: linkedRef?.unidade || item.unidade || 'un',
+          descricao: itemDesc,
+          unidade: item.unidade || linkedRef?.unidade || 'un',
           quantidade: item.quantidade || 0,
           valor_unitario_mat: matVal,
           valor_unitario_mo: moVal,
-          valor_unitario: item.valor_unitario_empresa || item.valor_unitario_orig,
-          valor_unitario_com_bdi: item.valor_unitario_empresa || item.valor_unitario_orig,
+          valor_unitario: item.valor_unitario_empresa || item.valor_unitario_orig || 0,
+          valor_unitario_com_bdi: item.valor_unitario_empresa || item.valor_unitario_orig || 0,
           total_mat: (item.quantidade || 0) * matVal,
           total_mo: (item.quantidade || 0) * moVal,
-          total: item.total_empresa || item.total_orig,
+          total: item.total_empresa || item.total_orig || 0,
           composicao_id: item.composicao_id || null
         };
       });
@@ -1453,15 +1525,16 @@ export default function OrcamentoDeParaStudio() {
       </div>
 
       {/* Tabela De-Para Lado a Lado */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-clip min-h-[calc(100vh-260px)] flex flex-col">
-        <div className="p-3 bg-slate-50 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 sticky top-0 z-30 rounded-t-2xl">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
+        {/* Barra de Ferramentas do Studio (Sempre no topo do Card) */}
+        <div className="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 rounded-t-2xl z-30">
           {/* Título integrado */}
           <div className="text-left select-none">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Studio de De-Para (EAP e Tópicos)</h3>
             <p className="text-[10px] text-slate-500 font-semibold">Vincule com botão único. Arraste a alça (⋮⋮) para reordenar.</p>
           </div>
             
-            {/* Ferramentas Superiores */}
+          {/* Ferramentas Superiores */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
               <button
@@ -1565,109 +1638,134 @@ export default function OrcamentoDeParaStudio() {
           }
         `}</style>
 
-        <div ref={tableContainerRef} className="overflow-visible">
-          <table className="w-full min-w-[1300px] text-xs text-left relative border-collapse table-fixed">
-            <thead className="bg-slate-100 text-slate-600 font-bold border-b border-slate-200 sticky top-[53px] z-20">
+        {/* Container da Tabela com Colunas com Larguras Exatas e Cabeçalho Sticky */}
+        <div ref={tableContainerRef} className="overflow-auto max-h-[calc(100vh-250px)] custom-horizontal-scrollbar bg-white rounded-b-2xl relative">
+          <table className="w-full min-w-[1300px] text-xs text-left border-collapse table-fixed relative">
+            <colgroup>
+              <col style={{ width: colWidths.eap }} />
+              <col style={{ width: colWidths.item_cliente }} />
+              <col style={{ width: colWidths.und }} />
+              <col style={{ width: colWidths.qtd }} />
+              {showMatUnit && <col style={{ width: colWidths.mat_unit }} />}
+              {showMoUnit && <col style={{ width: colWidths.mo_unit }} />}
+              {showUnitTotal && <col style={{ width: colWidths.unit_total }} />}
+              {showMatTotal && <col style={{ width: colWidths.mat_total }} />}
+              {showMoTotal && <col style={{ width: colWidths.mo_total }} />}
+              <col style={{ width: colWidths.preco_cliente }} />
+              <col style={{ width: colWidths.ref_empresa }} />
+              {showMatUnit && <col style={{ width: colWidths.mat_unit_empresa }} />}
+              {showMoUnit && <col style={{ width: colWidths.mo_unit_empresa }} />}
+              {showUnitTotal && <col style={{ width: colWidths.unit_total_empresa }} />}
+              {showMatTotal && <col style={{ width: colWidths.mat_total_empresa }} />}
+              {showMoTotal && <col style={{ width: colWidths.mo_total_empresa }} />}
+              <col style={{ width: colWidths.preco_empresa }} />
+              <col style={{ width: colWidths.acoes }} />
+            </colgroup>
+
+            {/* Títulos das Colunas Congelados no Topo da Tabela */}
+            <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-20 shadow-xs">
               <tr>
-                <th style={{ width: colWidths.eap }} className="p-2 bg-slate-100 relative select-none">
+                <th className="p-2 bg-slate-100 relative select-none">
                   <span>EAP</span>
                   <div onMouseDown={(e) => handleMouseDown('eap', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
-                <th style={{ width: colWidths.item_cliente }} className="p-3 bg-slate-100 relative select-none">
+                <th className="p-3 bg-slate-100 relative select-none">
                   <span>Item Cliente (Original - Fixo)</span>
                   <div onMouseDown={(e) => handleMouseDown('item_cliente', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
-                <th style={{ width: colWidths.und }} className="p-2 text-center bg-slate-100 font-bold relative select-none">
+                <th className="p-2 text-center bg-slate-100 font-bold relative select-none">
                   <span>Und</span>
                   <div onMouseDown={(e) => handleMouseDown('und', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
-                <th style={{ width: colWidths.qtd }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                   <span>Qtd</span>
                   <div onMouseDown={(e) => handleMouseDown('qtd', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
                 
                 {showMatUnit && (
-                  <th style={{ width: colWidths.mat_unit }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>Mat. Unit. (Cliente)</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_unit', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMoUnit && (
-                  <th style={{ width: colWidths.mo_unit }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>M.O. Unit. (Cliente)</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_unit', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showUnitTotal && (
-                  <th style={{ width: colWidths.unit_total }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>Unit. Total (Cliente)</span>
                     <div onMouseDown={(e) => handleMouseDown('unit_total', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMatTotal && (
-                  <th style={{ width: colWidths.mat_total }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>Mat. Total (Cliente)</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_total', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMoTotal && (
-                  <th style={{ width: colWidths.mo_total }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>M.O. Total (Cliente)</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_total', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
 
-                <th style={{ width: colWidths.preco_cliente }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                   <span>Preço Cliente</span>
                   <div onMouseDown={(e) => handleMouseDown('preco_cliente', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
-                <th style={{ width: colWidths.ref_empresa }} className="p-3 border-l border-slate-200 bg-slate-100 relative select-none">
+                <th className="p-3 border-l border-slate-200 bg-slate-100 relative select-none">
                   <span>Referência Empresa</span>
                   <div onMouseDown={(e) => handleMouseDown('ref_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
                 
                 {showMatUnit && (
-                  <th style={{ width: colWidths.mat_unit_empresa }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>Mat. Unit. (Empresa)</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_unit_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMoUnit && (
-                  <th style={{ width: colWidths.mo_unit_empresa }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>M.O. Unit. (Empresa)</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_unit_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showUnitTotal && (
-                  <th style={{ width: colWidths.unit_total_empresa }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>Unit. Total (Empresa)</span>
                     <div onMouseDown={(e) => handleMouseDown('unit_total_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMatTotal && (
-                  <th style={{ width: colWidths.mat_total_empresa }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>Mat. Total (Empresa)</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_total_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMoTotal && (
-                  <th style={{ width: colWidths.mo_total_empresa }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                     <span>M.O. Total (Empresa)</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_total_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
 
-                <th style={{ width: colWidths.preco_empresa }} className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                   <span>Preço Empresa</span>
                   <div onMouseDown={(e) => handleMouseDown('preco_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
-                <th style={{ width: colWidths.acoes }} className="p-2 text-center bg-slate-100 relative select-none">
+                <th className="p-2 text-center bg-slate-100 relative select-none">
                   <span>Ações</span>
                   <div onMouseDown={(e) => handleMouseDown('acoes', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+
+            {/* CORPO DA TABELA */}
+            <tbody className="divide-y divide-slate-100 bg-white">
               {items.map((item, index) => {
                 if (isRowHidden(item.item_eap)) return null;
 
@@ -1981,19 +2079,19 @@ export default function OrcamentoDeParaStudio() {
                           </button>
                         )}
 
-                        {/* Confirmar Inserção na Planilha do Cliente */}
+                        {/* Confirmar Inserção / Desinserção na Planilha do Cliente */}
                         {isInsertedOrDesdobrado && (
                           <button
                             onClick={() => handleToggleInserirCliente(item)}
-                            title={item.status_linha === 'inserido_empresa_e_cliente' ? "Remover da Planilha do Cliente" : "Confirmar Inserção na Planilha do Cliente"}
+                            title={item.status_linha === 'inserido_empresa_e_cliente' ? "Desinserir da Planilha do Cliente (Manter apenas na Referência Empresa)" : "Inserir na Planilha do Cliente (Exibir e Exportar na Proposta do Cliente)"}
                             className={clsx(
                               "p-1 rounded cursor-pointer transition-all",
                               item.status_linha === 'inserido_empresa_e_cliente'
-                                ? "bg-emerald-100 hover:bg-emerald-200 text-emerald-800"
+                                ? "bg-amber-100 hover:bg-rose-100 text-amber-900 hover:text-rose-700 border border-amber-300"
                                 : "hover:bg-blue-100 text-slate-400 hover:text-blue-700"
                             )}
                           >
-                            <UserCheck className="w-3.5 h-3.5" />
+                            {item.status_linha === 'inserido_empresa_e_cliente' ? <FileMinus className="w-3.5 h-3.5" /> : <FilePlus className="w-3.5 h-3.5" />}
                           </button>
                         )}
 

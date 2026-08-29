@@ -286,26 +286,26 @@ export default function Insumos() {
               placeholder="Buscar por código ou descrição..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all bg-white text-sm"
+              className="w-full pl-10 pr-4 py-2 rounded-lg border border-slate-300 focus:ring-2 focus:ring-primary focus:border-transparent outline-none transition-all bg-white text-sm text-slate-900 font-normal placeholder:text-slate-500"
             />
           </div>
           <div className="flex gap-2 w-full md:w-auto">
             <select
               value={filtroEstado}
               onChange={(e) => { setFiltroEstado(e.target.value); setPage(1); }}
-              className="px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm min-w-[120px]"
+              className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm min-w-[120px]"
             >
-              <option value="">Todos os Estados</option>
-              {UFS.map(uf => <option key={uf} value={uf}>{uf}</option>)}
+              <option value="" className="text-slate-900 bg-white font-normal">Todos os Estados</option>
+              {UFS.map(uf => <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">{uf}</option>)}
             </select>
 
             <select
               value={filtroTipo}
               onChange={(e) => { setFiltroTipo(e.target.value); setPage(1); }}
-              className="px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm min-w-[150px]"
+              className="px-3 py-2 border border-slate-300 rounded-lg bg-white text-slate-900 font-normal focus:ring-2 focus:ring-primary focus:border-transparent outline-none text-sm min-w-[150px]"
             >
-              <option value="">Todos os Tipos</option>
-              {TIPOS_FILTRO.map(t => <option key={t} value={t}>{t}</option>)}
+              <option value="" className="text-slate-900 bg-white font-normal">Todos os Tipos</option>
+              {TIPOS_FILTRO.map(t => <option key={t} value={t} className="text-slate-900 bg-white font-normal">{t}</option>)}
             </select>
           </div>
         </div>

@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   Plus, Search, Calculator, GitBranch, Trash2, X, FileSpreadsheet,
-  ChevronDown, ChevronRight, Filter
+  ChevronDown, ChevronRight, Filter, AlertTriangle
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -120,6 +120,12 @@ export const getImportadoEffectiveStatusInfo = (
   return { label: 'Em Vinculação', badgeCls: 'bg-amber-50 text-amber-700 border-amber-200 font-bold' };
 };
 
+const ESTADOS_BRASIL_LIST = [
+  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 
+  'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 
+  'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
+];
+
 export default function Orcamentos() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -158,19 +164,71 @@ export default function Orcamentos() {
   // Modais
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+  const [deleteModal, setDeleteModal] = useState<{
+    targetId: string;
+    targetCodigo: string;
+    targetNome: string;
+    targetRevisao: string;
+    familyBaseKey: string;
+    familyCount: number;
+    familyIds: string[];
+  } | null>(null);
+  const [deleteMode, setDeleteMode] = useState<'single' | 'all'>('single');
 
   const [newOrcamentoData, setNewOrcamentoData] = useState({
     codigo: '',
     descricao: '',
     cliente: '',
     projeto: '',
-    gestor_cliente: ''
+    gestor_cliente: '',
+    responsavel: '',
+    cidade: '',
+    estado: 'GO'
   });
+
+  const [usuariosCadastrados, setUsuariosCadastrados] = useState<any[]>([]);
 
   useEffect(() => {
     fetchOrcamentos();
     fetchImportados();
+    fetchUsuariosCadastrados();
   }, []);
+
+  const formatCidadeUpperNoAccents = (text: string) => {
+    if (!text) return '';
+    return text
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toUpperCase();
+  };
+
+  const fetchUsuariosCadastrados = async () => {
+    try {
+      const { data: engData, error: engError } = await supabase
+        .schema('engenharia')
+        .from('usuarios')
+        .select('id, nome, email, status')
+        .order('nome', { ascending: true });
+
+      if (!engError && engData && engData.length > 0) {
+        const valid = engData.filter((u: any) => u.nome && u.nome !== 'Time Comercial' && u.status !== 'excluido');
+        setUsuariosCadastrados(valid);
+        return;
+      }
+
+      const { data: pubData, error: pubError } = await supabase
+        .from('profiles')
+        .select('id, nome, email, status')
+        .order('nome', { ascending: true });
+
+      if (!pubError && pubData) {
+        const valid = pubData.filter((u: any) => u.nome && u.nome !== 'Time Comercial' && u.status !== 'excluido');
+        setUsuariosCadastrados(valid);
+      }
+    } catch (err) {
+      console.error('Erro ao buscar usuários:', err);
+    }
+  };
 
   const fetchOrcamentos = async () => {
     setLoading(true);
@@ -315,12 +373,16 @@ export default function Orcamentos() {
     setIsCreateModalOpen(true);
     try {
       const suggestedCode = await generateNextOrcamentoCode();
+      const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';
       setNewOrcamentoData({
         codigo: suggestedCode,
         descricao: '',
         cliente: '',
         projeto: '',
-        gestor_cliente: ''
+        gestor_cliente: '',
+        responsavel: defaultResp,
+        cidade: '',
+        estado: 'GO'
       });
     } catch (err) {
       console.error('Erro ao gerar código:', err);
@@ -356,6 +418,9 @@ export default function Orcamentos() {
         return;
       }
 
+      const cidadeFormatada = formatCidadeUpperNoAccents(newOrcamentoData.cidade).trim();
+      const localObra = [cidadeFormatada, newOrcamentoData.estado].filter(Boolean).join(' - ');
+
       const { data, error } = await supabase
         .schema('engenharia')
         .from('orcamentos')
@@ -366,6 +431,7 @@ export default function Orcamentos() {
           cliente: newOrcamentoData.cliente,
           projeto: newOrcamentoData.projeto,
           gestor_cliente: newOrcamentoData.gestor_cliente,
+          local_obra: localObra,
           revisao,
           status: 'Em Elaboração'
         })
@@ -506,25 +572,55 @@ export default function Orcamentos() {
     }
   };
 
-  const handleDeleteOrcamento = async (id: string, codigo: string, e: React.MouseEvent) => {
+  const handleDeleteOrcamento = (id: string, codigo: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const confirm = window.confirm(`Deseja realmente excluir permanentemente o orçamento ${codigo}?`);
-    if (!confirm) return;
+    const targetOrc = orcamentos.find(o => o.id === id);
+    const { base, revisao } = parseCodeRevisionAndBase(codigo);
+
+    // Identifica todos os orçamentos do mesmo grupo de revisões
+    const familyOrcs = orcamentos.filter(o => parseCodeRevisionAndBase(o.codigo).base === base);
+    const familyIds = familyOrcs.map(o => o.id);
+
+    setDeleteMode('single');
+    setDeleteModal({
+      targetId: id,
+      targetCodigo: codigo,
+      targetNome: targetOrc?.nome || targetOrc?.projeto || 'Orçamento sem título',
+      targetRevisao: String(targetOrc?.revisao || revisao),
+      familyBaseKey: base,
+      familyCount: familyIds.length,
+      familyIds
+    });
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deleteModal) return;
 
     try {
       setLoading(true);
+      const idsToDelete = deleteMode === 'all' ? deleteModal.familyIds : [deleteModal.targetId];
+
+      // Exclui orcamento_itens primeiro
+      await supabase
+        .schema('engenharia')
+        .from('orcamento_itens')
+        .delete()
+        .in('orcamento_id', idsToDelete);
+
+      // Exclui os orçamentos
       const { error } = await supabase
         .schema('engenharia')
         .from('orcamentos')
         .delete()
-        .eq('id', id);
+        .in('id', idsToDelete);
 
       if (error) throw error;
-      alert('Orçamento excluído com sucesso!');
+
+      setDeleteModal(null);
       fetchOrcamentos();
     } catch (err: any) {
       console.error(err);
-      alert('Erro ao excluir: ' + (err.message || err));
+      alert('Erro ao excluir orçamento: ' + (err.message || err));
     } finally {
       setLoading(false);
     }
@@ -1033,7 +1129,7 @@ export default function Orcamentos() {
                   value={newOrcamentoData.projeto}
                   onChange={(e) => setNewOrcamentoData({...newOrcamentoData, projeto: e.target.value})}
                   placeholder="Ex: Construção de Galpão Industrial"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
                 />
               </div>
 
@@ -1044,7 +1140,7 @@ export default function Orcamentos() {
                   value={newOrcamentoData.cliente}
                   onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cliente: e.target.value})}
                   placeholder="Ex: Metalúrgica BRP Ltda"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
                 />
               </div>
 
@@ -1055,8 +1151,57 @@ export default function Orcamentos() {
                   value={newOrcamentoData.gestor_cliente}
                   onChange={(e) => setNewOrcamentoData({...newOrcamentoData, gestor_cliente: e.target.value})}
                   placeholder="Ex: Eng. Pamella"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl outline-none focus:border-blue-500"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
                 />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Responsável Técnico / Orçamentista</label>
+                <select 
+                  value={newOrcamentoData.responsavel}
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, responsavel: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white cursor-pointer"
+                >
+                  <option value="" className="text-slate-500 font-normal">Selecione o Responsável / Orçamentista...</option>
+                  {usuariosCadastrados.map((u: any) => (
+                    <option key={u.id || u.nome} value={u.nome} className="text-slate-900 bg-white font-semibold">
+                      {u.nome} {u.email ? `(${u.email})` : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
+                  <input 
+                    type="text"
+                    value={newOrcamentoData.cidade}
+                    onChange={(e) => {
+                      const val = formatCidadeUpperNoAccents(e.target.value);
+                      setNewOrcamentoData({...newOrcamentoData, cidade: val});
+                    }}
+                    onBlur={(e) => {
+                      const trimmed = formatCidadeUpperNoAccents(e.target.value).trim();
+                      setNewOrcamentoData({...newOrcamentoData, cidade: trimmed});
+                    }}
+                    placeholder="EX: ANAPOLIS"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white uppercase"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">UF (Estado)</label>
+                  <select
+                    value={newOrcamentoData.estado}
+                    onChange={(e) => setNewOrcamentoData({...newOrcamentoData, estado: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-bold outline-none focus:border-blue-500 bg-white cursor-pointer"
+                  >
+                    {ESTADOS_BRASIL_LIST.map(uf => (
+                      <option key={uf} value={uf} className="text-slate-900 bg-white font-bold">{uf}</option>
+                    ))}
+                  </select>
+                </div>
               </div>
 
               <div className="pt-4 flex justify-end gap-2 border-t border-slate-100">
@@ -1090,6 +1235,132 @@ export default function Orcamentos() {
           navigate(`/orcamentos/depara/${importedId}`);
         }}
       />
+
+      {/* Modal de Confirmação de Exclusão com Escolha de Revisões */}
+      {deleteModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-md p-6 space-y-5">
+            {/* Header */}
+            <div className="flex items-start justify-between border-b border-slate-100 pb-3">
+              <div className="flex items-center gap-2.5 text-rose-600">
+                <div className="p-2 bg-rose-50 rounded-xl border border-rose-100">
+                  <Trash2 className="w-5 h-5 text-rose-600" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-slate-800">Excluir Orçamento</h3>
+                  <p className="text-xs text-slate-500 font-mono font-medium">{deleteModal.targetCodigo}</p>
+                </div>
+              </div>
+              <button 
+                onClick={() => setDeleteModal(null)}
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer transition-colors"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Conteúdo dependendo se tem revisões ou não */}
+            {deleteModal.familyCount > 1 ? (
+              <div className="space-y-4">
+                <div className="p-3 bg-amber-50 rounded-xl border border-amber-200/80 text-xs text-amber-900 space-y-1">
+                  <div className="font-bold flex items-center gap-1.5 text-amber-950">
+                    <AlertTriangle className="w-4 h-4 text-amber-600 shrink-0" />
+                    <span>Este orçamento possui {deleteModal.familyCount} revisões cadastradas!</span>
+                  </div>
+                  <p className="text-[11px] text-amber-800 leading-relaxed">
+                    Escolha como deseja realizar a exclusão do orçamento <strong className="font-mono">{deleteModal.targetCodigo}</strong>:
+                  </p>
+                </div>
+
+                <div className="space-y-2.5">
+                  {/* Opção 1: Excluir Apenas a Revisão Atual */}
+                  <label 
+                    onClick={() => setDeleteMode('single')}
+                    className={clsx(
+                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all",
+                      deleteMode === 'single'
+                        ? "border-blue-600 bg-blue-50/50 shadow-2xs ring-1 ring-blue-600"
+                        : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                    )}
+                  >
+                    <input 
+                      type="radio" 
+                      name="deleteMode" 
+                      checked={deleteMode === 'single'} 
+                      onChange={() => setDeleteMode('single')} 
+                      className="mt-0.5 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-xs text-slate-800 block">
+                        Excluir apenas o orçamento/revisão atual ({deleteModal.targetCodigo})
+                      </span>
+                      <p className="text-[11px] text-slate-500 leading-snug">
+                        Remove somente esta revisão (Rev. {deleteModal.targetRevisao}). As outras {deleteModal.familyCount - 1} revisões deste orçamento continuarão salvas.
+                      </p>
+                    </div>
+                  </label>
+
+                  {/* Opção 2: Excluir O Orçamento e Todas as Revisões */}
+                  <label 
+                    onClick={() => setDeleteMode('all')}
+                    className={clsx(
+                      "flex items-start gap-3 p-3.5 rounded-xl border cursor-pointer transition-all",
+                      deleteMode === 'all'
+                        ? "border-rose-600 bg-rose-50/50 shadow-2xs ring-1 ring-rose-600"
+                        : "border-slate-200 hover:border-slate-300 hover:bg-slate-50"
+                    )}
+                  >
+                    <input 
+                      type="radio" 
+                      name="deleteMode" 
+                      checked={deleteMode === 'all'} 
+                      onChange={() => setDeleteMode('all')} 
+                      className="mt-0.5 text-rose-600 focus:ring-rose-500 cursor-pointer"
+                    />
+                    <div className="space-y-0.5">
+                      <span className="font-bold text-xs text-rose-950 block">
+                        Excluir o orçamento atual e TODAS as suas revisões ({deleteModal.familyCount} revisões)
+                      </span>
+                      <p className="text-[11px] text-slate-500 leading-snug">
+                        Remove permanentemente a revisão atual e todas as revisões vinculadas a este código ({deleteModal.familyBaseKey}).
+                      </p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-3 py-1">
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Deseja realmente excluir permanentemente o orçamento <strong className="font-mono text-slate-800">{deleteModal.targetCodigo}</strong> ({deleteModal.targetNome})?
+                </p>
+                <div className="p-3 bg-rose-50 rounded-xl border border-rose-100 text-[11px] text-rose-700 font-semibold">
+                  ⚠️ Esta ação não poderá ser desfeita e todos os itens deste orçamento serão removidos.
+                </div>
+              </div>
+            )}
+
+            {/* Botões de Ação */}
+            <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100">
+              <button
+                type="button"
+                onClick={() => setDeleteModal(null)}
+                className="px-4 py-2 text-xs font-bold text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-xl transition-colors cursor-pointer"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                disabled={loading}
+                onClick={handleConfirmDelete}
+                className="px-4 py-2 bg-rose-600 hover:bg-rose-700 disabled:opacity-50 text-white text-xs font-bold rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-1.5"
+              >
+                <Trash2 className="w-3.5 h-3.5" />
+                <span>{deleteMode === 'all' && deleteModal.familyCount > 1 ? `Excluir Tudo (${deleteModal.familyCount})` : 'Excluir Orçamento'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

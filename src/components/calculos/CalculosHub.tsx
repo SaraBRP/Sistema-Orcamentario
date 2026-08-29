@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Calculator, Search, Layers, FileText, ChevronRight, 
-  Trash2, Edit3, Building2, Plus, Copy
+  Trash2, Edit3, Building2, Plus, Copy, Users
 } from 'lucide-react';
 import type { CalculoItem, ModuloCalculoId, ModuloInfo } from '../../types/calculos';
 import { CalculoDrawer } from './CalculoDrawer';
+import { DimensionamentoEquipeModal } from './DimensionamentoEquipeModal';
 
 const renderModuloIcon = (iconeName: string) => {
   switch (iconeName) {
@@ -160,6 +161,7 @@ export const CalculosHub: React.FC<Props> = ({
   const [moduloDrawerId, setModuloDrawerId] = useState<ModuloCalculoId>(init.initialModulo);
   const [editIdToRestore, setEditIdToRestore] = useState<string | null>(init.initialEditId);
   const [showMemorialModal, setShowMemorialModal] = useState(false);
+  const [dimensionandoItem, setDimensionandoItem] = useState<CalculoItem | null>(null);
 
   // Sincronizador de Estado com URL e SessionStorage
   const syncStateToUrl = useCallback((
@@ -372,66 +374,6 @@ export const CalculosHub: React.FC<Props> = ({
       {/* CONTEÚDO DA ABA 1: MEMÓRIAS DE CÁLCULO SALVAS (VISÃO PRINCIPAL) */}
       {activeTab === 'memoria' && (
         <div className="space-y-5 animate-in fade-in duration-200">
-          {/* Header & Resumo Global Consolidação */}
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-2xs space-y-4">
-            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-              <div>
-                <div className="flex items-center space-x-2 mb-1">
-                  <span className="px-2.5 py-0.5 rounded-md text-[10px] font-bold bg-slate-100 text-slate-700 uppercase tracking-wider">
-                    Consolidação da Memória de Cálculo
-                  </span>
-                  <span className="text-xs text-slate-500">• {calculos.length} elementos dimensionados</span>
-                </div>
-              </div>
-              {totaisGlobais.custoTotal > 0 && (
-                <div className="text-right bg-slate-50 px-4 py-2 rounded-xl border border-slate-200">
-                  <span className="text-[10px] text-slate-500 font-bold block uppercase tracking-wider">Custo Total de Insumos</span>
-                  <span className="text-base font-mono font-extrabold text-emerald-700">
-                    {totaisGlobais.custoTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
-                  </span>
-                </div>
-              )}
-            </div>
-
-            {/* Cards de Métricas Consolidadas */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Concreto Total</span>
-                <div className="text-base font-extrabold text-slate-900 font-mono">
-                  {totaisGlobais.concreto.toLocaleString('pt-BR')} <span className="text-xs font-normal text-slate-500">m³</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Fôrmas Totais</span>
-                <div className="text-base font-extrabold text-slate-900 font-mono">
-                  {totaisGlobais.forma.toLocaleString('pt-BR')} <span className="text-xs font-normal text-slate-500">m²</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Aço Total</span>
-                <div className="text-base font-extrabold text-slate-900 font-mono">
-                  {totaisGlobais.aco.toLocaleString('pt-BR')} <span className="text-xs font-normal text-slate-500">kg</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Escavação Solo</span>
-                <div className="text-base font-extrabold text-slate-900 font-mono">
-                  {totaisGlobais.escavacao.toLocaleString('pt-BR')} <span className="text-xs font-normal text-slate-500">m³</span>
-                </div>
-              </div>
-
-              <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 col-span-2 md:col-span-1">
-                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block mb-1">Impermeabilização</span>
-                <div className="text-base font-extrabold text-slate-900 font-mono">
-                  {totaisGlobais.impermeab.toLocaleString('pt-BR')} <span className="text-xs font-normal text-slate-500">m²</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
           {/* Tabela Formatada em Lista dos Cálculos Salvos */}
           <div className="bg-white rounded-2xl border border-slate-200 shadow-2xs overflow-hidden">
             <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -559,6 +501,14 @@ export const CalculosHub: React.FC<Props> = ({
 
                           <td className="py-3.5 px-4 text-center">
                             <div className="flex items-center justify-center space-x-1">
+                              <button
+                                onClick={() => setDimensionandoItem(calc)}
+                                className="px-2 py-1 bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 rounded text-xs font-bold transition-colors inline-flex items-center gap-1 cursor-pointer border border-slate-200"
+                                title="Dimensionar Equipes e RUP da atividade"
+                              >
+                                <Users className="w-3.5 h-3.5 text-blue-600" />
+                                <span>Equipe</span>
+                              </button>
                               <button
                                 onClick={() => handleOpenEditarCalculo(calc)}
                                 className="px-2 py-1 bg-blue-50 text-blue-700 hover:bg-blue-100 rounded text-xs font-bold transition-colors inline-flex items-center gap-1 cursor-pointer"
@@ -743,6 +693,23 @@ export const CalculosHub: React.FC<Props> = ({
             </div>
           </div>
         </div>
+      )}
+
+      {dimensionandoItem && (
+        <DimensionamentoEquipeModal
+          nomeAtividade={dimensionandoItem.nome}
+          quantidadeTotal={dimensionandoItem.resultados.volumeConcretoM3 || dimensionandoItem.resultados.areaFormaM2 || dimensionandoItem.resultados.areaLiquidaM2 || 100}
+          unidade="m³"
+          data={dimensionandoItem.dimensionamentoEquipe}
+          onSave={(data) => {
+            onSaveCalculo({
+              ...dimensionandoItem,
+              dimensionamentoEquipe: data
+            });
+            setDimensionandoItem(null);
+          }}
+          onClose={() => setDimensionandoItem(null)}
+        />
       )}
     </div>
   );
