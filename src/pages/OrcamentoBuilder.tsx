@@ -730,6 +730,7 @@ export default function OrcamentoBuilder() {
 
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
+  const [highlightedEap, setHighlightedEap] = useState<string | null>(null);
   const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
   const [targetImportRowIndex, setTargetImportRowIndex] = useState<number | null>(null);
 
@@ -2442,6 +2443,9 @@ export default function OrcamentoBuilder() {
         setSelectedRowIndices(new Set([itemIdx]));
       }
 
+      setHighlightedEap(eapCode);
+      setTimeout(() => setHighlightedEap(null), 4500);
+
       // Descolapsa ancestrais na árvore de tópicos para garantir que a linha esteja visível no DOM
       setCollapsedEaps(prev => {
         const next = new Set(prev);
@@ -2457,19 +2461,24 @@ export default function OrcamentoBuilder() {
         return altered ? next : prev;
       });
 
-      // Aguarda renderização do React e rola suavemente até a linha (na planilha ou na memória de cálculo)
+      // Aguarda renderização do React e rola suavemente até a linha
       setTimeout(() => {
-        const targetElements = document.querySelectorAll(`[data-eap="${eapCode}"], #row-eap-${eapCode}, #memoria-row-eap-${eapCode}`);
+        const cleanEap = eapCode.replace(/\s+/g, '');
+        const targetElements = document.querySelectorAll(`[data-eap="${eapCode}"], [data-eap="${cleanEap}"], [id*="row-eap-${eapCode}"]`);
         if (targetElements.length > 0) {
           targetElements.forEach((el) => {
             el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            el.classList.add('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
-            setTimeout(() => {
-              el.classList.remove('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
-            }, 3500);
+          });
+        } else {
+          const allRows = document.querySelectorAll('tr[data-eap]');
+          allRows.forEach((el) => {
+            const attr = el.getAttribute('data-eap');
+            if (attr && attr.trim() === eapCode) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
           });
         }
-      }, 100);
+      }, 150);
     };
 
     return parts.map((part, i) => {
@@ -3983,6 +3992,7 @@ export default function OrcamentoBuilder() {
 
       {activeSubTab === 'memoria_calculo' ? (
         <DocumentoMemorialOficial
+          highlightedEap={highlightedEap}
           header={{
             codigoOrcamento: orcamento?.codigo || `ORC-${id}`,
             nomeProjeto: orcamento?.projeto || orcamento?.nome || '',
@@ -4359,6 +4369,7 @@ export default function OrcamentoBuilder() {
                   );
 
                   const isSectionRow = Boolean((item as any).isTextLine || (item as any).isSecao || (!item.codigo && !item.composicao_id));
+                  const isHighlighted = Boolean(highlightedEap && (item.item_eap || '').trim() === highlightedEap.trim());
 
                   return (
                     <tr 
@@ -4371,9 +4382,11 @@ export default function OrcamentoBuilder() {
                       onDrop={(e) => handleDrop(e, index)}
                       onDragEnd={handleDragEnd}
                       onClick={(e) => handleRowClick(index, e)}
+                      style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '4px solid #d97706', transition: 'all 0.3s ease' } : {}}
                       className={clsx(
                         "transition-all group select-none border-l-4",
                         styles.rowBgClass,
+                        isHighlighted ? "!bg-amber-100 !border-l-amber-500 font-bold" : "",
                         selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
                       )}
                     >

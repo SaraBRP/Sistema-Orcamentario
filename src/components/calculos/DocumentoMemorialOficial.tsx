@@ -563,6 +563,7 @@ interface DocumentoMemorialOficialProps {
   onChangeItens: (itens: ItemMemoriaOficial[]) => void;
   readonly?: boolean;
   onVoltar?: () => void;
+  highlightedEap?: string | null;
 }
 
 export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> = ({
@@ -571,7 +572,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   itens,
   onChangeItens,
   readonly = false,
-  onVoltar
+  onVoltar,
+  highlightedEap
 }) => {
   const [editingItemModal, setEditingItemModal] = useState<ItemMemoriaOficial | null>(null);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
@@ -3887,11 +3889,13 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                   const isCoberto = isCobertoPorRowSpanMemoria(index, itens);
                   const isChildRow = isCoberto || (!isParent && level >= 2);
 
+                  const isHighlighted = Boolean(highlightedEap && (item.item_eap || '').trim() === highlightedEap.trim());
+
                   return (
                     <tr 
                       key={item.id || index} 
-                      id={item.item_eap ? `memoria-row-eap-${item.item_eap}` : undefined}
-                      data-eap={item.item_eap || undefined}
+                      id={item.item_eap ? `memoria-row-eap-${item.item_eap.trim()}` : undefined}
+                      data-eap={item.item_eap ? item.item_eap.trim() : undefined}
                       onClick={(e) => handleRowClick(e, index)}
                       draggable={!readonly}
                       onDragStart={(e) => {
@@ -3907,7 +3911,9 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                         e.preventDefault();
                         if (draggedRowIndex !== null) handleDropRow(draggedRowIndex, index);
                       }}
+                      style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '4px solid #d97706', transition: 'all 0.3s ease' } : {}}
                       className={`transition-colors cursor-pointer border-b border-slate-100 ${
+                        isHighlighted ? '!bg-amber-100 ring-2 ring-amber-400 font-bold' :
                         (selectedRowIndex === index || selectedRowIndices.has(index)) ? 'ring-2 ring-blue-500/50 bg-blue-50/40' : ''
                       } ${
                         dragOverRowIndex === index ? 'bg-blue-100 border-t-2 border-blue-600' :
