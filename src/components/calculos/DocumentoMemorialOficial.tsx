@@ -3112,6 +3112,62 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     onChangeItens(copia);
   };
 
+  const syncGlobalParametersToItens = (
+    dadosCompList: DadoComplementarItem[],
+    itensList: ItemMemoriaOficial[]
+  ): ItemMemoriaOficial[] => {
+    const itemToParamMap = new Map<string, DadoComplementarItem>();
+
+    (dadosCompList || []).forEach(dc => {
+      const linkedIds = dc.itemIds && dc.itemIds.length > 0 ? dc.itemIds : (dc.itemId ? [dc.itemId] : []);
+      linkedIds.forEach(id => {
+        if (id) itemToParamMap.set(id, dc);
+      });
+    });
+
+    return itensList.map(it => {
+      const boundParam = itemToParamMap.get(it.id);
+      if (boundParam) {
+        const valNum = typeof boundParam.valor === 'number' ? boundParam.valor : parseFloat(String(boundParam.valor)) || 0;
+        const paramLabel = boundParam.parametro || boundParam.parametroNome || 'Parâmetro Global';
+        const paramUnit = boundParam.unidade || '';
+
+        const obs = `PARÂMETRO GLOBAL: ${paramLabel}`;
+        const eqLit = `Parâmetro Vinculado: [${paramLabel}]`;
+        const subst = `${paramLabel} = ${valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${paramUnit}`.trim();
+
+        return {
+          ...it,
+          quantidade: valNum > 0 ? valNum : it.quantidade,
+          observacaoMemoria: obs,
+          equacaoLiteral: eqLit,
+          substituicaoNumerica: subst,
+          formulasLista: [
+            {
+              id: `param-bind-${it.id}`,
+              observacao: obs,
+              equacaoLiteral: eqLit,
+              substituicaoNumerica: subst,
+              resultado: valNum,
+              modoCalculo: 'parametro'
+            }
+          ]
+        };
+      } else {
+        if (it.observacaoMemoria && it.observacaoMemoria.startsWith('PARÂMETRO GLOBAL:')) {
+          return {
+            ...it,
+            observacaoMemoria: '',
+            equacaoLiteral: '',
+            substituicaoNumerica: '',
+            formulasLista: []
+          };
+        }
+        return it;
+      }
+    });
+  };
+
   const handleAddDadoComplementar = () => {
     if (!novoGlobalNome || !novoGlobalNome.trim()) return;
     const valNum = typeof novoGlobalValor === 'number' ? novoGlobalValor : parseFloat(String(novoGlobalValor)) || 0;
@@ -3133,21 +3189,11 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       itemId: novoGlobalItemId || undefined,
       itemDescricao: linkedItemDesc || undefined
     };
-    const atual = header.dadosComplementares || [];
-    onChangeHeader({ ...header, dadosComplementares: [...atual, novo] });
+    const atual = [...(header.dadosComplementares || []), novo];
+    onChangeHeader({ ...header, dadosComplementares: atual });
 
-    if (novoGlobalItemId && valNum > 0) {
-      const novaListaItens = itens.map(it => {
-        if (it.id === novoGlobalItemId) {
-          return {
-            ...it,
-            quantidade: valNum
-          };
-        }
-        return it;
-      });
-      onChangeItens(novaListaItens);
-    }
+    const syncedItens = syncGlobalParametersToItens(atual, itens);
+    onChangeItens(syncedItens);
 
     setNovoGlobalNome('');
     setNovoGlobalValor('');
@@ -3161,33 +3207,11 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       const found = CATALOGO_CAMPOS_SISTEMA.find(c => c.label === val);
       if (found) item.unidade = found.unidade;
     }
-    if (campo === 'itemId') {
-      if (val) {
-        const foundItem = itens.find(i => i.id === val);
-        item.itemDescricao = foundItem ? `${foundItem.item_eap ? `${foundItem.item_eap} - ` : ''}${foundItem.descricao}` : '';
-      } else {
-        item.itemId = undefined;
-        item.itemDescricao = undefined;
-      }
-    }
     atual[index] = item;
     onChangeHeader({ ...header, dadosComplementares: atual });
 
-    if (item.itemId && (campo === 'valor' || campo === 'itemId')) {
-      const numVal = typeof item.valor === 'number' ? item.valor : parseFloat(String(item.valor)) || 0;
-      if (numVal > 0) {
-        const novaListaItens = itens.map(it => {
-          if (it.id === item.itemId) {
-            return {
-              ...it,
-              quantidade: numVal
-            };
-          }
-          return it;
-        });
-        onChangeItens(novaListaItens);
-      }
-    }
+    const syncedItens = syncGlobalParametersToItens(atual, itens);
+    onChangeItens(syncedItens);
   };
 
   const handleRemoveDadoComplementar = (index: number) => {
@@ -3196,6 +3220,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     if (selectedGlobalParamIndex >= atual.length) {
       setSelectedGlobalParamIndex(Math.max(0, atual.length - 1));
     }
+    const syncedItens = syncGlobalParametersToItens(atual, itens);
+    onChangeItens(syncedItens);
   };
 
   const handleToggleItemLinkToParam = (paramIndex: number, itemIdToToggle: string) => {
@@ -3226,19 +3252,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     atual[paramIndex] = param;
     onChangeHeader({ ...header, dadosComplementares: atual });
 
-    const valNum = typeof param.valor === 'number' ? param.valor : parseFloat(String(param.valor)) || 0;
-    if (valNum > 0) {
-      const novaListaItens = itens.map(it => {
-        if (currentItemIds.includes(it.id)) {
-          return {
-            ...it,
-            quantidade: valNum
-          };
-        }
-        return it;
-      });
-      onChangeItens(novaListaItens);
-    }
+    const syncedItens = syncGlobalParametersToItens(atual, itens);
+    onChangeItens(syncedItens);
   };
 
   return (
