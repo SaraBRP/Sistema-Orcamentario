@@ -3241,27 +3241,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
             </div>
 
             {!readonly && (
-              <div className="space-y-2.5 bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
-                {/* LINHA SELEÇÃO DO ITEM DO ORÇAMENTO PARA VINCULAR (APLICAR AO ITEM) */}
-                <div className="flex items-center gap-2 bg-blue-50/70 p-2.5 rounded-xl border border-blue-100/80">
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-blue-900 shrink-0">
-                    <Target className="w-4 h-4 text-blue-600" />
-                    <span>Aplicar ao Item:</span>
-                  </div>
-                  <select
-                    value={novoGlobalItemId}
-                    onChange={(e) => setNovoGlobalItemId(e.target.value)}
-                    className="flex-1 p-2 bg-white border border-blue-200 rounded-lg text-xs font-medium text-slate-800 outline-none focus:ring-2 focus:ring-blue-500/30"
-                  >
-                    <option value="">(Nenhum - Parâmetro Geral da Obra)</option>
-                    {itens.map((i) => (
-                      <option key={i.id} value={i.id}>
-                        {i.item_eap ? `${i.item_eap} - ` : ''}{i.descricao} {i.unidade ? `(${i.unidade})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
+              <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-2.5 items-end">
                   <div>
                     <label className="text-[11px] font-bold text-slate-700 block mb-1">Descrição / Nome do Cálculo</label>
@@ -3337,7 +3317,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                     <tr>
                       <th className="p-2.5">Descrição do Parâmetro</th>
                       <th className="p-2.5">Parâmetro do Sistema</th>
-                      <th className="p-2.5">Item Vinculado</th>
+                      <th className="p-2.5">Item Vinculado ao Cálculo</th>
                       <th className="p-2.5 text-right">Valor Global</th>
                       <th className="p-2.5 text-center">Unidade</th>
                       {!readonly && <th className="p-2.5 text-center">Ações</th>}
@@ -3378,24 +3358,29 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                             )}
                           </td>
 
-                          <td className="p-2.5 text-slate-700 text-xs font-medium">
-                            {isEditingThisRow && !readonly ? (
-                              <select
-                                value={dc.itemId || ''}
-                                onChange={(e) => handleUpdateDadoComplementar(idx, 'itemId', e.target.value)}
-                                className="w-full px-2 py-1 border border-blue-400 bg-white rounded text-xs font-medium text-slate-800 outline-none shadow-2xs"
-                              >
-                                <option value="">(Nenhum - Parâmetro Geral)</option>
-                                {itens.map((i) => (
-                                  <option key={i.id} value={i.id}>
-                                    {i.item_eap ? `${i.item_eap} - ` : ''}{i.descricao}
-                                  </option>
-                                ))}
-                              </select>
+                          <td className="p-2.5 text-slate-700 text-xs font-medium min-w-[220px]">
+                            {!readonly ? (
+                              <div className="relative flex items-center">
+                                <select
+                                  value={dc.itemId || ''}
+                                  onChange={(e) => handleUpdateDadoComplementar(idx, 'itemId', e.target.value)}
+                                  className={`w-full pl-7 pr-3 py-1.5 bg-white border rounded-lg text-xs font-semibold outline-none transition-all shadow-2xs cursor-pointer truncate ${
+                                    dc.itemId ? 'border-blue-300 text-blue-900 bg-blue-50/40' : 'border-slate-300 text-slate-700 hover:border-blue-400'
+                                  }`}
+                                >
+                                  <option value="">(Nenhum - Parâmetro Geral)</option>
+                                  {itens.map((i) => (
+                                    <option key={i.id} value={i.id}>
+                                      {i.item_eap ? `${i.item_eap} - ` : ''}{i.descricao} {i.unidade ? `(${i.unidade})` : ''}
+                                    </option>
+                                  ))}
+                                </select>
+                                <Target className={`w-3.5 h-3.5 absolute left-2 pointer-events-none ${dc.itemId ? 'text-blue-600' : 'text-slate-400'}`} />
+                              </div>
                             ) : dc.itemId || dc.itemDescricao ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 border border-blue-200 rounded-md font-semibold text-[11px]">
-                                <Target className="w-3 h-3 text-blue-600 shrink-0" />
-                                <span className="truncate max-w-[200px]" title={dc.itemDescricao || 'Item Vinculado'}>
+                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg font-semibold text-xs">
+                                <Target className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                <span className="truncate max-w-[220px]" title={dc.itemDescricao || 'Item Vinculado'}>
                                   {(() => {
                                     const found = itens.find(it => it.id === dc.itemId);
                                     if (found) return `${found.item_eap ? `${found.item_eap} - ` : ''}${found.descricao}`;
@@ -3404,7 +3389,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                 </span>
                               </span>
                             ) : (
-                              <span className="text-slate-400 text-[11px] italic">Geral (Nenhum)</span>
+                              <span className="text-slate-400 text-xs italic">Geral (Nenhum)</span>
                             )}
                           </td>
 
