@@ -2451,15 +2451,19 @@ export default function OrcamentoBuilder() {
         return altered ? next : prev;
       });
 
-      // Aguarda renderização do React e rola suavemente até a linha
+      // Aguarda renderização do React e rola suavemente até a linha (na planilha ou na memória de cálculo)
       setTimeout(() => {
-        const el = document.getElementById(`row-eap-${eapCode}`);
-        if (el) {
-          el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          el.classList.add('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
-          setTimeout(() => {
-            el.classList.remove('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
-          }, 3000);
+        const targetElements = document.querySelectorAll(`[data-eap="${eapCode}"], #row-eap-${eapCode}, #memoria-row-eap-${eapCode}`);
+        if (targetElements.length > 0) {
+          targetElements.forEach((el, index) => {
+            if (index === 0) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            el.classList.add('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
+            setTimeout(() => {
+              el.classList.remove('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
+            }, 3500);
+          });
         }
       }, 100);
     };

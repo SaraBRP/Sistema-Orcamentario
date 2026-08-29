@@ -3890,6 +3890,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                   return (
                     <tr 
                       key={item.id || index} 
+                      id={item.item_eap ? `memoria-row-eap-${item.item_eap}` : undefined}
+                      data-eap={item.item_eap || undefined}
                       onClick={(e) => handleRowClick(e, index)}
                       draggable={!readonly}
                       onDragStart={(e) => {
