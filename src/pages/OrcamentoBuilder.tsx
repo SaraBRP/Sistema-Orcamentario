@@ -2436,6 +2436,12 @@ export default function OrcamentoBuilder() {
     const handleEapClick = (rawCode: string) => {
       const eapCode = rawCode.replace(/^item\s+/i, '').trim();
 
+      const itemIdx = itens.findIndex(it => (it.item_eap || '').trim() === eapCode);
+      if (itemIdx >= 0) {
+        setSelectedRowIndex(itemIdx);
+        setSelectedRowIndices(new Set([itemIdx]));
+      }
+
       // Descolapsa ancestrais na árvore de tópicos para garantir que a linha esteja visível no DOM
       setCollapsedEaps(prev => {
         const next = new Set(prev);
@@ -2455,10 +2461,8 @@ export default function OrcamentoBuilder() {
       setTimeout(() => {
         const targetElements = document.querySelectorAll(`[data-eap="${eapCode}"], #row-eap-${eapCode}, #memoria-row-eap-${eapCode}`);
         if (targetElements.length > 0) {
-          targetElements.forEach((el, index) => {
-            if (index === 0) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }
+          targetElements.forEach((el) => {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
             el.classList.add('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
             setTimeout(() => {
               el.classList.remove('!bg-amber-100', '!border-l-amber-500', 'ring-2', 'ring-amber-400', 'ring-inset');
@@ -4360,6 +4364,7 @@ export default function OrcamentoBuilder() {
                     <tr 
                       key={item.id}
                       id={item.item_eap ? `row-eap-${item.item_eap.trim()}` : undefined}
+                      data-eap={item.item_eap ? item.item_eap.trim() : undefined}
                       draggable={hasValues}
                       onDragStart={(e) => handleDragStart(e, index)}
                       onDragOver={(e) => handleDragOver(e, index)}
