@@ -158,12 +158,14 @@ export default function CalculosQuantitativosPage() {
           };
         });
 
-      // 6. Une tudo sem duplicar e filtra rascunhos de teste/exemplos fictícios
+      // 6. Une tudo sem duplicar e filtra rascunhos de teste/exemplos fictícios e memoriais órfãos
       const deduplicatedOrcMemoriais: MemorialCalculoRecord[] = [];
       const seenCodes = new Set<string>();
+      const validOrcIds = new Set<string>();
 
       orcMemoriais.forEach(orc => {
         const code = (orc.codigoOrcamento || '').trim();
+        if (orc.orcamentoId) validOrcIds.add(String(orc.orcamentoId));
         if (code) {
           if (!seenCodes.has(code)) {
             seenCodes.add(code);
@@ -174,6 +176,16 @@ export default function CalculosQuantitativosPage() {
         }
       });
 
+      // Busca orçamentos salvos no localStorage para sincronização
+      try {
+        const localOrcs = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+        (localOrcs || []).forEach((o: any) => {
+          if (o.codigo) seenCodes.add(String(o.codigo).trim());
+          if (o.id) validOrcIds.add(String(o.id));
+        });
+      } catch (e) {}
+
+      const avulsosOrfaosIds: string[] = [];
       const avulsosFiltrados = avulsos.filter(a => {
         const code = (a.codigoOrcamento || '').trim();
         const nome = (a.nomeProjeto || '').trim();
@@ -184,12 +196,30 @@ export default function CalculosQuantitativosPage() {
           nome.startsWith('Orçamento -') ||
           (nome === 'Nova Obra de Engenharia' && (!a.itens || a.itens.length <= 1))
         ) {
+          avulsosOrfaosIds.push(a.id);
           return false;
+        }
+
+        // Se o memorial avulso consta como vinculado a um orçamento, mas o orçamento foi excluído do sistema -> purge!
+        if (a.status === 'Vinculado a Orçamento' || (a.codigoOrcamento && a.codigoOrcamento.trim())) {
+          const hasOrcCode = code ? seenCodes.has(code) : false;
+          const hasOrcId = a.orcamentoId ? validOrcIds.has(String(a.orcamentoId)) : false;
+
+          if (!hasOrcCode && !hasOrcId) {
+            avulsosOrfaosIds.push(a.id);
+            return false;
+          }
         }
 
         if (code && seenCodes.has(code)) return false;
         return true;
       });
+
+      // Limpa os memoriais órfãos da memória local
+      if (avulsosOrfaosIds.length > 0) {
+        const limpos = avulsos.filter(a => !avulsosOrfaosIds.includes(a.id));
+        localStorage.setItem(LOCAL_STORAGE_MEMORIAIS_KEY, JSON.stringify(limpos));
+      }
 
       const listaCombinada = [...deduplicatedOrcMemoriais, ...impMemoriais, ...avulsosFiltrados];
       setMemoriaisList(listaCombinada);

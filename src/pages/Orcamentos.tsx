@@ -607,14 +607,43 @@ export default function Orcamentos() {
         .delete()
         .in('orcamento_id', idsToDelete);
 
-      // Exclui os orçamentos
+      // Exclui os orçamentos do Supabase
       const { error } = await supabase
         .schema('engenharia')
         .from('orcamentos')
         .delete()
         .in('id', idsToDelete);
 
-      if (error) throw error;
+      if (error) console.error('Erro ao deletar do Supabase:', error);
+
+      // Remove do localStorage brp_orcamentos_list
+      try {
+        const savedOrcs = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+        const filteredOrcs = savedOrcs.filter((o: any) => !idsToDelete.includes(String(o.id)));
+        localStorage.setItem('brp_orcamentos_list', JSON.stringify(filteredOrcs));
+      } catch (e) {}
+
+      // Exclui também os Memoriais de Cálculo vinculados do localStorage
+      try {
+        const targetCodigos = new Set([deleteModal.targetCodigo, deleteModal.familyBaseKey].filter(Boolean));
+        const savedMems = JSON.parse(localStorage.getItem('brp_memoriais_calculo_list') || '[]');
+        const filteredMems = savedMems.filter((m: any) => {
+          if (m.orcamentoId && idsToDelete.includes(String(m.orcamentoId))) return false;
+          if (m.id && idsToDelete.includes(String(m.id))) return false;
+          if (m.codigoOrcamento && targetCodigos.has(m.codigoOrcamento)) return false;
+          return true;
+        });
+        localStorage.setItem('brp_memoriais_calculo_list', JSON.stringify(filteredMems));
+      } catch (e) {}
+
+      // Limpa dados de cache dos orçamentos excluídos
+      idsToDelete.forEach(idDel => {
+        localStorage.removeItem(`orcamento_calculos_${idDel}`);
+        localStorage.removeItem(`orcamento_parametros_${idDel}`);
+        localStorage.removeItem(`orcamento_header_${idDel}`);
+        localStorage.removeItem(`orcamento_dados_comp_${idDel}`);
+        localStorage.removeItem(`brp_orcamento_itens_${idDel}`);
+      });
 
       setDeleteModal(null);
       fetchOrcamentos();

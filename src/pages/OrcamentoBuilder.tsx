@@ -1826,15 +1826,41 @@ export default function OrcamentoBuilder() {
   const loadOrcamento = async () => {
     setLoading(true);
     try {
-      // 1. Carrega cabeçalho
-      const { data: orcData, error: orcError } = await supabase
+      // 1. Carrega cabeçalho do Supabase com fallback local
+      const { data: dbOrcData } = await supabase
         .schema('engenharia')
         .from('orcamentos')
         .select('*')
         .eq('id', id)
-        .single();
+        .maybeSingle();
+
+      let orcData = dbOrcData;
+
+      if (!orcData) {
+        // Tenta buscar no localStorage
+        try {
+          const savedOrcs = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+          const foundLocal = savedOrcs.find((o: any) => String(o.id) === String(id));
+          if (foundLocal) {
+            orcData = {
+              id: foundLocal.id,
+              codigo: foundLocal.codigo || '',
+              nome: foundLocal.nome || 'Orçamento Local',
+              descricao: '',
+              cliente: foundLocal.cliente || '',
+              projeto: foundLocal.nome || '',
+              status: foundLocal.status || 'Em Elaboração'
+            };
+          }
+        } catch (e) {}
+      }
       
-      if (orcError) throw orcError;
+      if (!orcData) {
+        alert('Este orçamento não foi encontrado ou foi excluído.');
+        navigate('/orcamentos/calculos');
+        return;
+      }
+
       const localObs = id ? localStorage.getItem(`orcamento_obs_gestor_${id}`) : null;
       const effectiveObs = orcData.observacao_gestor || localObs || '';
 
