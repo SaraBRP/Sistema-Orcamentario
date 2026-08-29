@@ -41,22 +41,59 @@ export default function CalculosQuantitativosPage() {
         console.error('Erro ao carregar memoriais locais:', e);
       }
 
-      // 2. Orçamentos da Empresa (Supabase + localStorage fallback)
+      // 2. Orçamentos da Empresa (Supabase)
       let dbOrcamentos: any[] = [];
+      let loadedDb = false;
       try {
         const { data } = await supabase
           .schema('engenharia')
           .from('orcamentos')
           .select('*')
           .order('created_at', { ascending: false });
-        if (data) dbOrcamentos = data;
+        if (data) {
+          dbOrcamentos = data;
+          loadedDb = true;
+        }
       } catch (e) {
         console.error('Erro ao buscar orçamentos no Supabase:', e);
       }
 
+      // 3. Importações / Clientes (Supabase)
+      let dbImportados: any[] = [];
+      try {
+        const { data } = await supabase
+          .schema('engenharia')
+          .from('orcamentos_importados')
+          .select('*')
+          .order('created_at', { ascending: false });
+        if (data) dbImportados = data;
+      } catch (e) {}
+
+      // Conjunto de códigos e IDs válidos que REALMENTE existem no banco de dados Supabase
+      const validDbOrcCodes = new Set<string>();
+      const validDbOrcIds = new Set<string>();
+
+      dbOrcamentos.forEach(o => {
+        if (o.codigo) validDbOrcCodes.add(String(o.codigo).trim());
+        if (o.id) validDbOrcIds.add(String(o.id).trim());
+      });
+      dbImportados.forEach(imp => {
+        if (imp.codigo) validDbOrcCodes.add(String(imp.codigo).trim());
+        if (imp.id) validDbOrcIds.add(String(imp.id).trim());
+      });
+
+      // Se o banco foi consultado com sucesso, limpa o brp_orcamentos_list local de orçamentos excluídos
       let localOrcamentos: any[] = [];
       try {
-        localOrcamentos = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+        const rawLocal = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+        if (loadedDb && Array.isArray(rawLocal)) {
+          localOrcamentos = rawLocal.filter((o: any) => 
+            validDbOrcIds.has(String(o.id)) || (o.codigo && validDbOrcCodes.has(String(o.codigo).trim()))
+          );
+          localStorage.setItem('brp_orcamentos_list', JSON.stringify(localOrcamentos));
+        } else {
+          localOrcamentos = rawLocal;
+        }
       } catch (e) {}
 
       // Combina os orçamentos da empresa por ID / Código
@@ -70,17 +107,6 @@ export default function CalculosQuantitativosPage() {
         }
       });
       const orcList = Array.from(mapOrcamentos.values());
-
-      // 3. Importações / Clientes
-      let dbImportados: any[] = [];
-      try {
-        const { data } = await supabase
-          .schema('engenharia')
-          .from('orcamentos_importados')
-          .select('*')
-          .order('created_at', { ascending: false });
-        if (data) dbImportados = data;
-      } catch (e) {}
 
       // 4. Mapeia Orçamentos da Empresa em Registros de Memorial
       const orcMemoriais: MemorialCalculoRecord[] = orcList.map(orc => {
@@ -158,14 +184,12 @@ export default function CalculosQuantitativosPage() {
           };
         });
 
-      // 6. Une tudo sem duplicar e filtra rascunhos de teste/exemplos fictícios e memoriais órfãos
+      // 6. Une tudo sem duplicar e purga memoriais avulsos órfãos (cujo orçamento no Supabase foi apagado)
       const deduplicatedOrcMemoriais: MemorialCalculoRecord[] = [];
       const seenCodes = new Set<string>();
-      const validOrcIds = new Set<string>();
 
       orcMemoriais.forEach(orc => {
         const code = (orc.codigoOrcamento || '').trim();
-        if (orc.orcamentoId) validOrcIds.add(String(orc.orcamentoId));
         if (code) {
           if (!seenCodes.has(code)) {
             seenCodes.add(code);
@@ -175,15 +199,6 @@ export default function CalculosQuantitativosPage() {
           deduplicatedOrcMemoriais.push(orc);
         }
       });
-
-      // Busca orçamentos salvos no localStorage para sincronização
-      try {
-        const localOrcs = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
-        (localOrcs || []).forEach((o: any) => {
-          if (o.codigo) seenCodes.add(String(o.codigo).trim());
-          if (o.id) validOrcIds.add(String(o.id));
-        });
-      } catch (e) {}
 
       const avulsosOrfaosIds: string[] = [];
       const avulsosFiltrados = avulsos.filter(a => {
@@ -200,10 +215,11 @@ export default function CalculosQuantitativosPage() {
           return false;
         }
 
-        // Se o memorial avulso consta como vinculado a um orçamento, mas o orçamento foi excluído do sistema -> purge!
-        if (a.status === 'Vinculado a Orçamento' || (a.codigoOrcamento && a.codigoOrcamento.trim())) {
-          const hasOrcCode = code ? seenCodes.has(code) : false;
-          const hasOrcId = a.orcamentoId ? validOrcIds.has(String(a.orcamentoId)) : false;
+        // Se o memorial consta como vinculado a um orçamento ou possui código de orçamento:
+        // Se a consulta no Supabase rodou e nem o ID nem o código do orçamento existem no Supabase -> PURGA!
+        if (loadedDb && (a.status === 'Vinculado a Orçamento' || code || a.orcamentoId)) {
+          const hasOrcCode = code ? validDbOrcCodes.has(code) : false;
+          const hasOrcId = a.orcamentoId ? validDbOrcIds.has(String(a.orcamentoId)) : false;
 
           if (!hasOrcCode && !hasOrcId) {
             avulsosOrfaosIds.push(a.id);
@@ -215,7 +231,7 @@ export default function CalculosQuantitativosPage() {
         return true;
       });
 
-      // Limpa os memoriais órfãos da memória local
+      // Limpa permanentemente os memoriais órfãos da memória local
       if (avulsosOrfaosIds.length > 0) {
         const limpos = avulsos.filter(a => !avulsosOrfaosIds.includes(a.id));
         localStorage.setItem(LOCAL_STORAGE_MEMORIAIS_KEY, JSON.stringify(limpos));
@@ -321,13 +337,9 @@ export default function CalculosQuantitativosPage() {
 
   const handleDeleteMemorial = async (id: string) => {
     const target = memoriaisList.find(m => m.id === id);
+    if (!target) return;
 
-    if (target?.status === 'Vinculado a Orçamento' || target?.isOrcamentoNativo || target?.isImportado) {
-      alert('Memoriais vinculados a um orçamento não podem ser excluídos por esta aba. Caso queira excluir a proposta inteira, utilize a aba Orçamentos.');
-      return;
-    }
-
-    if (!confirm('Tem certeza que deseja excluir este memorial de cálculo avulso?')) return;
+    if (!confirm(`Tem certeza que deseja excluir permanentemente a memória de cálculo "${target.codigoOrcamento || target.nomeProjeto || 'Selecionada'}"?`)) return;
 
     // 1. Atualiza o estado do React imediatamente
     const newList = memoriaisList.filter(m => m.id !== id);
@@ -336,20 +348,28 @@ export default function CalculosQuantitativosPage() {
     // 2. Remove do localStorage de memoriais avulsos
     try {
       const savedMem = JSON.parse(localStorage.getItem(LOCAL_STORAGE_MEMORIAIS_KEY) || '[]');
-      const filteredMem = savedMem.filter((m: any) => m.id !== id && (target?.codigoOrcamento ? m.codigoOrcamento !== target.codigoOrcamento : true));
+      const filteredMem = savedMem.filter((m: any) => 
+        m.id !== id && 
+        (target.codigoOrcamento ? m.codigoOrcamento !== target.codigoOrcamento : true) &&
+        (target.orcamentoId ? m.orcamentoId !== target.orcamentoId : true)
+      );
       localStorage.setItem(LOCAL_STORAGE_MEMORIAIS_KEY, JSON.stringify(filteredMem));
     } catch (e) {}
 
     // 3. Remove do localStorage de orçamentos da empresa
     try {
       const savedOrc = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
-      const targetOrcId = target?.orcamentoId || (id.startsWith('orc-') ? id.replace('orc-', '') : id);
-      const filteredOrc = savedOrc.filter((o: any) => String(o.id) !== String(targetOrcId) && String(o.id) !== String(id) && (target?.codigoOrcamento ? o.codigo !== target.codigoOrcamento : true));
+      const targetOrcId = target.orcamentoId || (id.startsWith('orc-') ? id.replace('orc-', '') : id);
+      const filteredOrc = savedOrc.filter((o: any) => 
+        String(o.id) !== String(targetOrcId) && 
+        String(o.id) !== String(id) && 
+        (target.codigoOrcamento ? o.codigo !== target.codigoOrcamento : true)
+      );
       localStorage.setItem('brp_orcamentos_list', JSON.stringify(filteredOrc));
     } catch (e) {}
 
     // 4. Se for um orçamento do Supabase, remove do banco
-    if (target?.isOrcamentoNativo || target?.orcamentoId) {
+    if (target.isOrcamentoNativo || target.orcamentoId) {
       const realId = target.orcamentoId || (id.startsWith('orc-') ? id.replace('orc-', '') : id);
       try {
         await supabase.schema('engenharia').from('orcamento_itens').delete().eq('orcamento_id', realId);

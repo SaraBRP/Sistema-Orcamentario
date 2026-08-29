@@ -170,16 +170,14 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                           <Eye className="w-3.5 h-3.5" />
                           <span>Abrir</span>
                         </button>
-                        {!(m.status === 'Vinculado a Orçamento' || m.isOrcamentoNativo || m.isImportado) && (
-                          <button
-                            type="button"
-                            onClick={() => onDeleteMemorial(m.id)}
-                            className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
-                            title="Excluir memorial"
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => onDeleteMemorial(m.id)}
+                          className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                          title="Excluir memória de cálculo"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
                       </div>
                     </td>
                   </tr>
