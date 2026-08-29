@@ -254,6 +254,7 @@ export interface DadoComplementarItem {
   valor: string | number;  // Ex: "150.00" ou 150.00
   unidade: string;         // Ex: "m²", "m³", "und"
   itemId?: string;         // ID do item do orçamento vinculado (opcional)
+  itemIds?: string[];      // IDs dos itens do orçamento vinculados (multi-item)
   itemDescricao?: string;  // Descrição/EAP do item vinculado (ex: "1.1 - ESCAVAÇÃO ESTACA...")
 }
 

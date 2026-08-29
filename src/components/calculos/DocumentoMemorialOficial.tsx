@@ -666,6 +666,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   const [novoGlobalUnidade, setNovoGlobalUnidade] = useState(CATALOGO_CAMPOS_SISTEMA[0]?.unidade || 'm²');
   const [novoGlobalItemId, setNovoGlobalItemId] = useState('');
   const [editingGlobalIndex, setEditingGlobalIndex] = useState<number | null>(null);
+  const [selectedGlobalParamIndex, setSelectedGlobalParamIndex] = useState<number>(0);
 
   const [savedCustomFormulas, setSavedCustomFormulas] = useState<Array<{
     id: string;
@@ -3192,6 +3193,52 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   const handleRemoveDadoComplementar = (index: number) => {
     const atual = (header.dadosComplementares || []).filter((_, i) => i !== index);
     onChangeHeader({ ...header, dadosComplementares: atual });
+    if (selectedGlobalParamIndex >= atual.length) {
+      setSelectedGlobalParamIndex(Math.max(0, atual.length - 1));
+    }
+  };
+
+  const handleToggleItemLinkToParam = (paramIndex: number, itemIdToToggle: string) => {
+    const atual = [...(header.dadosComplementares || [])];
+    if (!atual[paramIndex]) return;
+
+    const param = { ...atual[paramIndex] };
+    const currentItemIds = param.itemIds ? [...param.itemIds] : (param.itemId ? [param.itemId] : []);
+
+    const idxInArray = currentItemIds.indexOf(itemIdToToggle);
+    if (idxInArray >= 0) {
+      currentItemIds.splice(idxInArray, 1);
+    } else {
+      currentItemIds.push(itemIdToToggle);
+    }
+
+    param.itemIds = currentItemIds;
+    param.itemId = currentItemIds[0] || undefined;
+
+    if (currentItemIds.length > 0) {
+      const firstFound = itens.find(i => i.id === currentItemIds[0]);
+      const firstDesc = firstFound ? `${firstFound.item_eap ? `${firstFound.item_eap} - ` : ''}${firstFound.descricao}` : '';
+      param.itemDescricao = currentItemIds.length === 1 ? firstDesc : `${currentItemIds.length} itens vinculados`;
+    } else {
+      param.itemDescricao = undefined;
+    }
+
+    atual[paramIndex] = param;
+    onChangeHeader({ ...header, dadosComplementares: atual });
+
+    const valNum = typeof param.valor === 'number' ? param.valor : parseFloat(String(param.valor)) || 0;
+    if (valNum > 0) {
+      const novaListaItens = itens.map(it => {
+        if (currentItemIds.includes(it.id)) {
+          return {
+            ...it,
+            quantidade: valNum
+          };
+        }
+        return it;
+      });
+      onChangeItens(novaListaItens);
+    }
   };
 
   return (
@@ -3309,6 +3356,95 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
               </div>
             )}
 
+            {/* VINCULAÇÃO DE ITENS AOS PARÂMETROS GLOBAIS (POSICIONADA ACIMA DA TABELA) */}
+            {(header.dadosComplementares || []).length > 0 && !readonly && (
+              <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 space-y-3 shadow-2xs mt-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-blue-200/80 pb-2">
+                  <div className="flex items-center gap-2">
+                    <Target className="w-4 h-4 text-blue-700 shrink-0" />
+                    <span className="font-bold text-xs text-blue-950 uppercase tracking-wide">
+                      Vincular Itens do Orçamento aos Parâmetros Globais
+                    </span>
+                  </div>
+                  <span className="text-[11px] font-semibold text-blue-800">
+                    Marque abaixo os itens do orçamento aos quais o parâmetro global se aplica (pode vincular a mais de um item).
+                  </span>
+                </div>
+
+                {(() => {
+                  const paramList = header.dadosComplementares || [];
+                  const safeIdx = Math.min(selectedGlobalParamIndex, Math.max(0, paramList.length - 1));
+                  const activeParam = paramList[safeIdx];
+                  const activeLinkedIds = activeParam
+                    ? (activeParam.itemIds && activeParam.itemIds.length > 0 ? activeParam.itemIds : (activeParam.itemId ? [activeParam.itemId] : []))
+                    : [];
+                  const validItens = itens.filter(i => (i.item_eap || i.descricao));
+
+                  return (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3 items-start">
+                      {/* Seleção do Parâmetro */}
+                      <div className="space-y-1">
+                        <label className="text-[11px] font-bold text-blue-900 block">1. Escolha o Parâmetro Global:</label>
+                        <select
+                          value={safeIdx}
+                          onChange={(e) => setSelectedGlobalParamIndex(parseInt(e.target.value, 10))}
+                          className="w-full p-2 bg-white border border-blue-300 rounded-lg text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500/30 cursor-pointer"
+                        >
+                          {paramList.map((dc, i) => (
+                            <option key={dc.id || i} value={i}>
+                              {dc.parametro} ({dc.valor} {dc.unidade})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      {/* Lista de Checkboxes de Itens */}
+                      <div className="md:col-span-2 space-y-1">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-bold text-blue-900 block">
+                            2. Marque os itens que utilizarão o valor de "{activeParam?.parametro || 'Parâmetro'}":
+                          </label>
+                          <span className="text-[10px] font-bold bg-blue-200 text-blue-900 px-2 py-0.5 rounded-full">
+                            {activeLinkedIds.length} item(ns) vinculado(s)
+                          </span>
+                        </div>
+
+                        <div className="bg-white p-2 rounded-lg border border-blue-200 max-h-44 overflow-y-auto space-y-1 divide-y divide-slate-100 text-xs shadow-inner">
+                          {validItens.length === 0 ? (
+                            <div className="text-slate-400 text-xs italic p-2 text-center">Nenhum item cadastrado no orçamento.</div>
+                          ) : (
+                            validItens.map((it) => {
+                              const isChecked = activeLinkedIds.includes(it.id);
+                              return (
+                                <label
+                                  key={it.id}
+                                  className={`flex items-center gap-2.5 p-1.5 rounded-md transition-colors cursor-pointer ${
+                                    isChecked ? 'bg-blue-50 text-blue-950 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={isChecked}
+                                    onChange={() => handleToggleItemLinkToParam(safeIdx, it.id)}
+                                    className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                  <span className="flex-1 text-xs">
+                                    {it.item_eap ? <span className="font-mono text-blue-800 font-bold mr-1.5">{it.item_eap}</span> : null}
+                                    <span>{it.descricao || 'Item sem descrição'}</span>
+                                    {it.unidade ? <span className="text-slate-400 font-normal ml-1">({it.unidade})</span> : null}
+                                  </span>
+                                </label>
+                              );
+                            })
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* TABELA DE PARÂMETROS GLOBAIS DA OBRA CADASTRADOS */}
             {(header.dadosComplementares || []).length > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs mt-2">
@@ -3317,7 +3453,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                     <tr>
                       <th className="p-2.5">Descrição do Parâmetro</th>
                       <th className="p-2.5">Parâmetro do Sistema</th>
-                      <th className="p-2.5">Item Vinculado ao Cálculo</th>
+                      <th className="p-2.5">Itens Vinculados</th>
                       <th className="p-2.5 text-right">Valor Global</th>
                       <th className="p-2.5 text-center">Unidade</th>
                       {!readonly && <th className="p-2.5 text-center">Ações</th>}
@@ -3359,38 +3495,25 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                           </td>
 
                           <td className="p-2.5 text-slate-700 text-xs font-medium min-w-[220px]">
-                            {!readonly ? (
-                              <div className="relative flex items-center">
-                                <select
-                                  value={dc.itemId || ''}
-                                  onChange={(e) => handleUpdateDadoComplementar(idx, 'itemId', e.target.value)}
-                                  className={`w-full pl-7 pr-3 py-1.5 bg-white border rounded-lg text-xs font-semibold outline-none transition-all shadow-2xs cursor-pointer truncate ${
-                                    dc.itemId ? 'border-blue-300 text-blue-900 bg-blue-50/40' : 'border-slate-300 text-slate-700 hover:border-blue-400'
-                                  }`}
-                                >
-                                  <option value="">(Nenhum - Parâmetro Geral)</option>
-                                  {itens.map((i) => (
-                                    <option key={i.id} value={i.id}>
-                                      {i.item_eap ? `${i.item_eap} - ` : ''}{i.descricao} {i.unidade ? `(${i.unidade})` : ''}
-                                    </option>
+                            {(() => {
+                              const linkedIds = dc.itemIds && dc.itemIds.length > 0 ? dc.itemIds : (dc.itemId ? [dc.itemId] : []);
+                              if (linkedIds.length === 0) {
+                                return <span className="text-slate-400 text-xs italic">Geral (Nenhum)</span>;
+                              }
+                              const linkedItems = itens.filter(i => linkedIds.includes(i.id));
+                              return (
+                                <div className="flex flex-wrap gap-1 items-center max-w-[320px]">
+                                  {linkedItems.map(it => (
+                                    <span key={it.id} className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-900 border border-blue-200 rounded-md font-semibold text-[11px]">
+                                      <Target className="w-3 h-3 text-blue-600 shrink-0" />
+                                      <span className="truncate max-w-[180px]" title={it.descricao}>
+                                        {it.item_eap ? `${it.item_eap} - ` : ''}{it.descricao}
+                                      </span>
+                                    </span>
                                   ))}
-                                </select>
-                                <Target className={`w-3.5 h-3.5 absolute left-2 pointer-events-none ${dc.itemId ? 'text-blue-600' : 'text-slate-400'}`} />
-                              </div>
-                            ) : dc.itemId || dc.itemDescricao ? (
-                              <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-lg font-semibold text-xs">
-                                <Target className="w-3.5 h-3.5 text-blue-600 shrink-0" />
-                                <span className="truncate max-w-[220px]" title={dc.itemDescricao || 'Item Vinculado'}>
-                                  {(() => {
-                                    const found = itens.find(it => it.id === dc.itemId);
-                                    if (found) return `${found.item_eap ? `${found.item_eap} - ` : ''}${found.descricao}`;
-                                    return dc.itemDescricao || 'Item Vinculado';
-                                  })()}
-                                </span>
-                              </span>
-                            ) : (
-                              <span className="text-slate-400 text-xs italic">Geral (Nenhum)</span>
-                            )}
+                                </div>
+                              );
+                            })()}
                           </td>
 
                           <td className="p-2.5 text-right font-mono font-bold text-blue-900">
