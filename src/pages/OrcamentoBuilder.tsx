@@ -2210,7 +2210,8 @@ export default function OrcamentoBuilder() {
       });
 
       const filtered = p.filter((_, i) => !indicesToRemove.has(i));
-      return ensureSingleTrailingBlankRow(filtered, id!);
+      const rebuilt = rebuildEapCodes(filtered);
+      return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
     setHasUnsavedChanges(true);
   };
