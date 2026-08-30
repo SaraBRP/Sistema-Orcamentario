@@ -4379,7 +4379,11 @@ export default function OrcamentoBuilder() {
                   );
 
                   const isSectionRow = Boolean((item as any).isTextLine || (item as any).isSecao || (!item.codigo && !item.composicao_id));
-                  const isHighlighted = Boolean(highlightedEap && (item.item_eap || '').trim() === highlightedEap.trim());
+                  const isHighlighted = Boolean(
+                    highlightedEap && 
+                    ((item.item_eap || '').trim() === highlightedEap.trim() || 
+                     (item.item_eap || '').replace(/\s+/g, '') === highlightedEap.replace(/\s+/g, ''))
+                  );
 
                   return (
                     <tr 
@@ -4392,11 +4396,11 @@ export default function OrcamentoBuilder() {
                       onDrop={(e) => handleDrop(e, index)}
                       onDragEnd={handleDragEnd}
                       onClick={(e) => handleRowClick(index, e)}
-                      style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '4px solid #d97706', transition: 'all 0.3s ease' } : {}}
+                      style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '6px solid #d97706', transition: 'all 0.3s ease' } : {}}
                       className={clsx(
                         "transition-all group select-none border-l-4",
                         styles.rowBgClass,
-                        isHighlighted ? "!bg-amber-100 !border-l-amber-500 font-bold" : "",
+                        isHighlighted ? "!bg-amber-200 !border-l-amber-600 text-amber-950 font-bold" : "",
                         selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
                       )}
                     >
@@ -4569,7 +4573,7 @@ export default function OrcamentoBuilder() {
                           className={clsx(
                             "w-full h-full bg-transparent text-center px-2 py-2 outline-none border border-transparent transition-all",
                             styles.textClass,
-                            (isSectionRow || item.isSummary) ? "cursor-not-allowed bg-slate-50/50 text-slate-400" : "focus:border-blue-500 focus:bg-white",
+                            (isSectionRow || item.isSummary) ? (isHighlighted ? "cursor-not-allowed bg-amber-100/60 text-amber-900" : "cursor-not-allowed bg-slate-50/50 text-slate-400") : "focus:border-blue-500 focus:bg-white",
                             item.codigo && !item.isSummary ? "cursor-not-allowed text-slate-500/80" : ""
                           )}
                         />
@@ -4610,7 +4614,7 @@ export default function OrcamentoBuilder() {
                             ? (item as any).displayQuantidade
                             : (isChildOfComp ? item.baseQuantidade * item.effectiveMultiplier : item.quantidade);
                           if (isSectionRow || item.isSummary) {
-                            return <div className="w-full h-full bg-slate-50/50 cursor-not-allowed" />;
+                            return <div className={clsx("w-full h-full cursor-not-allowed", isHighlighted ? "bg-amber-100/60" : "bg-slate-50/50")} />;
                           }
                           
                           if (activeCell?.rowIndex === index && activeCell?.colIndex === 3 && isEditingCell) {
