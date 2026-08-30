@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef } from 'react';
+import React, { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -32,6 +32,8 @@ type OrcamentoItem = {
   total_mo: number;
   total: number;
   composicao_id?: string | null;
+  parentCompositionId?: string | null;
+  parent_composition_id?: string | null;
   isTemp?: boolean;
   /** Flag temporária: indica que o usuário recuou explicitamente este item,
    *  impedindo que rebuildEapCodes o re-promova automaticamente sob uma atividade mãe. */
@@ -732,6 +734,7 @@ export default function OrcamentoBuilder() {
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
   const [highlightedEap, setHighlightedEap] = useState<string | null>(null);
   const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
+  const [dropTarget, setDropTarget] = useState<{ index: number; position: 'above' | 'below' } | null>(null);
   const [targetImportRowIndex, setTargetImportRowIndex] = useState<number | null>(null);
 
   const [equipeDuracoesMap, setEquipeDuracoesMap] = useState<Record<string, string>>(() => {
@@ -1342,7 +1345,31 @@ export default function OrcamentoBuilder() {
 
 
 
-  // Manipuladores de Drag and Drop (Reordenação de Linhas)
+  // Manipuladores de Drag and Drop (Reordenação de Linhas com Suporte a Blocos e Indicador de Posição Estilo MS Project)
+  const getBlockLength = (index: number, list: OrcamentoItem[]): number => {
+    const item = list[index];
+    if (!item) return 1;
+    const eap = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+
+    let count = 1;
+    if (eap) {
+      const prefix = eap + '.';
+      for (let k = index + 1; k < list.length; k++) {
+        const kEap = (list[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+        if (
+          kEap.startsWith(prefix) || 
+          (item.id && list[k].parentCompositionId === item.id) || 
+          (item.id && list[k].composicao_id === item.id)
+        ) {
+          count++;
+        } else {
+          break;
+        }
+      }
+    }
+    return count;
+  };
+
   const handleDragStart = (e: React.DragEvent, index: number) => {
     const item = itens[index];
     if ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '') {
@@ -1350,12 +1377,23 @@ export default function OrcamentoBuilder() {
       return;
     }
     setDraggedRowIndex(index);
+    setDropTarget(null);
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', String(index));
   };
 
-  const handleDragOver = (e: React.DragEvent, _index: number) => {
+  const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
+    if (draggedRowIndex === null || draggedRowIndex === index) return;
+
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const midY = rect.top + rect.height / 2;
+    const position: 'above' | 'below' = e.clientY < midY ? 'above' : 'below';
+
+    setDropTarget(prev => {
+      if (prev && prev.index === index && prev.position === position) return prev;
+      return { index, position };
+    });
   };
 
   const getParentCompositionRange = (childIndex: number, list: OrcamentoItem[]): { parentIndex: number; siblingIndices: number[] } | null => {
@@ -1398,7 +1436,13 @@ export default function OrcamentoBuilder() {
 
   const handleDrop = (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
-    if (draggedRowIndex === null || draggedRowIndex === targetIndex) return;
+    if (draggedRowIndex === null) {
+      setDropTarget(null);
+      return;
+    }
+
+    const position = dropTarget?.position || 'above';
+    setDropTarget(null);
 
     setItens(prev => {
       pushUndoSnapshot(prev);
@@ -1406,7 +1450,8 @@ export default function OrcamentoBuilder() {
       const draggedItem = copy[draggedRowIndex];
       if (!draggedItem) return prev;
 
-      const isChild = isChildOfComposition(draggedRowIndex, copy) || Boolean(draggedItem.composicao_id);
+      // Insumo interno de composição
+      const isChild = isChildOfComposition(draggedRowIndex, copy) || Boolean(draggedItem.parentCompositionId);
 
       if (isChild) {
         const compRange = getParentCompositionRange(draggedRowIndex, copy);
@@ -1415,38 +1460,33 @@ export default function OrcamentoBuilder() {
           const minAllowedIndex = siblingIndices[0];
           const maxAllowedIndex = siblingIndices[siblingIndices.length - 1];
 
-          if (targetIndex < minAllowedIndex || targetIndex > maxAllowedIndex) {
-            return prev;
-          }
-
+          let targetPos = position === 'above' ? targetIndex : targetIndex + 1;
+          let adjustedDest = Math.max(minAllowedIndex, Math.min(maxAllowedIndex, targetPos));
           const [movedInsumo] = copy.splice(draggedRowIndex, 1);
-          copy.splice(targetIndex, 0, movedInsumo);
+          if (draggedRowIndex < adjustedDest) adjustedDest--;
+          copy.splice(adjustedDest, 0, movedInsumo);
 
           const rebuilt = rebuildEapCodes(copy);
           return ensureSingleTrailingBlankRow(rebuilt, id!);
         }
       }
 
-      const draggedEap = (draggedItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-      const childIndices: number[] = [];
-      if (draggedEap) {
-        const prefix = draggedEap + '.';
-        for (let k = draggedRowIndex + 1; k < copy.length; k++) {
-          const kEap = (copy[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-          if (kEap.startsWith(prefix)) {
-            childIndices.push(k);
-          } else {
-            break;
-          }
-        }
+      // Bloco de composição/seção completa (move o pai JUNTO com todos os seus filhos)
+      const blockLength = getBlockLength(draggedRowIndex, copy);
+
+      let targetPos = targetIndex;
+      if (position === 'below') {
+        const targetBlockLen = getBlockLength(targetIndex, copy);
+        targetPos = targetIndex + targetBlockLen;
       }
 
-      const blockLength = 1 + childIndices.length;
+      if (draggedRowIndex === targetPos) return prev;
+
       const block = copy.splice(draggedRowIndex, blockLength);
 
-      let insertIndex = targetIndex;
-      if (draggedRowIndex < targetIndex) {
-        insertIndex = targetIndex - blockLength + 1;
+      let insertIndex = targetPos;
+      if (draggedRowIndex < targetPos) {
+        insertIndex = targetPos - blockLength;
       }
       insertIndex = Math.max(0, Math.min(copy.length, insertIndex));
 
@@ -1455,12 +1495,14 @@ export default function OrcamentoBuilder() {
       const rebuilt = rebuildEapCodes(copy);
       return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
+
     setDraggedRowIndex(null);
     setHasUnsavedChanges(true);
   };
 
   const handleDragEnd = () => {
     setDraggedRowIndex(null);
+    setDropTarget(null);
   };
 
   const createBlankRow = (orcamentoId: string, seq: number): OrcamentoItem => {
@@ -4386,25 +4428,40 @@ export default function OrcamentoBuilder() {
                      (item.item_eap || '').replace(/\s+/g, '') === highlightedEap.replace(/\s+/g, ''))
                   );
 
+                  const showDropAbove = dropTarget?.index === index && dropTarget.position === 'above';
+                  const showDropBelow = dropTarget?.index === index && dropTarget.position === 'below';
+
                   return (
-                    <tr 
-                      key={item.id}
-                      id={item.item_eap ? `row-eap-${item.item_eap.trim()}` : undefined}
-                      data-eap={item.item_eap ? item.item_eap.trim() : undefined}
-                      draggable={hasValues}
-                      onDragStart={(e) => handleDragStart(e, index)}
-                      onDragOver={(e) => handleDragOver(e, index)}
-                      onDrop={(e) => handleDrop(e, index)}
-                      onDragEnd={handleDragEnd}
-                      onClick={(e) => handleRowClick(index, e)}
-                      style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '6px solid #d97706', transition: 'all 0.3s ease' } : {}}
-                      className={clsx(
-                        "transition-all group select-none border-l-4",
-                        styles.rowBgClass,
-                        isHighlighted ? "!bg-amber-200 !border-l-amber-600 text-amber-950 font-bold" : "",
-                        selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
+                    <Fragment key={item.id || `frag-${index}`}>
+                      {showDropAbove && (
+                        <tr key={`drop-above-${index}`} className="h-1 bg-blue-600 z-50 pointer-events-none">
+                          <td colSpan={11} className="p-0 h-1 bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,1)] border-none relative">
+                            <div className="h-1 bg-blue-600 w-full relative flex items-center justify-between">
+                              <div className="w-3 h-3 bg-blue-600 rounded-full border-2 border-white shadow-md absolute -left-1.5 -top-1"></div>
+                              <div className="w-3 h-3 bg-blue-600 rounded-full border-2 border-white shadow-md absolute -right-1.5 -top-1"></div>
+                            </div>
+                          </td>
+                        </tr>
                       )}
-                    >
+
+                      <tr 
+                        key={item.id}
+                        id={item.item_eap ? `row-eap-${item.item_eap.trim()}` : undefined}
+                        data-eap={item.item_eap ? item.item_eap.trim() : undefined}
+                        draggable={hasValues}
+                        onDragStart={(e) => handleDragStart(e, index)}
+                        onDragOver={(e) => handleDragOver(e, index)}
+                        onDrop={(e) => handleDrop(e, index)}
+                        onDragEnd={handleDragEnd}
+                        onClick={(e) => handleRowClick(index, e)}
+                        style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '6px solid #d97706', transition: 'all 0.3s ease' } : {}}
+                        className={clsx(
+                          "transition-all group select-none border-l-4",
+                          styles.rowBgClass,
+                          isHighlighted ? "!bg-amber-200 !border-l-amber-600 text-amber-950 font-bold" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
+                        )}
+                      >
                       {/* EAP Item */}
                       <td
                         id={`cell-td-${index}-0`}
@@ -4904,7 +4961,19 @@ export default function OrcamentoBuilder() {
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
                       </td>
-                    </tr>
+                      </tr>
+
+                      {showDropBelow && (
+                        <tr key={`drop-below-${index}`} className="h-1 bg-blue-600 z-50 pointer-events-none">
+                          <td colSpan={11} className="p-0 h-1 bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,1)] border-none relative">
+                            <div className="h-1 bg-blue-600 w-full relative flex items-center justify-between">
+                              <div className="w-3 h-3 bg-blue-600 rounded-full border-2 border-white shadow-md absolute -left-1.5 -top-1"></div>
+                              <div className="w-3 h-3 bg-blue-600 rounded-full border-2 border-white shadow-md absolute -right-1.5 -top-1"></div>
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })
               )}
