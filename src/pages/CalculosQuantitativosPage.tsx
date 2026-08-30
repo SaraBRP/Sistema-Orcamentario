@@ -494,7 +494,28 @@ export default function CalculosQuantitativosPage() {
   };
 
   const executeGerarOrcamento = async (mem: MemorialCalculoRecord, formData: typeof newOrcamentoData) => {
-    const codigoOrcamentoGerado = formData.codigo || mem.codigoOrcamento || (await generateNextOrcamentoCode());
+    let codigoOrcamentoGerado = (formData.codigo || mem.codigoOrcamento || '').trim();
+
+    // 0. Verifica no Supabase se o código já foi utilizado por outro orçamento no meio tempo
+    try {
+      if (codigoOrcamentoGerado) {
+        const { data: existingOrc } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .select('id')
+          .eq('codigo', codigoOrcamentoGerado);
+
+        if (existingOrc && existingOrc.length > 0) {
+          // Se o código já foi usado por outro orçamento, gera automaticamente o próximo código vago oficial
+          codigoOrcamentoGerado = await generateNextOrcamentoCode();
+        }
+      } else {
+        codigoOrcamentoGerado = await generateNextOrcamentoCode();
+      }
+    } catch (e) {
+      if (!codigoOrcamentoGerado) codigoOrcamentoGerado = await generateNextOrcamentoCode();
+    }
+
     const nomeOrcamento = formData.projeto || mem.nomeProjeto || `Orçamento - ${codigoOrcamentoGerado}`;
     let targetOrcId = `orc-${Date.now()}`;
     const cid = formData.cidade ? formatCidadeUpperNoAccents(formData.cidade).trim() : '';
@@ -517,6 +538,8 @@ export default function CalculosQuantitativosPage() {
           gestor_cliente: formData.gestor_cliente || '',
           responsavel: formData.responsavel || '',
           local_obra: localObra,
+          cidade: cid,
+          estado: est,
           revisao,
           status: 'Em Elaboração',
           dados_complementares: mem.header?.dadosComplementares || []
