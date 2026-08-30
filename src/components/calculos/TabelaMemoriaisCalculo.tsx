@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Trash2, Eye, Calendar, Building2, User, MapPin } from 'lucide-react';
+import { Search, Trash2, Eye, Calendar, Building2, User, MapPin, Rocket } from 'lucide-react';
 import type { DadosComplementaresHeader, ItemMemoriaOficial } from '../../types/calculos';
 
 export interface MemorialCalculoRecord {
@@ -25,12 +25,14 @@ interface Props {
   memoriais: MemorialCalculoRecord[];
   onSelectMemorial: (memorial: MemorialCalculoRecord) => void;
   onDeleteMemorial: (id: string) => void;
+  onGerarOrcamento?: (memorial: MemorialCalculoRecord) => void;
 }
 
 export const TabelaMemoriaisCalculo: React.FC<Props> = ({
   memoriais,
   onSelectMemorial,
-  onDeleteMemorial
+  onDeleteMemorial,
+  onGerarOrcamento
 }) => {
   const [searchTerm, setSearchTerm] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('todos');
@@ -170,6 +172,17 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                           <Eye className="w-3.5 h-3.5" />
                           <span>Abrir</span>
                         </button>
+                        {onGerarOrcamento && (
+                          <button
+                            type="button"
+                            onClick={() => onGerarOrcamento(m)}
+                            className="px-2.5 py-1 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 font-bold rounded-lg text-xs flex items-center gap-1 transition-colors border border-emerald-200/80 cursor-pointer"
+                            title="Gerar Orçamento a partir deste Memorial"
+                          >
+                            <Rocket className="w-3.5 h-3.5 text-emerald-600" />
+                            <span>Orçamento</span>
+                          </button>
+                        )}
                         <button
                           type="button"
                           onClick={() => onDeleteMemorial(m.id)}
