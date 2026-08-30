@@ -2430,14 +2430,15 @@ export default function OrcamentoBuilder() {
   const renderObsWithLinks = (text: string) => {
     if (!text) return null;
 
-    // Regex para detectar códigos EAP com pontos (ex: 1.2.1, 10.3) ou menções tipo "item 1.2.1", "item 1", "item 2"
-    const EAP_REGEX = /(\b(?:item\s+)?\d+(?:\.\d+)+\b|\bitem\s+\d+\b)/gi;
+    // Regex para detectar códigos EAP (ex: 1.2.1, 1.2, 1, item 1.2.1, item 1)
+    const EAP_REGEX = /(\b(?:item\s+)?\d+(?:\.\d+)*\b)/gi;
     const parts = text.split(EAP_REGEX);
 
     const handleEapClick = (rawCode: string) => {
       const eapCode = rawCode.replace(/^item\s+/i, '').trim();
+      const cleanEap = eapCode.replace(/\s+/g, '');
 
-      const itemIdx = itens.findIndex(it => (it.item_eap || '').trim() === eapCode);
+      const itemIdx = itens.findIndex(it => (it.item_eap || '').trim() === eapCode || (it.item_eap || '').replace(/\s+/g, '') === cleanEap);
       if (itemIdx >= 0) {
         setSelectedRowIndex(itemIdx);
         setSelectedRowIndices(new Set([itemIdx]));
@@ -2446,7 +2447,7 @@ export default function OrcamentoBuilder() {
       setHighlightedEap(eapCode);
       setTimeout(() => setHighlightedEap(null), 4500);
 
-      // Descolapsa ancestrais na árvore de tópicos para garantir que a linha esteja visível no DOM
+      // Descolapsa ancestrais se o item estiver colapsado dentro de um tópico pai
       setCollapsedEaps(prev => {
         const next = new Set(prev);
         const codeParts = eapCode.split('.');
@@ -2461,35 +2462,44 @@ export default function OrcamentoBuilder() {
         return altered ? next : prev;
       });
 
-      // Aguarda renderização do React e rola suavemente até a linha
-      setTimeout(() => {
-        const cleanEap = eapCode.replace(/\s+/g, '');
-        const targetElements = document.querySelectorAll(`[data-eap="${eapCode}"], [data-eap="${cleanEap}"], [id*="row-eap-${eapCode}"]`);
-        if (targetElements.length > 0) {
-          targetElements.forEach((el) => {
-            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          });
-        } else {
+      // Rola a tela até a linha correspondente sem erros de sintaxe CSS
+      const doScroll = () => {
+        const rowPlanilha = document.getElementById(`row-eap-${eapCode}`) || document.getElementById(`row-eap-${cleanEap}`);
+        const rowMemoria = document.getElementById(`memoria-row-eap-${eapCode}`) || document.getElementById(`memoria-row-eap-${cleanEap}`);
+
+        let foundAny = false;
+        [rowPlanilha, rowMemoria].forEach((el) => {
+          if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+            foundAny = true;
+          }
+        });
+
+        if (!foundAny) {
           const allRows = document.querySelectorAll('tr[data-eap]');
           allRows.forEach((el) => {
-            const attr = el.getAttribute('data-eap');
-            if (attr && attr.trim() === eapCode) {
-              el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            const attr = (el.getAttribute('data-eap') || '').replace(/\s+/g, '');
+            if (attr === cleanEap) {
+              el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
             }
           });
         }
-      }, 150);
+      };
+
+      doScroll();
+      setTimeout(doScroll, 120);
+      setTimeout(doScroll, 320);
     };
 
     return parts.map((part, i) => {
-      const isMatch = /^(?:item\s+)?\d+(?:\.\d+)+$/i.test(part) || /^item\s+\d+$/i.test(part);
+      const isMatch = /^(?:item\s+)?\d+(?:\.\d+)*$/i.test(part.trim());
       if (isMatch) {
         return (
           <span
             key={i}
             onClick={() => handleEapClick(part)}
             className="underline decoration-2 underline-offset-2 font-bold cursor-pointer decoration-dotted text-blue-700 hover:text-blue-900 hover:bg-blue-100/80 rounded px-1 transition-all inline-flex items-center gap-0.5"
-            title={`Clique para ir direto ao item ${part} na planilha`}
+            title={`Clique para ir direto ao item ${part} na planilha ou memória de cálculo`}
           >
             {part}
           </span>
