@@ -92,7 +92,10 @@ export default function Configuracoes() {
   const fetchProfiles = async () => {
     setLoading(true);
 
-    // 1. Tenta buscar primeiramente da tabela exclusiva engenharia.usuarios
+    let dbProfiles: Profile[] = [];
+    let isExclusive = false;
+
+    // 1. Busca perfis de usuários salvos no banco
     const { data: engData, error: engError } = await supabase
       .schema('engenharia')
       .from('usuarios')
@@ -100,22 +103,79 @@ export default function Configuracoes() {
       .order('created_at', { ascending: false });
 
     if (!engError && engData) {
-      const valid = engData.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
-      setProfiles(valid);
-      setIsExclusiveTable(true);
+      dbProfiles = engData.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
+      isExclusive = true;
     } else {
-      // 2. Fallback para public.profiles enquanto a tabela engenharia.usuarios é provisionada
       const { data: pubData, error: pubError } = await supabase
         .from('profiles')
         .select('*')
         .order('created_at', { ascending: false });
 
       if (!pubError && pubData) {
-        const valid = pubData.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
-        setProfiles(valid);
+        dbProfiles = pubData.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
       }
-      setIsExclusiveTable(false);
+      isExclusive = false;
     }
+
+    setIsExclusiveTable(isExclusive);
+
+    // 2. Busca solicitações de cadastro pendentes enviadas da tela de login (LocalStorage + Supabase)
+    let localPending: any[] = [];
+    try {
+      const savedSol = localStorage.getItem('brp_solicitacoes_cadastro_usuarios');
+      if (savedSol) {
+        const list = JSON.parse(savedSol);
+        localPending = list.filter((s: any) => s.status === 'pendente');
+      }
+    } catch {}
+
+    let dbPending: any[] = [];
+    try {
+      const { data } = await supabase
+        .schema('engenharia')
+        .from('solicitacoes_cadastro')
+        .select('*')
+        .eq('status', 'pendente');
+      if (data) dbPending = data;
+    } catch {}
+
+    const pendingMap = new Map<string, Profile>();
+    
+    dbPending.forEach(s => {
+      pendingMap.set(s.email.toLowerCase(), {
+        id: s.id,
+        nome: s.nome,
+        email: s.email,
+        cargo: s.cargo || 'orcamentista',
+        status: 'pendente',
+        approved: false,
+        created_at: s.data_solicitacao || s.created_at || new Date().toISOString()
+      });
+    });
+
+    localPending.forEach(s => {
+      if (!pendingMap.has(s.email.toLowerCase())) {
+        pendingMap.set(s.email.toLowerCase(), {
+          id: s.id,
+          nome: s.nome,
+          email: s.email,
+          cargo: s.cargo || 'orcamentista',
+          status: 'pendente',
+          approved: false,
+          created_at: s.dataSolicitacao || new Date().toISOString()
+        });
+      }
+    });
+
+    const existingEmails = new Set(dbProfiles.map(p => (p.email || '').toLowerCase()));
+    const finalPendingList: Profile[] = [];
+    pendingMap.forEach((p, emailKey) => {
+      if (emailKey && !existingEmails.has(emailKey)) {
+        finalPendingList.push(p);
+      }
+    });
+
+    setProfiles([...dbProfiles, ...finalPendingList]);
     setLoading(false);
   };
 
@@ -175,39 +235,59 @@ export default function Configuracoes() {
   }, [approvedProfiles, pendingProfiles, subTabUsuarios, searchTerm, cargoFiltro, sortField, sortDirection]);
 
   // Aprovar Acesso de Usuário Pendente
-  const handleAprovar = async (id: string, _email?: string | null) => {
-    let query = isExclusiveTable
-      ? supabase.schema('engenharia').from('usuarios').update({ approved: true, status: 'ativo' }).eq('id', id)
-      : supabase.from('profiles').update({ approved: true, status: 'ativo' }).eq('id', id);
+  const handleAprovar = async (id: string, email?: string | null) => {
+    try {
+      if (isExclusiveTable) {
+        await supabase.schema('engenharia').from('usuarios').update({ approved: true, status: 'ativo' }).eq('id', id);
+      } else {
+        await supabase.from('profiles').update({ approved: true, status: 'ativo' }).eq('id', id);
+      }
+    } catch {}
 
-    const { error } = await query;
+    try {
+      await supabase.schema('engenharia').from('solicitacoes_cadastro').update({ status: 'aprovado' }).eq('id', id);
+    } catch {}
 
-    if (error) {
-      alert('Erro ao aprovar acesso: ' + error.message);
-    } else {
-      fetchProfiles();
-    }
+    try {
+      const saved = localStorage.getItem('brp_solicitacoes_cadastro_usuarios');
+      if (saved) {
+        const list = JSON.parse(saved);
+        const updated = list.map((s: any) => 
+          s.id === id || (email && s.email.toLowerCase() === email.toLowerCase()) 
+            ? { ...s, status: 'aprovado' } 
+            : s
+        );
+        localStorage.setItem('brp_solicitacoes_cadastro_usuarios', JSON.stringify(updated));
+      }
+    } catch {}
+
+    window.dispatchEvent(new Event('storage'));
+    fetchProfiles();
   };
 
-  const handleRecusarOuExcluir = async (id: string, nome?: string | null) => {
-    if (!window.confirm(`Tem certeza que deseja excluir o usuário "${nome || 'selecionado'}"?`)) return;
+  const handleRecusarOuExcluir = async (id: string, nome?: string | null, email?: string | null) => {
+    if (!window.confirm(`Tem certeza que deseja recusar/excluir o cadastro de "${nome || 'selecionado'}"?`)) return;
+
+    try {
+      await supabase.schema('engenharia').from('solicitacoes_cadastro').delete().eq('id', id);
+    } catch {}
+
+    try {
+      const saved = localStorage.getItem('brp_solicitacoes_cadastro_usuarios');
+      if (saved) {
+        const list = JSON.parse(saved);
+        const updated = list.filter((s: any) => s.id !== id && (!email || s.email.toLowerCase() !== email.toLowerCase()));
+        localStorage.setItem('brp_solicitacoes_cadastro_usuarios', JSON.stringify(updated));
+      }
+    } catch {}
 
     let query = isExclusiveTable
       ? supabase.schema('engenharia').from('usuarios').delete().eq('id', id)
       : supabase.from('profiles').delete().eq('id', id);
 
-    const { error } = await query;
+    await query;
 
-    if (error) {
-      // Se a exclusão física for bloqueada por chave estrangeira (FK em propostas), faz soft-delete marcando como 'excluido'
-      console.warn('DELETE física impedida por vínculo FK, realizando exclusão lógica:', error.message);
-      const fallbackQuery = isExclusiveTable
-        ? supabase.schema('engenharia').from('usuarios').update({ status: 'excluido', approved: false }).eq('id', id)
-        : supabase.from('profiles').update({ status: 'excluido', approved: false }).eq('id', id);
-
-      await fallbackQuery;
-    }
-
+    window.dispatchEvent(new Event('storage'));
     fetchProfiles();
   };
 
@@ -561,7 +641,7 @@ export default function Configuracoes() {
                               <span>Permitir</span>
                             </button>
                             <button
-                              onClick={() => handleRecusarOuExcluir(user.id, user.nome)}
+                              onClick={() => handleRecusarOuExcluir(user.id, user.nome, user.email)}
                               className="bg-rose-50 text-rose-700 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg font-bold text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                               title="Recusar Acesso"
                             >
