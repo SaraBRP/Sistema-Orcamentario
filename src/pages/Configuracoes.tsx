@@ -163,12 +163,15 @@ export default function Configuracoes() {
     
     // Processa registros do Supabase solicitacoes_cadastro
     dbRequests.forEach(s => {
+      if (!s.email) return;
+      const emailLower = s.email.toLowerCase();
+      const savedCargo = localStorage.getItem(`brp_user_cargo_${emailLower}`);
       const isApproved = s.status === 'aprovado';
-      requestsMap.set(s.email.toLowerCase(), {
+      requestsMap.set(emailLower, {
         id: s.id,
         nome: formatUserDisplayName(s.nome, s.email),
         email: s.email,
-        cargo: s.cargo || 'orcamentista',
+        cargo: savedCargo || s.cargo || 'orcamentista',
         status: isApproved ? 'ativo' : 'pendente',
         approved: isApproved,
         created_at: s.data_solicitacao || s.created_at || new Date().toISOString()
@@ -177,18 +180,35 @@ export default function Configuracoes() {
 
     // Processa registros do LocalStorage
     localRequests.forEach(s => {
-      if (!requestsMap.has(s.email.toLowerCase())) {
-        const isApproved = s.status === 'aprovado';
-        requestsMap.set(s.email.toLowerCase(), {
+      if (!s.email) return;
+      const emailLower = s.email.toLowerCase();
+      const savedCargo = localStorage.getItem(`brp_user_cargo_${emailLower}`);
+      const isApproved = s.status === 'aprovado';
+      if (!requestsMap.has(emailLower)) {
+        requestsMap.set(emailLower, {
           id: s.id,
           nome: formatUserDisplayName(s.nome, s.email),
           email: s.email,
-          cargo: s.cargo || 'orcamentista',
+          cargo: savedCargo || s.cargo || 'orcamentista',
           status: isApproved ? 'ativo' : 'pendente',
           approved: isApproved,
           created_at: s.dataSolicitacao || new Date().toISOString()
         });
       }
+    });
+
+    // Aplica cargos atualizados aos dbProfiles
+    dbProfiles = dbProfiles.map(p => {
+      if (!p.email) return p;
+      const emailLower = p.email.toLowerCase();
+      const savedCargo = localStorage.getItem(`brp_user_cargo_${emailLower}`);
+      const reqMatch = requestsMap.get(emailLower);
+      const finalCargo = savedCargo || (reqMatch ? reqMatch.cargo : p.cargo);
+      return {
+        ...p,
+        nome: formatUserDisplayName(p.nome, p.email),
+        cargo: finalCargo || 'orcamentista'
+      };
     });
 
     // Inclui cadastros que ainda não possuem perfil duplicado em dbProfiles
@@ -396,6 +416,15 @@ export default function Configuracoes() {
 
     await query;
 
+    if (selectedUser.email) {
+      try {
+        let queryEmail = isExclusiveTable
+          ? supabase.schema('engenharia').from('usuarios').update(payload).eq('email', selectedUser.email.toLowerCase())
+          : supabase.from('profiles').update(payload).eq('email', selectedUser.email.toLowerCase());
+        await queryEmail;
+      } catch {}
+    }
+
     try {
       await supabase
         .schema('engenharia')
@@ -407,6 +436,20 @@ export default function Configuracoes() {
         })
         .eq('id', selectedUser.id);
     } catch {}
+
+    if (selectedUser.email) {
+      try {
+        await supabase
+          .schema('engenharia')
+          .from('solicitacoes_cadastro')
+          .update({
+            nome: finalNome,
+            cargo: finalCargo,
+            permitted_screens: editScreens
+          })
+          .eq('email', selectedUser.email.toLowerCase());
+      } catch {}
+    }
 
     try {
       const saved = localStorage.getItem('brp_solicitacoes_cadastro_usuarios');
@@ -422,6 +465,7 @@ export default function Configuracoes() {
     } catch {}
 
     if (selectedUser.email) {
+      localStorage.setItem(`brp_user_cargo_${selectedUser.email.toLowerCase()}`, finalCargo);
       saveUserPermissionsLocally(selectedUser.email, editScreens);
     }
 
