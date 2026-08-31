@@ -258,6 +258,9 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   const startRow = 8;
   let currentRow = startRow;
 
+  // Track Nível 1 (Seções Principais) para o somatório final não duplicar/triplicar
+  const level1RowIndices: number[] = [];
+
   if (itens.length === 0) {
     const row = wsOrcamento.getRow(currentRow);
     row.getCell(2).value = '1.0';
@@ -271,11 +274,17 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     row.getCell(10).value = { formula: `F${currentRow}*G${currentRow}` };
     row.getCell(11).value = { formula: `F${currentRow}*H${currentRow}` };
     row.getCell(12).value = { formula: `J${currentRow}+K${currentRow}` };
+    level1RowIndices.push(currentRow);
     currentRow++;
   } else {
     itens.forEach((item, index) => {
       const row = wsOrcamento.getRow(currentRow);
       const isSeçao = item.isSecao || item.is_secao || item.isSummary || !item.codigo || item.codigo === '-';
+      const itemEap = String(item.item_eap || item.item || `${index + 1}`).trim();
+
+      if (!itemEap.includes('.')) {
+        level1RowIndices.push(currentRow);
+      }
 
       const matUnit = Number(item.valor_unitario_mat ?? item.valor_material_unitario ?? item.mat_unit ?? 0);
       const moUnit = Number(item.valor_unitario_mo ?? item.valor_mao_obra_unitario ?? item.mo_unit ?? 0);
@@ -284,7 +293,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
       const totalMat = Number(item.total_mat ?? (qtd * matUnit));
       const totalMo = Number(item.total_mo ?? (qtd * moUnit));
 
-      row.getCell(2).value = item.item_eap || item.item || `${index + 1}`;
+      row.getCell(2).value = itemEap;
       row.getCell(3).value = item.codigo || '-';
       row.getCell(4).value = item.descricao || item.nome || '';
       row.getCell(5).value = isSeçao ? '' : (item.unidade || item.und || '');
@@ -395,8 +404,16 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     };
   });
 
-  wsOrcamento.getCell(`J${summaryValueRow}`).value = { formula: `SUM(J8:J${lastDataRow})` };
-  wsOrcamento.getCell(`K${summaryValueRow}`).value = { formula: `SUM(K8:K${lastDataRow})` };
+  // Fórmulas exatas de somatório evitando duplicação hierárquica
+  if (level1RowIndices.length > 0) {
+    const sumJ = level1RowIndices.map(r => `J${r}`).join('+');
+    const sumK = level1RowIndices.map(r => `K${r}`).join('+');
+    wsOrcamento.getCell(`J${summaryValueRow}`).value = { formula: sumJ };
+    wsOrcamento.getCell(`K${summaryValueRow}`).value = { formula: sumK };
+  } else {
+    wsOrcamento.getCell(`J${summaryValueRow}`).value = { formula: `SUM(J8:J${lastDataRow})` };
+    wsOrcamento.getCell(`K${summaryValueRow}`).value = { formula: `SUM(K8:K${lastDataRow})` };
+  }
   wsOrcamento.getCell(`L${summaryValueRow}`).value = { formula: `J${summaryValueRow}+K${summaryValueRow}` };
 
   [10, 11, 12].forEach(col => {
