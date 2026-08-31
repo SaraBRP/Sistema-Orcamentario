@@ -2,7 +2,6 @@ import React, { Fragment, useState, useEffect, useMemo, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
-import * as XLSX from 'xlsx';
 import { 
   ArrowLeft, ArrowRight, Save, Plus, Search, Trash2, Import, Calculator, 
   Settings2, FileSpreadsheet, Layers, X, Check, ChevronDown, ChevronRight,
@@ -14,6 +13,7 @@ import { clsx } from 'clsx';
 import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemorialOficial';
 import DistribuiçãoEquipeTab from '../components/calculos/DistribuiçãoEquipeTab';
 import type { CalculoItem } from '../types/calculos';
+import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
 
 type OrcamentoItem = {
   id: string;
@@ -775,228 +775,22 @@ export default function OrcamentoBuilder() {
       return;
     }
 
-    // Exportação para Excel (.xlsx)
-    try {
-      const wb = XLSX.utils.book_new();
-      const cleanName = (configData.nome || 'Orcamento').replace(/[^a-zA-Z0-9_-]/g, '_');
-      const filename = `${cleanName}_${exportScope === 'full' ? 'Completo' : activeSubTab}.xlsx`;
-
-      // 1. Planilha Orçamentária
-      if (exportScope === 'full' || activeSubTab === 'planilha') {
-        const planilhaData = computedItens
-          .filter(i => (i.item_eap || '').trim() !== '' || (i.descricao || '').trim() !== '')
-          .map(i => ({
-            'Item EAP': i.item_eap,
-            'Código': i.codigo || '-',
-            'Descrição do Serviço / Seção': i.descricao,
-            'Unidade': i.isSummary ? '' : i.unidade,
-            'Quantidade': i.isSummary ? 0 : i.quantidade,
-            'Valor Mat. Unit (R$)': i.isSummary ? 0 : i.valor_unitario_mat,
-            'Valor M.O. Unit (R$)': i.isSummary ? 0 : i.valor_unitario_mo,
-            'Valor Unitário (R$)': i.isSummary ? 0 : i.valor_unitario,
-            'Total Material (R$)': i.total_mat,
-            'Total Mão de Obra (R$)': i.total_mo,
-            'Total Geral (R$)': i.total
-          }));
-
-        const wsPlanilha = XLSX.utils.json_to_sheet(planilhaData);
-        XLSX.utils.book_append_sheet(wb, wsPlanilha, 'Planilha Orçamentária');
-      }
-
-      // 2. Memória de Cálculo
-      if (exportScope === 'full' || activeSubTab === 'memoria_calculo') {
-        const memoriaData = itens
-          .filter(i => (i.item_eap || '').trim() !== '' || (i.descricao || '').trim() !== '')
-          .map(i => ({
-            'Item EAP': i.item_eap,
-            'Tipo': (i as any).isSecao || (i as any).is_secao ? 'Seção / Tópico' : (i.composicao_id ? 'Composição' : 'Insumo'),
-            'Descrição do Serviço': i.descricao,
-            'Unidade': i.unidade,
-            'Quantidade': i.quantidade,
-            'Equação Literal': (i as any).equacaoLiteral || (i as any).equacao_literal || '',
-            'Substituição Numérica': (i as any).substituicaoNumerica || (i as any).substituicao_numerica || '',
-            'Observação / Memória': (i as any).observacaoMemoria || (i as any).observacao_memoria || ''
-          }));
-
-        const wsMemoria = XLSX.utils.json_to_sheet(memoriaData);
-        XLSX.utils.book_append_sheet(wb, wsMemoria, 'Memória de Cálculo');
-      }
-
-      // 3. Distribuição de Equipe (Hierarquia e Cálculos Féis ao Componente DistribuiçãoEquipeTab)
-      if (exportScope === 'full' || activeSubTab === 'distribuicao_equipe') {
-        const isMaoDeObra = (item: OrcamentoItem) => {
-          const cod = (item.codigo || '').trim().toLowerCase();
-          if (cod.startsWith('mo.') || cod.startsWith('mo') || cod.includes('mo.')) return true;
-          const fonte = (item.banco_fonte || '').trim().toUpperCase();
-          if (fonte.includes('MO') || fonte.includes('MÃO DE OBRA')) return true;
-          const un = (item.unidade || '').trim().toLowerCase();
-          if ((un === 'h' || un === 'hs' || un === 'hr' || un === 'hrs') && (item.valor_unitario_mo > 0 || (item as any).total_mo > 0)) return true;
-          return false;
-        };
-
-        const getDirectParentEap = (eap: string): string => {
-          const parts = (eap || '').trim().split('.').filter(Boolean);
-          if (parts.length <= 1) return '';
-          return parts.slice(0, -1).join('.');
-        };
-
-        const compareEap = (a: string, b: string) => {
-          const partsA = (a || '').split('.').map(n => parseInt(n, 10) || 0);
-          const partsB = (b || '').split('.').map(n => parseInt(n, 10) || 0);
-          const maxLen = Math.max(partsA.length, partsB.length);
-          for (let i = 0; i < maxLen; i++) {
-            const valA = partsA[i] ?? 0;
-            const valB = partsB[i] ?? 0;
-            if (valA !== valB) return valA - valB;
-          }
-          return 0;
-        };
-
-        const eapMap = new Map<string, OrcamentoItem>();
-        computedItens.forEach(i => {
-          if (i.item_eap) eapMap.set(i.item_eap.trim(), i);
-        });
-
-        const findItemInMap = (targetEap: string): OrcamentoItem | undefined => {
-          const trimmed = targetEap.trim();
-          if (eapMap.has(trimmed)) return eapMap.get(trimmed);
-          if (eapMap.has(trimmed + '.0')) return eapMap.get(trimmed + '.0');
-          if (eapMap.has(trimmed.replace(/\.0$/, ''))) return eapMap.get(trimmed.replace(/\.0$/, ''));
-          for (const [key, item] of eapMap.entries()) {
-            if (((item as any).isSecao || (item as any).is_secao || !item.unidade) && (key === trimmed || key.startsWith(trimmed + '.'))) {
-              return item;
-            }
-          }
-          return undefined;
-        };
-
-        const getSectionForItem = (itemEap: string): { eap: string; descricao: string } => {
-          const parts = itemEap.trim().split('.').filter(Boolean);
-          const rootNum = parts[0] || '1';
-          if (parts.length <= 1) {
-            const item = findItemInMap(rootNum);
-            return { eap: rootNum, descricao: item?.descricao || rootNum };
-          }
-          for (let len = parts.length - 1; len >= 1; len--) {
-            const ancestorEap = parts.slice(0, len).join('.');
-            const ancestorItem = findItemInMap(ancestorEap);
-            if (ancestorItem && ((ancestorItem as any).isSecao || (ancestorItem as any).is_secao || !ancestorItem.unidade) && ancestorItem.descricao) {
-              return { eap: ancestorEap, descricao: ancestorItem.descricao };
-            }
-          }
-          const rootItem = findItemInMap(rootNum);
-          return { eap: rootNum, descricao: rootItem?.descricao || rootNum };
-        };
-
-        const compsWithLaborMap = new Map<string, {
-          comp: OrcamentoItem;
-          laborInsumos: Array<{ insumo: OrcamentoItem; totalHoras: number }>;
-        }>();
-
-        computedItens.forEach(item => {
-          const itemEap = (item.item_eap || '').trim();
-          if (!itemEap) return;
-
-          const directLaborChildren = computedItens.filter(child => {
-            const parentEap = getDirectParentEap(child.item_eap);
-            return parentEap === itemEap && isMaoDeObra(child);
-          });
-
-          if (directLaborChildren.length > 0) {
-            directLaborChildren.sort((a, b) => compareEap(a.item_eap, b.item_eap));
-            compsWithLaborMap.set(itemEap, {
-              comp: item,
-              laborInsumos: directLaborChildren.map(ins => ({
-                insumo: ins,
-                totalHoras: (ins as any).displayQuantidade !== undefined ? (ins as any).displayQuantidade : (ins.quantidade || 0)
-              }))
-            });
-          }
-        });
-
-        const sectionsMap = new Map<string, {
-          eap: string;
-          descricao: string;
-          compositions: Array<{
-            comp: OrcamentoItem;
-            laborInsumos: Array<{ insumo: OrcamentoItem; totalHoras: number }>;
-          }>;
-        }>();
-
-        compsWithLaborMap.forEach(({ comp, laborInsumos }) => {
-          const { eap: sectionEap, descricao: sectionDesc } = getSectionForItem(comp.item_eap);
-          if (!sectionsMap.has(sectionEap)) {
-            sectionsMap.set(sectionEap, { eap: sectionEap, descricao: sectionDesc, compositions: [] });
-          }
-          sectionsMap.get(sectionEap)!.compositions.push({ comp, laborInsumos });
-        });
-
-        const sections = Array.from(sectionsMap.values());
-        sections.sort((a, b) => compareEap(a.eap, b.eap));
-
-        const equipeExportRows: any[] = [];
-
-        sections.forEach(sec => {
-          // Linha de Seção
-          equipeExportRows.push({
-            'Item EAP': sec.eap,
-            'Estrutura / Seção / Atividade / Mão de Obra': `SEÇÃO: ${sec.descricao}`,
-            'Tipo': 'SEÇÃO',
-            'Unidade': '',
-            'Qtd / Horas Totais': '',
-            'Duração (Dias)': '',
-            'Carga Horária (h/dia)': '',
-            'Horas Disponíveis / Pessoa': '',
-            'Equipe Necessária': ''
-          });
-
-          sec.compositions.sort((a, b) => compareEap(a.comp.item_eap, b.comp.item_eap));
-
-          sec.compositions.forEach(({ comp, laborInsumos }) => {
-            const dur = parseFloat(equipeDuracoesMap[comp.id] || '0') || 0;
-            const jor = parseFloat(equipeJornadasMap[comp.id] || '0') || 0;
-            const hrsDisp = dur * jor;
-
-            // Linha de Composição
-            equipeExportRows.push({
-              'Item EAP': comp.item_eap,
-              'Estrutura / Seção / Atividade / Mão de Obra': comp.descricao,
-              'Tipo': 'COMPOSIÇÃO',
-              'Unidade': comp.unidade || '',
-              'Qtd / Horas Totais': comp.quantidade || 0,
-              'Duração (Dias)': dur > 0 ? dur : '-',
-              'Carga Horária (h/dia)': jor > 0 ? jor : '-',
-              'Horas Disponíveis / Pessoa': hrsDisp > 0 ? hrsDisp : '-',
-              'Equipe Necessária': '-'
-            });
-
-            // Linhas de Insumo Mão de Obra
-            laborInsumos.forEach(({ insumo, totalHoras }) => {
-              const eqNecessaria = (hrsDisp > 0 && totalHoras > 0) ? Math.ceil(totalHoras / hrsDisp) : 0;
-
-              equipeExportRows.push({
-                'Item EAP': insumo.item_eap,
-                'Estrutura / Seção / Atividade / Mão de Obra': `  ↳ ${insumo.descricao}`,
-                'Tipo': 'MÃO DE OBRA',
-                'Unidade': insumo.unidade || 'H',
-                'Qtd / Horas Totais': totalHoras,
-                'Duração (Dias)': dur > 0 ? dur : '-',
-                'Carga Horária (h/dia)': jor > 0 ? jor : '-',
-                'Horas Disponíveis / Pessoa': hrsDisp > 0 ? hrsDisp : '-',
-                'Equipe Necessária': eqNecessaria > 0 ? `${eqNecessaria} Colaborador(es)` : '-'
-              });
-            });
-          });
-        });
-
-        const wsEquipe = XLSX.utils.json_to_sheet(equipeExportRows.length > 0 ? equipeExportRows : [{ 'Mensagem': 'Nenhum item de mão de obra cadastrado' }]);
-        XLSX.utils.book_append_sheet(wb, wsEquipe, 'Distribuição de Equipe');
-      }
-
-      XLSX.writeFile(wb, filename);
-    } catch (err: any) {
-      alert('Erro ao gerar arquivo Excel: ' + err.message);
-    }
+    // Exportação para Excel (.xlsx) utilizando o Padrão Oficial Formatado da BRP Engenharia
+    exportarOrcamentoExcelPadrao({
+      codigo: orcamento?.codigo || (configData as any)?.codigo || 'BRP',
+      revisao: orcamento?.revisao || (configData as any)?.revisao || '00',
+      cliente: orcamento?.cliente || (configData as any)?.cliente || '',
+      projeto: orcamento?.projeto || orcamento?.nome || (configData as any)?.nome || '',
+      gestor_cliente: orcamento?.gestor_cliente || (configData as any)?.gestor_cliente || '',
+      responsavel: orcamento?.responsavel || (configData as any)?.responsavel || '',
+      cidade: orcamento?.cidade || (configData as any)?.cidade || '',
+      estado: orcamento?.estado || (configData as any)?.estado || 'GO',
+      itens: computedItens,
+      memoriaCalculo: itens,
+      distribuicaoEquipe: []
+    }).catch(err => {
+      alert('Erro ao gerar arquivo Excel formatado: ' + err.message);
+    });
   };
 
   // Controle de Navegação por Células (Grid Excel Style)
