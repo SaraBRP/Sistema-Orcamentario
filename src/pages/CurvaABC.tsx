@@ -1,7 +1,7 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
-  Download, Search, Calculator, 
+  Download, Search, 
   BarChart3, Layers, Package, FileSpreadsheet, Check, X,
   ChevronDown, RefreshCw
 } from 'lucide-react';
@@ -39,6 +39,52 @@ export default function CurvaABC() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
   const [loadingOrcamentos, setLoadingOrcamentos] = useState(true);
   const [selectedOrcamento, setSelectedOrcamento] = useState<any | null>(null);
+
+  // Estados para o Campo de Pesquisa Interativo de Orçamentos
+  const [orcamentoSearchQuery, setOrcamentoSearchQuery] = useState('');
+  const [isOrcamentoDropdownOpen, setIsOrcamentoDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
+
+  // Sincroniza o texto de pesquisa com o orçamento selecionado
+  useEffect(() => {
+    if (selectedOrcamento) {
+      setOrcamentoSearchQuery(`[${selectedOrcamento.codigo}] ${selectedOrcamento.nome || selectedOrcamento.projeto || 'Sem título'} - ${selectedOrcamento.cliente || 'Sem Cliente'}`);
+    } else {
+      setOrcamentoSearchQuery('');
+    }
+  }, [selectedOrcamento]);
+
+  // Fecha o dropdown ao clicar fora
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setIsOrcamentoDropdownOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  // Lista de orçamentos filtrada em tempo real conforme o usuário digita no campo
+  const filteredOrcamentosList = useMemo(() => {
+    if (!orcamentoSearchQuery.trim()) return orcamentos;
+
+    const query = orcamentoSearchQuery.toLowerCase().trim();
+    // Se a busca for idêntica ao rótulo do orçamento atualmente selecionado, exibe todos os orçamentos
+    if (selectedOrcamento) {
+      const selectedLabel = `[${selectedOrcamento.codigo}] ${selectedOrcamento.nome || selectedOrcamento.projeto || 'Sem título'} - ${selectedOrcamento.cliente || 'Sem Cliente'}`.toLowerCase();
+      if (query === selectedLabel) {
+        return orcamentos;
+      }
+    }
+
+    return orcamentos.filter(orc => {
+      const matchCodigo = (orc.codigo || '').toLowerCase().includes(query);
+      const matchNome = (orc.nome || orc.projeto || '').toLowerCase().includes(query);
+      const matchCliente = (orc.cliente || '').toLowerCase().includes(query);
+      return matchCodigo || matchNome || matchCliente;
+    });
+  }, [orcamentos, orcamentoSearchQuery, selectedOrcamento]);
 
   // Itens & ABC State
   const [rawItems, setRawItems] = useState<OrcamentoItem[]>([]);
@@ -437,30 +483,93 @@ export default function CurvaABC() {
             <p className="text-slate-500 text-xs mt-0.5">Análise de impacto financeiro e gráfico da Curva S Pareto</p>
           </div>
 
-          {/* Selector em Dropdown */}
-          <div className="relative w-full sm:w-80">
-            <Calculator className="w-4 h-4 text-blue-600 absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
-            <select
-              value={selectedOrcamento?.id || ''}
-              onChange={(e) => {
-                const found = orcamentos.find(o => o.id === e.target.value);
-                setSelectedOrcamento(found || null);
-              }}
-              className="w-full pl-9 pr-9 py-2 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-blue-500 appearance-none cursor-pointer transition-colors shadow-2xs"
-            >
-              {loadingOrcamentos ? (
-                <option value="">Carregando orçamentos...</option>
-              ) : orcamentos.length === 0 ? (
-                <option value="">Nenhum orçamento cadastrado</option>
-              ) : (
-                orcamentos.map((orc) => (
-                  <option key={orc.id} value={orc.id}>
-                    [{orc.codigo}] {orc.nome || orc.projeto || 'Sem título'} - {orc.cliente || 'Sem Cliente'}
-                  </option>
-                ))
-              )}
-            </select>
-            <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+          {/* Seletor de Orçamento com Campo de Pesquisa Autocomplete */}
+          <div className="relative w-full sm:w-96" ref={dropdownRef}>
+            <div className="relative flex items-center">
+              <Search className="w-4 h-4 text-blue-600 absolute left-3.5 pointer-events-none" />
+              <input
+                type="text"
+                value={orcamentoSearchQuery}
+                onFocus={() => setIsOrcamentoDropdownOpen(true)}
+                onChange={(e) => {
+                  setOrcamentoSearchQuery(e.target.value);
+                  setIsOrcamentoDropdownOpen(true);
+                }}
+                placeholder="Pesquisar orçamento por código, nome ou cliente..."
+                className="w-full pl-9 pr-16 py-2 bg-slate-50 hover:bg-slate-100/80 focus:bg-white border border-slate-300 rounded-xl text-xs font-bold text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 transition-all shadow-2xs"
+              />
+              <div className="absolute right-2.5 flex items-center gap-1">
+                {orcamentoSearchQuery && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setOrcamentoSearchQuery('');
+                      setIsOrcamentoDropdownOpen(true);
+                    }}
+                    className="p-1 text-slate-400 hover:text-slate-600 rounded-full transition-colors cursor-pointer"
+                    title="Limpar pesquisa"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setIsOrcamentoDropdownOpen(!isOrcamentoDropdownOpen)}
+                  className="p-1 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer"
+                >
+                  <ChevronDown className={clsx("w-4 h-4 transition-transform", isOrcamentoDropdownOpen && "rotate-180")} />
+                </button>
+              </div>
+            </div>
+
+            {/* Dropdown de Resultados Filtrados em Tempo Real */}
+            {isOrcamentoDropdownOpen && (
+              <div className="absolute left-0 right-0 top-full mt-1.5 bg-white border border-slate-200 rounded-2xl shadow-xl z-50 max-h-72 overflow-y-auto divide-y divide-slate-100 animate-in fade-in slide-in-from-top-1 duration-150">
+                {loadingOrcamentos ? (
+                  <div className="p-4 text-center text-xs text-slate-400 flex items-center justify-center gap-2">
+                    <RefreshCw className="w-3.5 h-3.5 animate-spin text-blue-500" />
+                    <span>Carregando orçamentos...</span>
+                  </div>
+                ) : filteredOrcamentosList.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    Nenhum orçamento encontrado com o termo "{orcamentoSearchQuery}"
+                  </div>
+                ) : (
+                  filteredOrcamentosList.map((orc) => {
+                    const isSelected = selectedOrcamento?.id === orc.id;
+                    return (
+                      <button
+                        key={orc.id}
+                        type="button"
+                        onClick={() => {
+                          setSelectedOrcamento(orc);
+                          setIsOrcamentoDropdownOpen(false);
+                        }}
+                        className={clsx(
+                          "w-full text-left px-3.5 py-2.5 text-xs transition-colors flex items-center justify-between gap-2 cursor-pointer hover:bg-blue-50/70",
+                          isSelected ? "bg-blue-50/90 font-bold text-blue-900" : "text-slate-700"
+                        )}
+                      >
+                        <div className="flex flex-col gap-0.5 truncate">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-mono font-bold text-blue-600 bg-blue-50 px-1.5 py-0.5 rounded text-[11px] border border-blue-100">
+                              [{orc.codigo}]
+                            </span>
+                            <span className="font-semibold text-slate-900 truncate">
+                              {orc.nome || orc.projeto || 'Sem título'}
+                            </span>
+                          </div>
+                          <span className="text-[11px] text-slate-400 truncate">
+                            Cliente: <strong className="text-slate-600 font-semibold">{orc.cliente || 'Não informado'}</strong>
+                          </span>
+                        </div>
+                        {isSelected && <Check className="w-4 h-4 text-blue-600 shrink-0" />}
+                      </button>
+                    );
+                  })
+                )}
+              </div>
+            )}
           </div>
         </div>
 
