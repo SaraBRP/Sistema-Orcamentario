@@ -382,9 +382,9 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
           cell.alignment = { vertical: 'middle' };
         }
 
-        // Formatação numéricas
-        if (col === 6 && typeof cell.value === 'number') cell.numFmt = '#,##0.00';
-        if (col >= 7 && col <= 12 && typeof cell.value === 'number') cell.numFmt = 'R$ #,##0.00';
+        // Formatação numéricas (Contábil R$ para todas as colunas de valor/total 7 a 12, inclusive fórmulas)
+        if (col === 6) cell.numFmt = '#,##0.00';
+        if (col >= 7 && col <= 12) cell.numFmt = 'R$ #,##0.00';
       }
 
       currentRow++;
