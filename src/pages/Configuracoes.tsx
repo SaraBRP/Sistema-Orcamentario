@@ -85,6 +85,7 @@ export default function Configuracoes() {
   const [editStatus, setEditStatus] = useState<'ativo' | 'inativo'>('ativo');
   const [editScreens, setEditScreens] = useState<string[]>([]);
   const [savingUser, setSavingUser] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Estado para Novo Cadastro Manual
   const [isNewUserModalOpen, setIsNewUserModalOpen] = useState(false);
@@ -438,9 +439,20 @@ export default function Configuracoes() {
       }
     } catch {}
 
+    const updatedSelectedUser = {
+      ...selectedUser,
+      nome: finalNome,
+      cargo: finalCargo,
+      status: finalStatus,
+      permitted_screens: editScreens
+    };
+
+    setSelectedUser(updatedSelectedUser);
     setSavingUser(false);
     setIsEditModalOpen(false);
-    setSelectedUser(null);
+    setSaveSuccess(true);
+    setTimeout(() => setSaveSuccess(false), 2500);
+
     window.dispatchEvent(new Event('storage'));
     fetchProfiles();
   };
@@ -847,10 +859,15 @@ export default function Configuracoes() {
                       <button
                         onClick={handleSaveEdit}
                         disabled={savingUser}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                        className={clsx(
+                          "px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-all shadow-xs cursor-pointer disabled:opacity-50",
+                          saveSuccess
+                            ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                            : "bg-blue-600 hover:bg-blue-700 text-white"
+                        )}
                       >
                         <Check className="w-4 h-4" />
-                        <span>{savingUser ? 'Salvando...' : 'Salvar Permissões'}</span>
+                        <span>{savingUser ? 'Salvando...' : saveSuccess ? 'Permissões Salvas!' : 'Salvar Permissões'}</span>
                       </button>
                     </div>
 
