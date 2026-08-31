@@ -1194,7 +1194,7 @@ export default function Orcamentos() {
                   <option value="" className="text-slate-500 font-normal">Selecione o Responsável / Orçamentista...</option>
                   {usuariosCadastrados.map((u: any) => (
                     <option key={u.id || u.nome} value={u.nome} className="text-slate-900 bg-white font-semibold">
-                      {u.nome} {u.email ? `(${u.email})` : ''}
+                      {u.nome}
                     </option>
                   ))}
                 </select>
