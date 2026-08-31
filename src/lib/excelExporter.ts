@@ -147,9 +147,14 @@ export function buildDistribuicaoEquipeRows(
     sec.compositions.sort((a, b) => compareEap(a.comp.item_eap, b.comp.item_eap));
 
     sec.compositions.forEach(({ comp, laborInsumos }) => {
-      const dur = parseFloat(duracoesMap[comp.id] || '1') || 1;
-      const jor = parseFloat(jornadasMap[comp.id] || '5') || 5;
-      const hrsDisp = dur * jor;
+      const durStr = duracoesMap[comp.id] || '';
+      const jorStr = jornadasMap[comp.id] || '';
+
+      const dur = parseFloat(durStr);
+      const jor = parseFloat(jorStr);
+
+      const hasValidConfig = !isNaN(dur) && dur > 0 && !isNaN(jor) && jor > 0;
+      const hrsDisp = hasValidConfig ? dur * jor : 0;
 
       exportRows.push({
         item_eap: comp.item_eap,
@@ -157,14 +162,16 @@ export function buildDistribuicaoEquipeRows(
         tipo: 'COMPOSIÇÃO',
         unidade: comp.unidade || '',
         qtd_horas: comp.quantidade || 0,
-        duracao: dur,
-        carga_horaria: jor,
-        horas_disp: hrsDisp,
-        equipe: ''
+        duracao: hasValidConfig ? dur : '-',
+        carga_horaria: hasValidConfig ? jor : '-',
+        horas_disp: hasValidConfig ? hrsDisp : '-',
+        equipe: '-'
       });
 
       laborInsumos.forEach(({ insumo, totalHoras }) => {
-        const eqNecessaria = hrsDisp > 0 && totalHoras > 0 ? Math.ceil(totalHoras / hrsDisp) : 0;
+        const eqNecessaria = hasValidConfig && hrsDisp > 0 && totalHoras > 0
+          ? Math.ceil(totalHoras / hrsDisp)
+          : 0;
 
         exportRows.push({
           item_eap: insumo.item_eap,
@@ -172,9 +179,9 @@ export function buildDistribuicaoEquipeRows(
           tipo: 'MÃO DE OBRA',
           unidade: insumo.unidade || 'H',
           qtd_horas: totalHoras,
-          duracao: dur,
-          carga_horaria: jor,
-          horas_disp: hrsDisp,
+          duracao: hasValidConfig ? dur : '-',
+          carga_horaria: hasValidConfig ? jor : '-',
+          horas_disp: hasValidConfig ? hrsDisp : '-',
           equipe: eqNecessaria > 0 ? `${eqNecessaria} Colaboradores` : '-'
         });
       });
