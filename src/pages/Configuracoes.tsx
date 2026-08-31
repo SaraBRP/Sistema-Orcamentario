@@ -67,6 +67,13 @@ const formatUserDisplayName = (nome?: string | null, email?: string | null) => {
   return 'Usuário';
 };
 
+const normalizeCargo = (cargo?: string | null): 'gestor' | 'orcamentista' => {
+  if (!cargo) return 'orcamentista';
+  const c = cargo.toLowerCase().trim();
+  if (c === 'gestor' || c === 'gestora') return 'gestor';
+  return 'orcamentista';
+};
+
 export default function Configuracoes() {
   const [activeTab, setActiveTab] = useState<Tab>('usuarios');
   const [subTabUsuarios, setSubTabUsuarios] = useState<SubTabUsuarios>('lista');
@@ -373,7 +380,7 @@ export default function Configuracoes() {
   const handleSelectUserForPermissions = (user: Profile) => {
     setSelectedUser(user);
     setEditNome(formatUserDisplayName(user.nome, user.email));
-    setEditCargo(user.cargo || 'orcamentista');
+    setEditCargo(normalizeCargo(user.cargo));
     setEditStatus((user.status as 'ativo' | 'inativo') || 'ativo');
     const savedScreens = (user.permitted_screens && user.permitted_screens.length > 0)
       ? user.permitted_screens
@@ -385,7 +392,7 @@ export default function Configuracoes() {
   const handleOpenEdit = (user: Profile) => {
     setSelectedUser(user);
     setEditNome(formatUserDisplayName(user.nome, user.email));
-    setEditCargo(user.cargo || 'orcamentista');
+    setEditCargo(normalizeCargo(user.cargo));
     setEditStatus((user.status as 'ativo' | 'inativo') || 'ativo');
     const savedScreens = (user.permitted_screens && user.permitted_screens.length > 0)
       ? user.permitted_screens
@@ -400,7 +407,7 @@ export default function Configuracoes() {
     setSavingUser(true);
 
     const finalNome = formatUserDisplayName(editNome, selectedUser.email);
-    const finalCargo = editCargo || selectedUser.cargo || 'orcamentista';
+    const finalCargo = normalizeCargo(editCargo);
     const finalStatus = editStatus || selectedUser.status || 'ativo';
 
     const payload = {
@@ -1006,8 +1013,8 @@ export default function Configuracoes() {
                 <div>
                   <label className="block text-xs font-bold text-slate-700 mb-1">Cargo / Nível</label>
                   <select
-                    value={editCargo}
-                    onChange={(e) => setEditCargo(e.target.value)}
+                    value={normalizeCargo(editCargo)}
+                    onChange={(e) => setEditCargo(normalizeCargo(e.target.value))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold"
                   >
                     <option value="orcamentista">Orçamentista</option>
