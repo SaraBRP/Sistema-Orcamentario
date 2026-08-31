@@ -1812,27 +1812,32 @@ export default function OrcamentoBuilder() {
       }
 
       // Ordenar por EAP lexicograficamente
-      const sorted = (effectiveData || []).map((i: any) => ({
-        ...i,
-        item_eap: (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim(),
-        isSecao: i.is_secao !== undefined ? Boolean(i.is_secao) : Boolean(i.isSecao),
-        is_secao: i.is_secao !== undefined ? Boolean(i.is_secao) : Boolean(i.isSecao),
-        level: i.level !== undefined ? i.level : undefined,
-        isChildInsumoOfComposition: i.is_child_insumo !== undefined ? Boolean(i.is_child_insumo) : Boolean(i.isChildInsumoOfComposition),
-        parentCompositionId: i.parent_composition_id || i.parentCompositionId || '',
-        quantidade: parseFloat(i.quantidade || 0),
-        valor_unitario_mat: parseFloat(i.valor_unitario_mat || 0),
-        valor_unitario_mo: parseFloat(i.valor_unitario_mo || 0),
-        valor_unitario: parseFloat(i.valor_unitario || 0),
-        valor_unitario_com_bdi: parseFloat(i.valor_unitario_com_bdi || 0),
-        total_mat: parseFloat(i.total_mat || 0),
-        total_mo: parseFloat(i.total_mo || 0),
-        total: parseFloat(i.total || 0),
-        equacaoLiteral: i.equacao_literal || i.equacaoLiteral || '',
-        substituicaoNumerica: i.substituicao_numerica || i.substituicaoNumerica || '',
-        observacaoMemoria: i.observacao_memoria || i.observacaoMemoria || '',
-        formulasLista: Array.isArray(i.formulas_lista) ? i.formulas_lista : (Array.isArray(i.formulasLista) ? i.formulasLista : [])
-      })).sort(sortEap);
+      const sorted = (effectiveData || []).map((i: any) => {
+        const formulasArr = Array.isArray(i.formulas_lista) ? i.formulas_lista : (Array.isArray(i.formulasLista) ? i.formulasLista : []);
+        const firstForm = formulasArr.length > 0 ? formulasArr[0] : {};
+
+        return {
+          ...i,
+          item_eap: (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim(),
+          isSecao: i.is_secao !== undefined ? Boolean(i.is_secao) : Boolean(i.isSecao),
+          is_secao: i.is_secao !== undefined ? Boolean(i.is_secao) : Boolean(i.isSecao),
+          level: i.level !== undefined ? i.level : undefined,
+          isChildInsumoOfComposition: i.is_child_insumo !== undefined ? Boolean(i.is_child_insumo) : Boolean(i.isChildInsumoOfComposition),
+          parentCompositionId: i.parent_composition_id || i.parentCompositionId || '',
+          quantidade: parseFloat(i.quantidade || 0),
+          valor_unitario_mat: parseFloat(i.valor_unitario_mat || 0),
+          valor_unitario_mo: parseFloat(i.valor_unitario_mo || 0),
+          valor_unitario: parseFloat(i.valor_unitario || 0),
+          valor_unitario_com_bdi: parseFloat(i.valor_unitario_com_bdi || 0),
+          total_mat: parseFloat(i.total_mat || 0),
+          total_mo: parseFloat(i.total_mo || 0),
+          total: parseFloat(i.total || 0),
+          equacaoLiteral: i.equacaoLiteral || i.equacao_literal || firstForm.equacaoLiteral || firstForm.equacao_literal || '',
+          substituicaoNumerica: i.substituicaoNumerica || i.substituicao_numerica || firstForm.substituicaoNumerica || firstForm.substituicao_numerica || '',
+          observacaoMemoria: i.observacaoMemoria || i.observacao_memoria || firstForm.observacao || '',
+          formulasLista: formulasArr
+        };
+      }).sort(sortEap);
 
       const rebuilt = rebuildEapCodes(sorted);
       setItens(ensureSingleTrailingBlankRow(rebuilt, id!));
@@ -2675,10 +2680,19 @@ export default function OrcamentoBuilder() {
             total_mat: item.total_mat,
             total_mo: item.total_mo,
             composicao_id: item.composicao_id || null,
-            equacao_literal: (item as any).equacao_literal || (item as any).equacaoLiteral || null,
-            substituicao_numerica: (item as any).substituicao_numerica || (item as any).substituicaoNumerica || null,
             observacao_memoria: (item as any).observacao_memoria || (item as any).observacaoMemoria || null,
-            formulas_lista: (item as any).formulas_lista || (item as any).formulasLista || []
+            formulas_lista: (item as any).formulas_lista && (item as any).formulas_lista.length > 0 
+              ? (item as any).formulas_lista 
+              : ((item as any).formulasLista && (item as any).formulasLista.length > 0 
+                  ? (item as any).formulasLista 
+                  : (((item as any).substituicaoNumerica || (item as any).substituicao_numerica)
+                      ? [{
+                          id: `formula-${Date.now()}`,
+                          equacaoLiteral: (item as any).equacaoLiteral || (item as any).equacao_literal || '',
+                          substituicaoNumerica: (item as any).substituicaoNumerica || (item as any).substituicao_numerica || '',
+                          observacao: (item as any).observacaoMemoria || (item as any).observacao_memoria || ''
+                        }]
+                      : []))
           };
 
           const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
