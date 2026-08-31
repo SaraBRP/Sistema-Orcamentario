@@ -210,6 +210,11 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     views: [{ showGridLines: true }]
   });
 
+  wsOrcamento.properties.outlineProperties = {
+    summaryBelow: false,
+    summaryRight: true
+  };
+
   // Configuração de Larguras das Colunas (Iniciando na Coluna B)
   wsOrcamento.getColumn(1).width = 4;   // A
   wsOrcamento.getColumn(2).width = 12;  // B - Item EAP
@@ -288,6 +293,10 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
       const row = wsOrcamento.getRow(currentRow);
       const isSeçao = item.isSecao || item.is_secao || item.isSummary || !item.codigo || item.codigo === '-';
       const itemEap = String(item.item_eap || item.item || `${index + 1}`).trim();
+
+      // Define o nível de agrupamento hierárquico (outline level) no Excel
+      const outlineLevel = (itemEap.match(/\./g) || []).length;
+      row.outlineLevel = outlineLevel;
 
       if (!itemEap.includes('.')) {
         level1RowIndices.push(currentRow);
@@ -454,6 +463,11 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     views: [{ showGridLines: true }]
   });
 
+  wsMemoria.properties.outlineProperties = {
+    summaryBelow: false,
+    summaryRight: true
+  };
+
   wsMemoria.getColumn(1).width = 4;
   wsMemoria.getColumn(2).width = 12; // Item EAP
   wsMemoria.getColumn(3).width = 14; // Tipo
@@ -522,7 +536,10 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   memoriaRows.forEach((m, i) => {
     const rIdx = 8 + i;
     const row = wsMemoria.getRow(rIdx);
-    row.getCell(2).value = m.item_eap || `${i + 1}`;
+    const itemEap = String(m.item_eap || `${i + 1}`).trim();
+    row.outlineLevel = (itemEap.match(/\./g) || []).length;
+
+    row.getCell(2).value = itemEap;
     row.getCell(3).value = m.tipo || (m.codigo ? 'Composição' : 'Seção');
     row.getCell(4).value = m.descricao || '';
     row.getCell(5).value = m.unidade || '';
@@ -551,6 +568,11 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   const wsEquipe = workbook.addWorksheet('Distribuição de Equipe', {
     views: [{ showGridLines: true }]
   });
+
+  wsEquipe.properties.outlineProperties = {
+    summaryBelow: false,
+    summaryRight: true
+  };
 
   wsEquipe.getColumn(1).width = 4;
   wsEquipe.getColumn(2).width = 12; // Item EAP
@@ -613,6 +635,8 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     const row = wsEquipe.getRow(rIdx);
 
     const itemEap = eq.item_eap || eq['Item EAP'] || `${i + 1}`;
+    row.outlineLevel = (String(itemEap).match(/\./g) || []).length;
+
     const atividade = eq.atividade || eq['Estrutura / Seção / Atividade / Mão de Obra'] || eq.nome || '';
     const tipo = eq.tipo || eq['Tipo'] || 'MÃO DE OBRA';
     const unidade = eq.unidade || eq['Unidade'] || '';
