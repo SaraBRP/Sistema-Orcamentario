@@ -24,11 +24,13 @@ import {
   Bell,
   LayoutGrid,
   User,
+  ShieldCheck
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { ModalKanbanOrcamentos } from './ModalKanbanOrcamentos';
 import { ModalEditarPerfil, type UserProfileData } from './ModalEditarPerfil';
+import { ModalSolicitacoesCadastro, LOCAL_STORAGE_SOLICITACOES_KEY, type SolicitacaoCadastroUsuario } from './ModalSolicitacoesCadastro';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -128,50 +130,74 @@ export default function Layout() {
   // Estados dos Modais e Popovers
   const [kanbanModalOpen, setKanbanModalOpen] = useState(false);
   const [editarPerfilModalOpen, setEditarPerfilModalOpen] = useState(false);
+  const [solicitacoesModalOpen, setSolicitacoesModalOpen] = useState(false);
   const [notificacoesOpen, setNotificacoesOpen] = useState(false);
   const [perfilOpen, setPerfilOpen] = useState(false);
 
-  const [notificacoes, setNotificacoes] = useState<NotificacaoItem[]>([]);
+  const [notificacoes, setNotificacoes] = useState<(NotificacaoItem & { isUserRegistration?: boolean })[]>([]);
   const [kanbanUnreadCount, setKanbanUnreadCount] = useState<number>(0);
+  const [pendingUsersCount, setPendingUsersCount] = useState<number>(0);
 
   useEffect(() => {
-    const updateUnreadCount = () => {
+    const updateCounts = () => {
       try {
+        // 1. Kanban unread count
         const lastViewedRaw = localStorage.getItem('kanban_last_viewed_time');
-        
-        // Se o usuário nunca abriu o Kanban nesta sessão/dispositivo, inicializamos com o timestamp atual
-        // para que não mostre o badge "1" desnecessariamente sem haver mudança recente.
         if (!lastViewedRaw) {
           localStorage.setItem('kanban_last_viewed_time', String(Date.now()));
           setKanbanUnreadCount(0);
-          return;
+        } else {
+          const lastViewed = parseInt(lastViewedRaw, 10);
+          const saved = localStorage.getItem('brp_orcamentos_list');
+          if (saved) {
+            const list = JSON.parse(saved);
+            if (Array.isArray(list)) {
+              let unread = 0;
+              list.forEach((item: any) => {
+                const itemTime = item.updated_at ? new Date(item.updated_at).getTime() : (item.dataCriacao ? new Date(item.dataCriacao).getTime() : 0);
+                if (itemTime > lastViewed) unread++;
+              });
+              setKanbanUnreadCount(unread);
+            }
+          }
         }
 
-        const lastViewed = parseInt(lastViewedRaw, 10);
-        const saved = localStorage.getItem('brp_orcamentos_list');
-        if (saved) {
-          const list = JSON.parse(saved);
-          if (Array.isArray(list)) {
-            let unread = 0;
-            list.forEach((item: any) => {
-              const itemTime = item.updated_at ? new Date(item.updated_at).getTime() : (item.dataCriacao ? new Date(item.dataCriacao).getTime() : 0);
-              if (itemTime > lastViewed) {
-                unread++;
-              }
-            });
-            setKanbanUnreadCount(unread);
-          }
+        // 2. Solicitações de cadastro pendentes de aprovação pelo Gestor
+        const savedSol = localStorage.getItem(LOCAL_STORAGE_SOLICITACOES_KEY);
+        let pendCount = 0;
+        if (savedSol) {
+          const list: SolicitacaoCadastroUsuario[] = JSON.parse(savedSol);
+          pendCount = list.filter(s => s.status === 'pendente').length;
+        }
+        setPendingUsersCount(pendCount);
+
+        // Se houver solicitações pendentes, injeta a notificação para o Gestor
+        if (pendCount > 0) {
+          setNotificacoes([
+            {
+              id: 'notif-pending-users',
+              tipo: 'revisao',
+              titulo: 'Solicitação de Cadastro de Usuário 👤',
+              mensagem: `${pendCount} novo${pendCount > 1 ? 's' : ''} usuário${pendCount > 1 ? 's' : ''} cadastrado${pendCount > 1 ? 's' : ''} aguardando sua aprovação de acesso.`,
+              tempo: 'Pendente',
+              lida: false,
+              isUserRegistration: true
+            }
+          ]);
+        } else {
+          setNotificacoes([]);
         }
       } catch (e) {
         setKanbanUnreadCount(0);
+        setPendingUsersCount(0);
       }
     };
 
-    updateUnreadCount();
-    window.addEventListener('storage', updateUnreadCount);
-    const interval = setInterval(updateUnreadCount, 8000);
+    updateCounts();
+    window.addEventListener('storage', updateCounts);
+    const interval = setInterval(updateCounts, 6000);
     return () => {
-      window.removeEventListener('storage', updateUnreadCount);
+      window.removeEventListener('storage', updateCounts);
       clearInterval(interval);
     };
   }, []);
@@ -253,6 +279,12 @@ export default function Layout() {
         onClose={() => setEditarPerfilModalOpen(false)}
         profile={userProfile}
         onSaveProfile={handleSaveProfile}
+      />
+
+      {/* Modal de Aprovação de Solicitações de Cadastro de Usuários (Área do Gestor) */}
+      <ModalSolicitacoesCadastro
+        isOpen={solicitacoesModalOpen}
+        onClose={() => setSolicitacoesModalOpen(false)}
       />
 
       {/* Mobile Header */}
@@ -529,23 +561,35 @@ export default function Layout() {
                       <div className="py-8 text-center text-slate-400 text-xs font-medium space-y-1">
                         <Bell className="w-7 h-7 mx-auto text-slate-300 mb-1 opacity-60" />
                         <p className="font-semibold text-slate-600">Nenhuma notificação no momento</p>
-                        <p className="text-[11px] text-slate-400">As notificações de aprovações e cotações surgirão aqui.</p>
+                        <p className="text-[11px] text-slate-400">As notificações de aprovações e solicitações surgirão aqui.</p>
                       </div>
                     ) : (
                       notificacoes.map((n) => (
                         <div 
                           key={n.id} 
+                          onClick={() => {
+                            if (n.isUserRegistration) {
+                              setNotificacoesOpen(false);
+                              setSolicitacoesModalOpen(true);
+                            }
+                          }}
                           className={`p-3 rounded-xl border text-xs space-y-1 transition-all ${
+                            n.isUserRegistration ? 'bg-purple-50/70 border-purple-200 cursor-pointer hover:bg-purple-100' : 
                             n.lida ? 'bg-slate-50 border-slate-200 opacity-75' : 'bg-blue-50/50 border-blue-200'
                           }`}
                         >
                           <div className="flex items-center justify-between font-bold">
-                            <span className={n.tipo === 'aprovado' ? 'text-emerald-700' : n.tipo === 'reprovado' ? 'text-rose-700' : 'text-blue-700'}>
+                            <span className={n.isUserRegistration ? 'text-purple-800' : n.tipo === 'aprovado' ? 'text-emerald-700' : n.tipo === 'reprovado' ? 'text-rose-700' : 'text-blue-700'}>
                               {n.titulo}
                             </span>
                             <span className="text-[10px] text-slate-400 font-normal">{n.tempo}</span>
                           </div>
                           <p className="text-slate-600 text-[11px] leading-relaxed">{n.mensagem}</p>
+                          {n.isUserRegistration && (
+                            <span className="inline-block mt-1 text-[10px] text-purple-700 font-bold hover:underline">
+                              Clique para Analisar Solicitação →
+                            </span>
+                          )}
                         </div>
                       ))
                     )}
@@ -572,9 +616,9 @@ export default function Layout() {
             <div className="relative">
               <button
                 type="button"
-                onClick={() => setEditarPerfilModalOpen(true)}
+                onClick={() => setPerfilOpen(!perfilOpen)}
                 className="flex items-center gap-2.5 p-1 hover:bg-slate-100 rounded-2xl transition-all cursor-pointer border border-transparent hover:border-slate-200 group"
-                title="Clique para editar seu nome e foto de perfil"
+                title="Clique para abrir o menu do usuário"
               >
                 <div className="relative">
                   {userProfile.avatarUrl ? (
@@ -587,6 +631,9 @@ export default function Layout() {
                     <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-blue-600 via-indigo-600 to-sky-500 text-white font-extrabold text-sm flex items-center justify-center shadow-md border-2 border-white group-hover:scale-105 transition-transform">
                       {userProfile.nome ? userProfile.nome[0].toUpperCase() : 'S'}
                     </div>
+                  )}
+                  {pendingUsersCount > 0 && (
+                    <span className="absolute -top-1 -right-1 w-3.5 h-3.5 bg-amber-500 border-2 border-white rounded-full animate-pulse" title={`${pendingUsersCount} solicitações pendentes`}></span>
                   )}
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 rounded-full border-2 border-white" title="Online"></span>
                 </div>
@@ -632,6 +679,25 @@ export default function Layout() {
                     >
                       <User className="w-4 h-4 text-blue-600" />
                       <span>Editar Nome & Foto</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPerfilOpen(false);
+                        setSolicitacoesModalOpen(true);
+                      }}
+                      className="w-full text-left px-3 py-2 rounded-xl hover:bg-purple-50 hover:text-purple-700 transition-colors flex items-center justify-between cursor-pointer"
+                    >
+                      <div className="flex items-center gap-2">
+                        <ShieldCheck className="w-4 h-4 text-purple-600" />
+                        <span>Aprovação de Usuários</span>
+                      </div>
+                      {pendingUsersCount > 0 && (
+                        <span className="px-2 py-0.5 bg-amber-500 text-white text-[10px] font-extrabold rounded-full animate-pulse">
+                          {pendingUsersCount}
+                        </span>
+                      )}
                     </button>
 
                     <button
