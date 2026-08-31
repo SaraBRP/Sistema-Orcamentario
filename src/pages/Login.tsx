@@ -5,6 +5,12 @@ import { useAuth } from '../hooks/useAuth';
 import { HardHat, UserPlus, LogIn, Clock, AlertCircle } from 'lucide-react';
 import { LOCAL_STORAGE_SOLICITACOES_KEY, type SolicitacaoCadastroUsuario } from '../components/ModalSolicitacoesCadastro';
 
+const isSystemAdminEmail = (email?: string | null) => {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return lower === 'sara.alves@brpmetalica.com' || lower.includes('sara.alves');
+};
+
 export default function Login() {
   const [mode, setMode] = useState<'login' | 'register'>('login');
   
@@ -95,18 +101,18 @@ export default function Login() {
     if (!authError) {
       let nome = emailTrim.split('@')[0];
       nome = nome.charAt(0).toUpperCase() + nome.slice(1);
-      let cargo = emailTrim.includes('sara') ? 'Administrador' : 'Orçamentista';
+      const isAdmin = isSystemAdminEmail(emailTrim);
+      let cargo = isAdmin ? 'Administrador' : 'Orçamentista';
 
       if (dadosSolicitacao) {
         if (dadosSolicitacao.nome) nome = dadosSolicitacao.nome;
         if (dadosSolicitacao.cargo) cargo = dadosSolicitacao.cargo;
       }
 
-      const isSara = emailTrim.includes('sara');
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
-        nome: isSara ? 'Sara' : nome,
+        nome: isAdmin ? 'Sara' : nome,
         email: emailTrim,
-        funcao: isSara || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
+        funcao: isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
         avatarUrl: ''
       }));
 
@@ -116,14 +122,14 @@ export default function Login() {
 
     // 3. Se a conta for aprovada via Gestor (independente de ter conta no Supabase Auth)
     if (statusSolicitacao === 'aprovado' || (dadosSolicitacao && dadosSolicitacao.status === 'aprovado')) {
-      const isSara = emailTrim.includes('sara');
+      const isAdmin = isSystemAdminEmail(emailTrim);
       const nome = dadosSolicitacao?.nome || emailTrim.split('@')[0];
-      const cargo = dadosSolicitacao?.cargo || (isSara ? 'Administrador' : 'Orçamentista');
+      const cargo = dadosSolicitacao?.cargo || (isAdmin ? 'Administrador' : 'Orçamentista');
 
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
-        nome: isSara ? 'Sara' : nome,
+        nome: isAdmin ? 'Sara' : nome,
         email: emailTrim,
-        funcao: isSara || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
+        funcao: isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
         avatarUrl: ''
       }));
 

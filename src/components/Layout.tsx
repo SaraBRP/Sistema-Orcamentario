@@ -8,7 +8,6 @@ import {
   Layers,
   Calculator,
   LogOut,
-  Settings,
   Menu,
   X,
   BarChart3,
@@ -17,7 +16,6 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  FileText,
   BookOpen,
   GitBranch,
   Handshake,
@@ -83,10 +81,13 @@ const navSections: NavSection[] = [
   { name: 'Cotações', path: '/cotacoes', icon: Handshake },
   { name: 'Fluxo de Aprovação', path: '/fluxo-aprovacao', icon: GitBranch },
   { name: 'Padrões Técnicos', path: '/padroes-tecnicos', icon: BookOpen },
-  { name: 'Relatórios', path: '/relatorios', icon: FileText },
-  { name: 'Aprendizado', path: '/aprendizado', icon: GraduationCap },
-  { name: 'Configurações', path: '/configuracoes', icon: Settings },
 ];
+
+const isSystemAdminEmail = (email?: string | null) => {
+  if (!email) return false;
+  const lower = email.trim().toLowerCase();
+  return lower === 'sara.alves@brpmetalica.com' || lower.includes('sara.alves');
+};
 
 export default function Layout() {
   const { signOut, user } = useAuth();
@@ -108,23 +109,23 @@ export default function Layout() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.email) {
-          const isSaraSaved = parsed.email.toLowerCase().includes('sara');
+          const isAdmin = isSystemAdminEmail(parsed.email);
           return {
             ...parsed,
-            funcao: isSaraSaved || parsed.cargo?.toLowerCase() === 'administrador' || parsed.funcao === 'Administrador'
-              ? 'Administrador'
-              : (parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' ? 'Gestor' : 'Orçamentista')
+            funcao: isAdmin 
+              ? 'Administrador' 
+              : (parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' || parsed.cargo === 'Gestor' || parsed.cargo === 'gestor' ? 'Gestor' : 'Orçamentista')
           };
         }
       }
     } catch {}
 
     const currentUserEmail = user?.email || 'sara.alves@brpmetalica.com';
-    const isSara = currentUserEmail.toLowerCase().includes('sara');
+    const isAdmin = isSystemAdminEmail(currentUserEmail);
     return {
-      nome: isSara ? 'Sara' : currentUserEmail.split('@')[0],
+      nome: isAdmin ? 'Sara' : currentUserEmail.split('@')[0],
       email: currentUserEmail,
-      funcao: isSara ? 'Administrador' : 'Orçamentista',
+      funcao: isAdmin ? 'Administrador' : 'Orçamentista',
       avatarUrl: ''
     };
   });
@@ -146,51 +147,50 @@ export default function Layout() {
       if (!activeEmail) return;
 
       const emailLower = activeEmail.toLowerCase();
-      const isSaraEmail = emailLower.includes('sara');
+      const isAdminEmail = isSystemAdminEmail(emailLower);
 
-      // Se o perfil atual em memória for de outro e-mail ou não for Administrador para Sara, sincroniza imediatamente
-      if (!userProfile.email || userProfile.email.toLowerCase() !== emailLower || (isSaraEmail && userProfile.funcao !== 'Administrador')) {
-        let nome = emailLower.split('@')[0];
-        nome = nome.charAt(0).toUpperCase() + nome.slice(1);
-        let cargo = isSaraEmail ? 'Administrador' : 'Orçamentista';
+      let nome = emailLower.split('@')[0];
+      nome = nome.charAt(0).toUpperCase() + nome.slice(1);
+      let cargo = isAdminEmail ? 'Administrador' : 'Orçamentista';
 
-        try {
-          const { data: sol } = await supabase
+      try {
+        const { data: sol } = await supabase
+          .schema('engenharia')
+          .from('solicitacoes_cadastro')
+          .select('*')
+          .eq('email', emailLower)
+          .maybeSingle();
+
+        if (sol) {
+          if (sol.nome) nome = sol.nome;
+          if (sol.cargo) cargo = sol.cargo;
+        } else {
+          const { data: usr } = await supabase
             .schema('engenharia')
-            .from('solicitacoes_cadastro')
+            .from('usuarios')
             .select('*')
             .eq('email', emailLower)
             .maybeSingle();
-
-          if (sol) {
-            if (sol.nome) nome = sol.nome;
-            if (sol.cargo) cargo = sol.cargo;
-          } else {
-            const { data: usr } = await supabase
-              .schema('engenharia')
-              .from('usuarios')
-              .select('*')
-              .eq('email', emailLower)
-              .maybeSingle();
-            if (usr) {
-              if (usr.nome) nome = usr.nome;
-              if (usr.cargo) cargo = usr.cargo;
-            }
+          if (usr) {
+            if (usr.nome) nome = usr.nome;
+            if (usr.cargo) cargo = usr.cargo;
           }
-        } catch {}
+        }
+      } catch {}
 
-        const finalFuncao: 'Administrador' | 'Gestor' | 'Orçamentista' =
-          isSaraEmail || cargo.toLowerCase() === 'administrador'
-            ? 'Administrador'
-            : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
+      const finalFuncao: 'Administrador' | 'Gestor' | 'Orçamentista' =
+        isAdminEmail
+          ? 'Administrador'
+          : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
 
-        const newProfile: UserProfileData = {
-          nome: isSaraEmail ? 'Sara' : nome,
-          email: activeEmail,
-          funcao: finalFuncao,
-          avatarUrl: userProfile.avatarUrl || ''
-        };
+      const newProfile: UserProfileData = {
+        nome: isAdminEmail ? 'Sara' : nome,
+        email: activeEmail,
+        funcao: finalFuncao,
+        avatarUrl: userProfile.avatarUrl || ''
+      };
 
+      if (userProfile.email !== activeEmail || userProfile.funcao !== finalFuncao || userProfile.nome !== newProfile.nome) {
         setUserProfile(newProfile);
         try {
           localStorage.setItem('orcabrp_user_profile', JSON.stringify(newProfile));

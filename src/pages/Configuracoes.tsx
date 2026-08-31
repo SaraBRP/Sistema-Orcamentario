@@ -222,8 +222,8 @@ export default function Configuracoes() {
       const emailLower = p.email.toLowerCase();
       const cargoLower = (p.cargo || '').toLowerCase();
 
-      // Exclui a conta Administrador / Criador (Sara) das tabelas de gestão de usuários
-      if (emailLower.includes('sara') || cargoLower === 'administrador' || cargoLower === 'administradora') {
+      // Exclui apenas a conta oficial de Administrador / Criador (sara.alves@brpmetalica.com) das tabelas de gestão de usuários
+      if (emailLower.includes('sara.alves') || cargoLower === 'administrador' || cargoLower === 'administradora') {
         return false;
       }
       return true;
