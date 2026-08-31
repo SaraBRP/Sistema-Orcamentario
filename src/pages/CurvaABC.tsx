@@ -95,20 +95,37 @@ export default function CurvaABC() {
   const [chartLimit, setChartLimit] = useState<number>(15); // 10, 15, 30, ou 999
   const [hoveredChartIndex, setHoveredChartIndex] = useState<number | null>(null);
   const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(new Set());
+  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
 
-  // Multi-seleção com Ctrl+Click ou Cmd+Click (Mac)
+  // Multi-seleção com Ctrl+Click, Cmd+Click (Mac) ou Shift+Click (intervalo ou múltiplos)
   const handleItemClick = (itemId: string, e: React.MouseEvent) => {
     setSelectedItemIds(prev => {
       const next = new Set(prev);
-      if (e.ctrlKey || e.metaKey) {
-        // Toggle com Ctrl/Cmd
+
+      // Se Shift estiver pressionado e houver um item previamente clicado na lista
+      if (e.shiftKey && lastSelectedId && filteredItems.length > 0) {
+        const lastIdx = filteredItems.findIndex(i => i.id === lastSelectedId);
+        const currIdx = filteredItems.findIndex(i => i.id === itemId);
+
+        if (lastIdx >= 0 && currIdx >= 0) {
+          const start = Math.min(lastIdx, currIdx);
+          const end = Math.max(lastIdx, currIdx);
+          for (let i = start; i <= end; i++) {
+            next.add(filteredItems[i].id);
+          }
+          return next;
+        }
+      }
+
+      // Se Ctrl, Cmd ou Shift estiver pressionado
+      if (e.ctrlKey || e.metaKey || e.shiftKey) {
         if (next.has(itemId)) {
           next.delete(itemId);
         } else {
           next.add(itemId);
         }
       } else {
-        // Clique normal: seleciona só este (ou deseleciona se já era o único)
+        // Clique simples
         if (next.size === 1 && next.has(itemId)) {
           next.clear();
         } else {
@@ -118,6 +135,8 @@ export default function CurvaABC() {
       }
       return next;
     });
+
+    setLastSelectedId(itemId);
   };
 
 
@@ -1038,7 +1057,7 @@ export default function CurvaABC() {
               </div>
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <span className="text-blue-300 text-[11px] font-normal hidden sm:block">Ctrl+Click para selecionar mais</span>
+              <span className="text-blue-300 text-[11px] font-normal hidden sm:block">Shift+Click ou Ctrl+Click para seleção múltipla</span>
               <button 
                 onClick={() => setSelectedItemIds(new Set())}
                 className="bg-white/15 hover:bg-white/25 text-white px-3 py-1.5 rounded-lg transition-colors cursor-pointer flex items-center gap-1.5 border border-white/20"
@@ -1097,7 +1116,7 @@ export default function CurvaABC() {
                     <tr 
                       key={item.id}
                       onClick={(e) => handleItemClick(item.id, e)}
-                      title={selectedItemIds.size > 0 ? 'Ctrl+Click para adicionar/remover da seleção' : ''}
+                      title={selectedItemIds.size > 0 ? 'Shift+Click para intervalo ou Ctrl+Click para seleção individual' : ''}
                       className={clsx(
                         "cursor-pointer transition-colors",
                         isSelected
