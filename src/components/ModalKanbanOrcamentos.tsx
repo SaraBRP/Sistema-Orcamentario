@@ -10,7 +10,8 @@ import {
   FileText,
   CheckCircle2,
   ExternalLink,
-  Info
+  Info,
+  Calculator
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 
@@ -21,9 +22,12 @@ export interface CardOrcamentoKanban {
   cliente: string;
   valorTotal: number;
   revisao: string;
-  status: 'em_andamento' | 'aguardando_aprovacao' | 'aprovado' | 'reprovado';
+  status: 'memorial_calculo' | 'em_andamento' | 'aguardando_aprovacao' | 'aprovado' | 'reprovado';
   dataUltimaModificacao: string;
   orcamentista: string;
+  tipoItem?: 'memorial' | 'orcamento';
+  memorialId?: string;
+  orcamentoId?: string;
 }
 
 interface ModalKanbanOrcamentosProps {
@@ -55,7 +59,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
   const [orcamentos, setOrcamentos] = useState<CardOrcamentoKanban[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Busca orçamentos reais do Supabase e LocalStorage para o Kanban
+  // Busca orçamentos e memórias reais (deduplicados por código/ID)
   useEffect(() => {
     async function carregarOrcamentosBanco() {
       try {
@@ -75,52 +79,142 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
           if (raw) localData = JSON.parse(raw);
         } catch (e) {}
 
-        const mapOrcs = new Map<string, any>();
-        dbData.forEach(o => {
-          if (o.id) mapOrcs.set(String(o.id), o);
-          if (o.codigo) mapOrcs.set(String(o.codigo).trim(), o);
-        });
-        localData.forEach(o => {
-          if (o.id && !mapOrcs.has(String(o.id))) mapOrcs.set(String(o.id), o);
-          if (o.codigo && !mapOrcs.has(String(o.codigo).trim())) mapOrcs.set(String(o.codigo).trim(), o);
-        });
+        // Map para deduplicar orçamentos rigorosamente (chave é código ou ID unico)
+        const mapOrcs = new Map<string, CardOrcamentoKanban>();
 
-        const allOrcs = Array.from(mapOrcs.values());
+        dbData.forEach((o: any) => {
+          const code = (o.codigo || '').trim();
+          const idStr = String(o.id || '');
+          const key = code || idStr;
+          if (!key) return;
 
-        const formatados: CardOrcamentoKanban[] = allOrcs.map((o: any) => {
           const stRaw = String(o.status || '').toLowerCase();
           let st: CardOrcamentoKanban['status'] = 'em_andamento';
-          if (stRaw.includes('aprovado')) {
-            st = 'aprovado';
-          } else if (stRaw.includes('reprovado') || stRaw.includes('cancelad') || stRaw.includes('recusad')) {
-            st = 'reprovado';
-          } else if (stRaw.includes('aguardando') || stRaw.includes('valida') || stRaw.includes('análise')) {
-            st = 'aguardando_aprovacao';
-          }
+          if (stRaw.includes('aprovado')) st = 'aprovado';
+          else if (stRaw.includes('reprovado') || stRaw.includes('cancelad')) st = 'reprovado';
+          else if (stRaw.includes('aguardando') || stRaw.includes('valida')) st = 'aguardando_aprovacao';
+
+          const rawDate = o.updated_at || o.created_at;
+          const dtFormated = rawDate 
+            ? new Date(rawDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : new Date().toLocaleDateString('pt-BR');
+
+          mapOrcs.set(key, {
+            id: idStr,
+            codigo: code || `ORÇ-${idStr.substring(0, 5)}`,
+            nome: o.projeto || o.nome || 'Orçamento sem nome',
+            cliente: o.cliente || 'Cliente BRP',
+            valorTotal: Number(o.valor_total || 0),
+            revisao: o.revisao ? `R${o.revisao}` : 'R0',
+            status: st,
+            dataUltimaModificacao: dtFormated,
+            orcamentista: o.responsavel || 'Sara (Orçamentista)',
+            tipoItem: 'orcamento',
+            orcamentoId: idStr
+          });
+        });
+
+        localData.forEach((o: any) => {
+          const code = (o.codigo || '').trim();
+          const idStr = String(o.id || '');
+          const key = code || idStr;
+          if (!key || mapOrcs.has(key)) return;
+
+          const stRaw = String(o.status || '').toLowerCase();
+          let st: CardOrcamentoKanban['status'] = 'em_andamento';
+          if (stRaw.includes('aprovado')) st = 'aprovado';
+          else if (stRaw.includes('reprovado') || stRaw.includes('cancelad')) st = 'reprovado';
+          else if (stRaw.includes('aguardando') || stRaw.includes('valida')) st = 'aguardando_aprovacao';
 
           const rawDate = o.updated_at || o.created_at || o.dataCriacao;
           const dtFormated = rawDate 
             ? new Date(rawDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
             : new Date().toLocaleDateString('pt-BR');
 
-          const rev = o.revisao ? `R${o.revisao}` : 'R0';
-
-          return {
-            id: String(o.id),
-            codigo: o.codigo || `ORÇ-${String(o.id).substring(0, 5)}`,
+          mapOrcs.set(key, {
+            id: idStr,
+            codigo: code || `ORÇ-${idStr.substring(0, 5)}`,
             nome: o.projeto || o.nome || 'Orçamento sem nome',
             cliente: o.cliente || 'Cliente BRP',
-            valorTotal: Number(o.valor_total || o.valorTotal || 0),
-            revisao: rev,
+            valorTotal: Number(o.valorTotal || o.valor_total || 0),
+            revisao: o.revisao ? `R${o.revisao}` : 'R0',
             status: st,
             dataUltimaModificacao: dtFormated,
-            orcamentista: o.responsavel || 'Sara (Orçamentista)'
-          };
+            orcamentista: o.responsavel || 'Sara (Orçamentista)',
+            tipoItem: 'orcamento',
+            orcamentoId: idStr
+          });
         });
 
-        setOrcamentos(formatados);
+        // Busca Memórias de Cálculo (sem orçamento gerado)
+        let memoriaisList: any[] = [];
+        try {
+          const savedMem = localStorage.getItem('brp_memoriais_list');
+          if (savedMem) memoriaisList = JSON.parse(savedMem);
+        } catch (e) {}
+
+        let dbMemoriais: any[] = [];
+        try {
+          const { data } = await supabase
+            .schema('engenharia')
+            .from('memoriais_calculo')
+            .select('*');
+          if (data) dbMemoriais = data;
+        } catch (e) {}
+
+        const mapMemoriais = new Map<string, CardOrcamentoKanban>();
+
+        memoriaisList.forEach((m: any) => {
+          if (m.status !== 'Vinculado a Orçamento' && !m.orcamentoId) {
+            const code = (m.codigoOrcamento || m.codigo || '').trim();
+            const key = code || m.id;
+            if (!key) return;
+
+            const dtFormated = m.dataAtualizacao || new Date().toLocaleDateString('pt-BR');
+
+            mapMemoriais.set(key, {
+              id: `mem-${m.id}`,
+              codigo: code || `MEM-${String(m.id).substring(0, 5)}`,
+              nome: m.nomeProjeto || m.header?.nomeProjeto || 'Memória sem nome',
+              cliente: m.cliente || m.header?.cliente || 'Cliente BRP',
+              valorTotal: 0,
+              revisao: 'SEM ORÇAMENTO',
+              status: 'memorial_calculo',
+              dataUltimaModificacao: dtFormated,
+              orcamentista: m.responsavel || m.header?.responsavel || 'Sara (Orçamentista)',
+              tipoItem: 'memorial',
+              memorialId: String(m.id)
+            });
+          }
+        });
+
+        dbMemoriais.forEach((m: any) => {
+          if (m.status !== 'Vinculado a Orçamento' && !m.orcamento_id) {
+            const code = (m.codigo || m.codigo_orcamento || '').trim();
+            const key = code || m.id;
+            if (!key || mapMemoriais.has(key)) return;
+
+            mapMemoriais.set(key, {
+              id: `mem-${m.id}`,
+              codigo: code || `MEM-${String(m.id).substring(0, 5)}`,
+              nome: m.nome_projeto || m.nome || 'Memória sem nome',
+              cliente: m.cliente || 'Cliente BRP',
+              valorTotal: 0,
+              revisao: 'SEM ORÇAMENTO',
+              status: 'memorial_calculo',
+              dataUltimaModificacao: m.updated_at ? new Date(m.updated_at).toLocaleDateString('pt-BR') : new Date().toLocaleDateString('pt-BR'),
+              orcamentista: m.responsavel || 'Sara (Orçamentista)',
+              tipoItem: 'memorial',
+              memorialId: String(m.id)
+            });
+          }
+        });
+
+        const cardsCombinados = [...Array.from(mapMemoriais.values()), ...Array.from(mapOrcs.values())];
+        setOrcamentos(cardsCombinados);
+
       } catch (err) {
-        console.warn('Erro ao carregar orçamentos para o Kanban:', err);
+        console.warn('Erro ao carregar orçamentos e memórias para o Kanban:', err);
         setOrcamentos([]);
       }
     }
@@ -139,6 +233,14 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
   );
 
   const colunas = [
+    {
+      id: 'memorial_calculo',
+      titulo: 'Memória de Cálculo',
+      subtitulo: 'Memórias sem orçamento gerado',
+      corHeader: 'bg-purple-50 text-purple-800 border-purple-200',
+      badgeCor: 'bg-purple-100 text-purple-800',
+      items: orcamentosFiltrados.filter(o => o.status === 'memorial_calculo')
+    },
     {
       id: 'em_andamento',
       titulo: 'Em Andamento / Revisão',
@@ -161,7 +263,6 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
       subtitulo: 'Homologados (visíveis por até 7 dias)',
       corHeader: 'bg-emerald-50 text-emerald-800 border-emerald-200',
       badgeCor: 'bg-emerald-100 text-emerald-800',
-      // Aplica a regra dos 7 dias para homologados/aprovados
       items: orcamentosFiltrados.filter(o => o.status === 'aprovado' && isDentroDos7Dias(o.dataUltimaModificacao))
     },
     {
@@ -170,17 +271,20 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
       subtitulo: 'Arquivados (visíveis por até 7 dias)',
       corHeader: 'bg-rose-50 text-rose-800 border-rose-200',
       badgeCor: 'bg-rose-100 text-rose-800',
-      // Aplica a regra dos 7 dias para reprovados/cancelados
       items: orcamentosFiltrados.filter(o => o.status === 'reprovado' && isDentroDos7Dias(o.dataUltimaModificacao))
     }
   ];
 
-  const handleNavegacaoCard = (colunaId: string) => {
+  const handleNavegacaoCard = (colunaId: string, item?: CardOrcamentoKanban) => {
     onClose();
-    if (colunaId === 'aguardando_aprovacao') {
+    if (colunaId === 'memorial_calculo') {
+      navigate('/calculos-quantitativos');
+    } else if (colunaId === 'aguardando_aprovacao') {
       navigate('/fluxo-aprovacao');
+    } else if (item?.orcamentoId) {
+      navigate(`/orcamento/${item.orcamentoId}`);
     } else {
-      navigate('/orcamentos/calculos');
+      navigate('/orcamentos');
     }
   };
 
@@ -200,7 +304,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
                 <span className="px-2 py-0.5 bg-blue-100 text-blue-800 text-[10px] font-bold rounded-md uppercase tracking-wider">OrçaBRP</span>
               </div>
               <p className="text-xs text-slate-500">
-                Acompanhe propostas comerciais por fase. Aprovados e reprovados expiram em 7 dias sem novas revisões.
+                Acompanhe propostas comerciais por fase desde a memória de cálculo até a aprovação.
               </p>
             </div>
           </div>
@@ -228,9 +332,9 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
           </div>
         </div>
 
-        {/* Quadro Kanban (4 Colunas) */}
+        {/* Quadro Kanban (5 Colunas) */}
         <div className="flex-1 p-4 overflow-x-auto overflow-y-hidden">
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4 h-full min-w-[1000px]">
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-4 h-full min-w-[1250px]">
             {colunas.map((coluna) => {
               const valorTotalColuna = coluna.items.reduce((acc, curr) => acc + (curr.valorTotal || 0), 0);
 
@@ -259,7 +363,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
                     {coluna.items.length === 0 ? (
                       <div className="h-32 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-center p-4 space-y-1">
                         <Info className="w-4 h-4 text-slate-400" />
-                        <span className="text-xs text-slate-400 font-medium italic">Nenhum orçamento nesta fase.</span>
+                        <span className="text-xs text-slate-400 font-medium italic">Nenhum item nesta fase.</span>
                       </div>
                     ) : (
                       coluna.items.map((item) => (
@@ -268,10 +372,18 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
                           className="bg-white p-4 rounded-xl border border-slate-200 shadow-2xs hover:shadow-md transition-all space-y-3 group"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <span className="font-mono text-[11px] font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-100">
+                            <span className={`font-mono text-[11px] font-bold px-2 py-0.5 rounded border ${
+                              item.tipoItem === 'memorial' 
+                                ? 'text-purple-700 bg-purple-50 border-purple-200' 
+                                : 'text-blue-700 bg-blue-50 border-blue-100'
+                            }`}>
                               {item.codigo}
                             </span>
-                            <span className="px-2 py-0.5 bg-slate-100 text-slate-700 text-[10px] font-extrabold rounded uppercase tracking-wider">
+                            <span className={`px-2 py-0.5 text-[10px] font-extrabold rounded uppercase tracking-wider ${
+                              item.tipoItem === 'memorial'
+                                ? 'bg-purple-100 text-purple-800'
+                                : 'bg-slate-100 text-slate-700'
+                            }`}>
                               {item.revisao}
                             </span>
                           </div>
@@ -288,7 +400,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
 
                           <div className="pt-2 border-t border-slate-100 flex items-center justify-between">
                             <div className="font-mono font-extrabold text-xs text-emerald-700">
-                              R$ {item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                              {item.tipoItem === 'memorial' ? 'R$ 0,00 (Em medição)' : `R$ ${item.valorTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}`}
                             </div>
 
                             <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
@@ -299,10 +411,21 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
 
                           {/* Botão Único de Ação por Coluna */}
                           <div className="pt-2 border-t border-slate-100">
+                            {coluna.id === 'memorial_calculo' && (
+                              <button
+                                type="button"
+                                onClick={() => handleNavegacaoCard('memorial_calculo', item)}
+                                className="w-full py-1.5 bg-purple-50 hover:bg-purple-100 text-purple-800 font-bold text-[11px] rounded-xl border border-purple-200/80 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                              >
+                                <Calculator className="w-3.5 h-3.5 text-purple-600" />
+                                <span>Acessar / Gerar Orçamento</span>
+                              </button>
+                            )}
+
                             {coluna.id === 'em_andamento' && (
                               <button
                                 type="button"
-                                onClick={() => handleNavegacaoCard('em_andamento')}
+                                onClick={() => handleNavegacaoCard('em_andamento', item)}
                                 className="w-full py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-800 font-bold text-[11px] rounded-xl border border-amber-200/80 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                               >
                                 <FileText className="w-3.5 h-3.5 text-amber-600" />
@@ -313,7 +436,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
                             {coluna.id === 'aguardando_aprovacao' && (
                               <button
                                 type="button"
-                                onClick={() => handleNavegacaoCard('aguardando_aprovacao')}
+                                onClick={() => handleNavegacaoCard('aguardando_aprovacao', item)}
                                 className="w-full py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-800 font-bold text-[11px] rounded-xl border border-blue-200/80 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                               >
                                 <CheckCircle2 className="w-3.5 h-3.5 text-blue-600" />
@@ -324,7 +447,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
                             {(coluna.id === 'aprovado' || coluna.id === 'reprovado') && (
                               <button
                                 type="button"
-                                onClick={() => handleNavegacaoCard(coluna.id)}
+                                onClick={() => handleNavegacaoCard(coluna.id, item)}
                                 className="w-full py-1.5 bg-slate-50 hover:bg-slate-100 text-slate-700 font-bold text-[11px] rounded-xl border border-slate-200 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
                               >
                                 <ExternalLink className="w-3.5 h-3.5 text-slate-500" />
@@ -347,7 +470,7 @@ export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentos
         <div className="bg-white p-3.5 border-t border-slate-200 flex items-center justify-between text-xs text-slate-500 shrink-0">
           <div className="flex items-center gap-2">
             <Sparkles className="w-4 h-4 text-blue-600" />
-            <span>Total no Quadro: <strong>{orcamentosFiltrados.length} propostas</strong></span>
+            <span>Total no Quadro: <strong>{orcamentosFiltrados.length} itens</strong> (Memórias & Orçamentos)</span>
           </div>
 
           <button
