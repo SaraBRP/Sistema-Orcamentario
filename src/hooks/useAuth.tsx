@@ -22,17 +22,78 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    const checkAuthStatus = async () => {
+      try {
+        const { data: { session: supaSession } } = await supabase.auth.getSession();
+        if (supaSession) {
+          setSession(supaSession);
+          setUser(supaSession.user);
+          setLoading(false);
+          return;
+        }
+      } catch {}
+
+      // Fallback: se houver perfil ativo no localStorage de um usuário aprovado
+      try {
+        const saved = localStorage.getItem('orcabrp_user_profile');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.email) {
+            const mockUser: any = {
+              id: parsed.email,
+              email: parsed.email,
+              user_metadata: { full_name: parsed.nome }
+            };
+            const mockSession: any = {
+              user: mockUser,
+              access_token: 'local-approved-token'
+            };
+            setUser(mockUser);
+            setSession(mockSession);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch {}
+
+      setUser(null);
+      setSession(null);
       setLoading(false);
-    });
+    };
+
+    checkAuthStatus();
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange((_event, supaSession) => {
+      if (supaSession) {
+        setSession(supaSession);
+        setUser(supaSession.user);
+      } else {
+        try {
+          const saved = localStorage.getItem('orcabrp_user_profile');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed && parsed.email) {
+              const mockUser: any = {
+                id: parsed.email,
+                email: parsed.email,
+                user_metadata: { full_name: parsed.nome }
+              };
+              const mockSession: any = {
+                user: mockUser,
+                access_token: 'local-approved-token'
+              };
+              setUser(mockUser);
+              setSession(mockSession);
+              return;
+            }
+          }
+        } catch {}
+
+        setUser(null);
+        setSession(null);
+      }
       setLoading(false);
     });
 
@@ -40,7 +101,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const signOut = async () => {
+    try {
+      localStorage.removeItem('orcabrp_user_profile');
+    } catch {}
     await supabase.auth.signOut();
+    setUser(null);
+    setSession(null);
   };
 
   return (

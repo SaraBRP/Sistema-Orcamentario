@@ -46,59 +46,61 @@ export default function Login() {
 
     const emailTrim = email.trim().toLowerCase();
 
-    // 1. Verifica se há uma solicitação de cadastro para este e-mail no sistema
-    try {
-      let localList: SolicitacaoCadastroUsuario[] = [];
-      const saved = localStorage.getItem(LOCAL_STORAGE_SOLICITACOES_KEY);
-      if (saved) localList = JSON.parse(saved);
+    // 1. Busca status da solicitação de cadastro (no LocalStorage e no Supabase)
+    let statusSolicitacao: string | null = null;
+    let dadosSolicitacao: any = null;
 
-      const solicitacao = localList.find(s => s.email.toLowerCase() === emailTrim);
-      if (solicitacao) {
-        if (solicitacao.status === 'pendente') {
-          setError('⏳ Sua solicitação de cadastro está PENDENTE DE APROVAÇÃO pelo Gestor. Aguarde a liberação para acessar.');
-          setLoading(false);
-          return;
-        }
-        if (solicitacao.status === 'reprovado') {
-          setError('❌ A sua solicitação de cadastro foi RECUSADA pelo Gestor. Faça um novo cadastro.');
-          setLoading(false);
-          return;
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_SOLICITACOES_KEY);
+      if (saved) {
+        const list: SolicitacaoCadastroUsuario[] = JSON.parse(saved);
+        const item = list.find(s => s.email.toLowerCase() === emailTrim);
+        if (item) {
+          statusSolicitacao = item.status;
+          dadosSolicitacao = item;
         }
       }
     } catch {}
 
-    // 2. Tenta autenticação no Supabase ou Mock
-    const { error } = await supabase.auth.signInWithPassword({ email: emailTrim, password });
-    if (!error) {
-      // Login com sucesso no Supabase! Salva o perfil do usuário logado
-      let nome = emailTrim.split('@')[0];
-      nome = nome.charAt(0).toUpperCase() + nome.slice(1);
-      let cargo = emailTrim.includes('sara') ? 'Gestor' : 'Orçamentista';
-
+    if (!statusSolicitacao) {
       try {
-        const { data: sol } = await supabase
+        const { data: dbSol } = await supabase
           .schema('engenharia')
           .from('solicitacoes_cadastro')
           .select('*')
           .eq('email', emailTrim)
           .maybeSingle();
 
-        if (sol) {
-          if (sol.nome) nome = sol.nome;
-          if (sol.cargo) cargo = sol.cargo;
-        } else {
-          const { data: usr } = await supabase
-            .schema('engenharia')
-            .from('usuarios')
-            .select('*')
-            .eq('email', emailTrim)
-            .maybeSingle();
-          if (usr) {
-            if (usr.nome) nome = usr.nome;
-            if (usr.cargo) cargo = usr.cargo;
-          }
+        if (dbSol) {
+          statusSolicitacao = dbSol.status;
+          dadosSolicitacao = dbSol;
         }
       } catch {}
+    }
+
+    if (statusSolicitacao === 'pendente') {
+      setError('⏳ Sua solicitação de cadastro está PENDENTE DE APROVAÇÃO pelo Gestor. Aguarde a liberação para acessar.');
+      setLoading(false);
+      return;
+    }
+
+    if (statusSolicitacao === 'reprovado') {
+      setError('❌ A sua solicitação de cadastro foi RECUSADA pelo Gestor. Faça um novo cadastro.');
+      setLoading(false);
+      return;
+    }
+
+    // 2. Tenta autenticação no Supabase Auth
+    const { error: authError } = await supabase.auth.signInWithPassword({ email: emailTrim, password });
+    if (!authError) {
+      let nome = emailTrim.split('@')[0];
+      nome = nome.charAt(0).toUpperCase() + nome.slice(1);
+      let cargo = emailTrim.includes('sara') ? 'Gestor' : 'Orçamentista';
+
+      if (dadosSolicitacao) {
+        if (dadosSolicitacao.nome) nome = dadosSolicitacao.nome;
+        if (dadosSolicitacao.cargo) cargo = dadosSolicitacao.cargo;
+      }
 
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
         nome,
@@ -109,29 +111,25 @@ export default function Login() {
 
       window.location.href = '/';
       return;
-    } else {
-      // Se der erro no Supabase Auth, verifica se é um usuário recém aprovado localmente
-      try {
-        const saved = localStorage.getItem(LOCAL_STORAGE_SOLICITACOES_KEY);
-        if (saved) {
-          const list: SolicitacaoCadastroUsuario[] = JSON.parse(saved);
-          const userApproved = list.find(s => s.email.toLowerCase() === emailTrim && s.status === 'aprovado');
-          if (userApproved) {
-            // Cria um perfil local aprovado
-            localStorage.setItem('orcabrp_user_profile', JSON.stringify({
-              nome: userApproved.nome,
-              email: userApproved.email,
-              funcao: userApproved.cargo || 'Orçamentista',
-              avatarUrl: ''
-            }));
-            window.location.href = '/';
-            return;
-          }
-        }
-      } catch {}
-
-      setError(error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message);
     }
+
+    // 3. Se a conta for aprovada via Gestor (independente de ter conta no Supabase Auth)
+    if (statusSolicitacao === 'aprovado' || (dadosSolicitacao && dadosSolicitacao.status === 'aprovado')) {
+      const nome = dadosSolicitacao?.nome || emailTrim.split('@')[0];
+      const cargo = dadosSolicitacao?.cargo || 'Orçamentista';
+
+      localStorage.setItem('orcabrp_user_profile', JSON.stringify({
+        nome,
+        email: emailTrim,
+        funcao: cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista',
+        avatarUrl: ''
+      }));
+
+      window.location.href = '/';
+      return;
+    }
+
+    setError(authError?.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : 'E-mail ou senha incorretos.');
     setLoading(false);
   };
 
