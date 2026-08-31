@@ -5,6 +5,8 @@ import { useAuth } from '../hooks/useAuth';
 import { HardHat, UserPlus, LogIn, Clock, AlertCircle } from 'lucide-react';
 import { LOCAL_STORAGE_SOLICITACOES_KEY, type SolicitacaoCadastroUsuario } from '../components/ModalSolicitacoesCadastro';
 
+import { getUserSavedPermissions } from '../lib/permissions';
+
 const isSystemAdminEmail = (email?: string | null) => {
   if (!email) return false;
   const lower = email.trim().toLowerCase();
@@ -109,11 +111,15 @@ export default function Login() {
         if (dadosSolicitacao.cargo) cargo = dadosSolicitacao.cargo;
       }
 
+      const funcaoFinal = isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
+      const permittedScreens = getUserSavedPermissions(emailTrim, funcaoFinal);
+
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
         nome: isAdmin ? 'Sara' : nome,
         email: emailTrim,
-        funcao: isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
-        avatarUrl: ''
+        funcao: funcaoFinal,
+        avatarUrl: '',
+        permitted_screens: permittedScreens
       }));
 
       window.location.href = '/';
@@ -126,11 +132,15 @@ export default function Login() {
       const nome = dadosSolicitacao?.nome || emailTrim.split('@')[0];
       const cargo = dadosSolicitacao?.cargo || (isAdmin ? 'Administrador' : 'Orçamentista');
 
+      const funcaoFinal = isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
+      const permittedScreens = getUserSavedPermissions(emailTrim, funcaoFinal);
+
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
         nome: isAdmin ? 'Sara' : nome,
         email: emailTrim,
-        funcao: isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
-        avatarUrl: ''
+        funcao: funcaoFinal,
+        avatarUrl: '',
+        permitted_screens: permittedScreens
       }));
 
       window.location.href = '/';

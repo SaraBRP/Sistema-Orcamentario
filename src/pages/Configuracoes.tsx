@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
+import { getUserSavedPermissions, saveUserPermissionsLocally } from '../lib/permissions';
 import { 
   Users, 
   ShieldCheck, 
@@ -353,7 +354,10 @@ export default function Configuracoes() {
     setEditNome(formatUserDisplayName(user.nome, user.email));
     setEditCargo(user.cargo || 'orcamentista');
     setEditStatus((user.status as 'ativo' | 'inativo') || 'ativo');
-    setEditScreens(user.permitted_screens || MODULOS_SISTEMA.map(m => m.id));
+    const savedScreens = (user.permitted_screens && user.permitted_screens.length > 0)
+      ? user.permitted_screens
+      : getUserSavedPermissions(user.email || '', user.cargo);
+    setEditScreens(savedScreens);
   };
 
   // Abrir Modal de Edição (Somente quando clicado no ícone de editar da tabela)
@@ -362,7 +366,10 @@ export default function Configuracoes() {
     setEditNome(formatUserDisplayName(user.nome, user.email));
     setEditCargo(user.cargo || 'orcamentista');
     setEditStatus((user.status as 'ativo' | 'inativo') || 'ativo');
-    setEditScreens(user.permitted_screens || MODULOS_SISTEMA.map(m => m.id));
+    const savedScreens = (user.permitted_screens && user.permitted_screens.length > 0)
+      ? user.permitted_screens
+      : getUserSavedPermissions(user.email || '', user.cargo);
+    setEditScreens(savedScreens);
     setIsEditModalOpen(true);
   };
 
@@ -394,7 +401,8 @@ export default function Configuracoes() {
         .from('solicitacoes_cadastro')
         .update({
           nome: finalNome,
-          cargo: finalCargo
+          cargo: finalCargo,
+          permitted_screens: editScreens
         })
         .eq('id', selectedUser.id);
     } catch {}
@@ -405,10 +413,28 @@ export default function Configuracoes() {
         const list = JSON.parse(saved);
         const updated = list.map((s: any) =>
           s.id === selectedUser.id || (selectedUser.email && s.email.toLowerCase() === selectedUser.email.toLowerCase())
-            ? { ...s, nome: finalNome, cargo: finalCargo }
+            ? { ...s, nome: finalNome, cargo: finalCargo, permitted_screens: editScreens }
             : s
         );
         localStorage.setItem('brp_solicitacoes_cadastro_usuarios', JSON.stringify(updated));
+      }
+    } catch {}
+
+    if (selectedUser.email) {
+      saveUserPermissionsLocally(selectedUser.email, editScreens);
+    }
+
+    // Se o gestor estiver editando as próprias permissões ou se o usuário logado for este perfil
+    try {
+      const activeProfileStr = localStorage.getItem('orcabrp_user_profile');
+      if (activeProfileStr && selectedUser.email) {
+        const activeProfile = JSON.parse(activeProfileStr);
+        if (activeProfile.email && activeProfile.email.toLowerCase() === selectedUser.email.toLowerCase()) {
+          localStorage.setItem('orcabrp_user_profile', JSON.stringify({
+            ...activeProfile,
+            permitted_screens: editScreens
+          }));
+        }
       }
     } catch {}
 

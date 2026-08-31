@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import { supabase } from '../lib/supabase';
@@ -32,6 +32,7 @@ import { twMerge } from 'tailwind-merge';
 import { ModalKanbanOrcamentos } from './ModalKanbanOrcamentos';
 import { ModalEditarPerfil, type UserProfileData } from './ModalEditarPerfil';
 import { ModalSolicitacoesCadastro, LOCAL_STORAGE_SOLICITACOES_KEY, type SolicitacaoCadastroUsuario } from './ModalSolicitacoesCadastro';
+import { getUserSavedPermissions } from '../lib/permissions';
 
 export function cn(...inputs: (string | undefined | null | false)[]) {
   return twMerge(clsx(inputs));
@@ -47,6 +48,7 @@ interface NotificacaoItem {
 }
 
 type NavSection = {
+  id: string;
   name: string;
   icon: React.ElementType;
   path?: string;
@@ -54,8 +56,9 @@ type NavSection = {
 };
 
 const navSections: NavSection[] = [
-  { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+  { id: 'dashboard', name: 'Dashboard', path: '/', icon: LayoutDashboard },
   {
+    id: 'orcamentos',
     name: 'Orçamentos',
     icon: Calculator,
     path: '/orcamentos',
@@ -64,6 +67,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'banco-proprio',
     name: 'Banco Próprio',
     icon: Building2,
     children: [
@@ -72,6 +76,7 @@ const navSections: NavSection[] = [
     ],
   },
   {
+    id: 'banco-sistema',
     name: 'Banco do Sistema',
     icon: Database,
     children: [
@@ -79,13 +84,13 @@ const navSections: NavSection[] = [
       { name: 'Insumos', path: '/banco-sistema/insumos', icon: Package },
     ],
   },
-  { name: 'Curva ABC', path: '/curva-abc', icon: BarChart3 },
-  { name: 'Cotações', path: '/cotacoes', icon: Handshake },
-  { name: 'Fluxo de Aprovação', path: '/fluxo-aprovacao', icon: GitBranch },
-  { name: 'Padrões Técnicos', path: '/padroes-tecnicos', icon: BookOpen },
-  { name: 'Relatórios', path: '/relatorios', icon: FileText },
-  { name: 'Aprendizado', path: '/aprendizado', icon: GraduationCap },
-  { name: 'Configurações', path: '/configuracoes', icon: Settings },
+  { id: 'curva-abc', name: 'Curva ABC', path: '/curva-abc', icon: BarChart3 },
+  { id: 'cotacoes', name: 'Cotações', path: '/cotacoes', icon: Handshake },
+  { id: 'fluxo-aprovacao', name: 'Fluxo de Aprovação', path: '/fluxo-aprovacao', icon: GitBranch },
+  { id: 'padroes-tecnicos', name: 'Padrões Técnicos', path: '/padroes-tecnicos', icon: BookOpen },
+  { id: 'relatorios', name: 'Relatórios', path: '/relatorios', icon: FileText },
+  { id: 'aprendizado', name: 'Aprendizado', path: '/aprendizado', icon: GraduationCap },
+  { id: 'configuracoes', name: 'Configurações', path: '/configuracoes', icon: Settings },
 ];
 
 const isSystemAdminEmail = (email?: string | null) => {
@@ -115,11 +120,14 @@ export default function Layout() {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.email) {
           const isAdmin = isSystemAdminEmail(parsed.email);
+          const funcao = isAdmin 
+            ? 'Administrador' 
+            : (parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' || parsed.cargo === 'Gestor' || parsed.cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
+          const permitted_screens = parsed.permitted_screens || getUserSavedPermissions(parsed.email, funcao);
           return {
             ...parsed,
-            funcao: isAdmin 
-              ? 'Administrador' 
-              : (parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' || parsed.cargo === 'Gestor' || parsed.cargo === 'gestor' ? 'Gestor' : 'Orçamentista')
+            funcao,
+            permitted_screens
           };
         }
       }
@@ -127,11 +135,14 @@ export default function Layout() {
 
     const currentUserEmail = user?.email || 'sara.alves@brpmetalica.com';
     const isAdmin = isSystemAdminEmail(currentUserEmail);
+    const funcao = isAdmin ? 'Administrador' : 'Orçamentista';
+    const permitted_screens = getUserSavedPermissions(currentUserEmail, funcao);
     return {
       nome: isAdmin ? 'Sara' : currentUserEmail.split('@')[0],
       email: currentUserEmail,
-      funcao: isAdmin ? 'Administrador' : 'Orçamentista',
-      avatarUrl: ''
+      funcao,
+      avatarUrl: '',
+      permitted_screens
     };
   });
 
@@ -188,14 +199,17 @@ export default function Layout() {
           ? 'Administrador'
           : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
 
+      const permitted_screens = getUserSavedPermissions(activeEmail, finalFuncao);
+
       const newProfile: UserProfileData = {
         nome: isAdminEmail ? 'Sara' : nome,
         email: activeEmail,
         funcao: finalFuncao,
-        avatarUrl: userProfile.avatarUrl || ''
+        avatarUrl: userProfile.avatarUrl || '',
+        permitted_screens
       };
 
-      if (userProfile.email !== activeEmail || userProfile.funcao !== finalFuncao || userProfile.nome !== newProfile.nome) {
+      if (userProfile.email !== activeEmail || userProfile.funcao !== finalFuncao || userProfile.nome !== newProfile.nome || !userProfile.permitted_screens) {
         setUserProfile(newProfile);
         try {
           localStorage.setItem('orcabrp_user_profile', JSON.stringify(newProfile));
@@ -205,6 +219,33 @@ export default function Layout() {
 
     syncActiveUserProfile();
   }, [user]);
+
+  // Seções visíveis do menu lateral baseadas nas permissões do colaborador logado
+  const visibleNavSections = useMemo(() => {
+    if (!userProfile?.email) return navSections;
+    if (isSystemAdminEmail(userProfile.email)) return navSections;
+
+    const allowed = userProfile.permitted_screens || getUserSavedPermissions(userProfile.email, userProfile.funcao);
+    return navSections.filter(section => allowed.includes(section.id));
+  }, [userProfile]);
+
+  // Proteção de rotas em tempo de execução para atalhos de URL não autorizados
+  useEffect(() => {
+    if (!userProfile?.email || isSystemAdminEmail(userProfile.email)) return;
+
+    const allowed = userProfile.permitted_screens || getUserSavedPermissions(userProfile.email, userProfile.funcao);
+    const currentPath = location.pathname;
+
+    const matchedSection = navSections.find(s => {
+      if (s.path && s.path !== '/' && currentPath.startsWith(s.path)) return true;
+      if (s.children && s.children.some(c => currentPath.startsWith(c.path))) return true;
+      return false;
+    });
+
+    if (matchedSection && !allowed.includes(matchedSection.id)) {
+      navigate('/', { replace: true });
+    }
+  }, [location.pathname, userProfile, navigate]);
 
   const handleSaveProfile = (updated: UserProfileData) => {
     setUserProfile(updated);
@@ -448,7 +489,7 @@ export default function Layout() {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-          {navSections.map((section) => {
+          {visibleNavSections.map((section: NavSection) => {
             if (section.children) {
               const expanded = !sidebarCollapsed && expandedSections.includes(section.name);
               const active = isSectionActive(section);
@@ -525,7 +566,7 @@ export default function Layout() {
 
                   {expanded && !sidebarCollapsed && (
                     <div className="mt-1 ml-4 pl-3 border-l border-slate-700/60 space-y-1">
-                      {section.children.map((child) => {
+                      {section.children.map((child: { name: string; path: string; icon: React.ElementType }) => {
                         const childActive = isPathActive(child.path);
                         const ChildIcon = child.icon;
                         return (

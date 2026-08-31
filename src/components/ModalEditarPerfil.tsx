@@ -14,6 +14,7 @@ export interface UserProfileData {
   email: string;
   funcao: 'Administrador' | 'Gestor' | 'Orçamentista';
   avatarUrl: string;
+  permitted_screens?: string[];
 }
 
 interface ModalEditarPerfilProps {
