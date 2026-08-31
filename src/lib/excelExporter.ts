@@ -16,6 +16,18 @@ export interface ExportOrcamentoOptions {
   jornadasMap?: Record<string, string>;
 }
 
+export function toTitleCase(str: string): string {
+  if (!str) return '';
+  return str
+    .toLowerCase()
+    .split(' ')
+    .map(word => {
+      if (!word) return '';
+      return word.replace(/(?:^|[\/\-\(])\w/g, letter => letter.toUpperCase());
+    })
+    .join(' ');
+}
+
 export function buildDistribuicaoEquipeRows(
   itens: any[],
   duracoesMap: Record<string, string> = {},
@@ -175,7 +187,7 @@ export function buildDistribuicaoEquipeRows(
 
         exportRows.push({
           item_eap: insumo.item_eap,
-          atividade: `↳ ${insumo.descricao}`,
+          atividade: `↳ ${toTitleCase(insumo.descricao)}`,
           tipo: 'MÃO DE OBRA',
           unidade: insumo.unidade || 'H',
           qtd_horas: totalHoras,
@@ -292,11 +304,23 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     itens.forEach((item, index) => {
       const row = wsOrcamento.getRow(currentRow);
       const isSeçao = item.isSecao || item.is_secao || item.isSummary || !item.codigo || item.codigo === '-';
-      const itemEap = String(item.item_eap || item.item || `${index + 1}`).trim();
+      const codLower = String(item.codigo || '').trim().toLowerCase();
 
-      // Define o nível de agrupamento hierárquico (outline level) no Excel
-      const outlineLevel = (itemEap.match(/\./g) || []).length;
-      row.outlineLevel = outlineLevel;
+      const isInsumo = !isSeçao && (
+        codLower.startsWith('mat.') ||
+        codLower.startsWith('mo.') ||
+        codLower.startsWith('eq.') ||
+        codLower.startsWith('trans.') ||
+        codLower.startsWith('alg.') ||
+        codLower.startsWith('serv.') ||
+        codLower.startsWith('ins.') ||
+        codLower.startsWith('ver.')
+      );
+
+      const isComposicaoOuSeçao = !isInsumo;
+
+      const itemEap = String(item.item_eap || item.item || `${index + 1}`).trim();
+      row.outlineLevel = (itemEap.match(/\./g) || []).length;
 
       if (!itemEap.includes('.')) {
         level1RowIndices.push(currentRow);
@@ -309,9 +333,12 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
       const totalMat = Number(item.total_mat ?? (qtd * matUnit));
       const totalMo = Number(item.total_mo ?? (qtd * moUnit));
 
+      const rawDesc = item.descricao || item.nome || '';
+      const descricao = isInsumo ? toTitleCase(rawDesc) : rawDesc;
+
       row.getCell(2).value = itemEap;
       row.getCell(3).value = item.codigo || '-';
-      row.getCell(4).value = item.descricao || item.nome || '';
+      row.getCell(4).value = descricao;
       row.getCell(5).value = isSeçao ? '' : (item.unidade || item.und || '');
 
       if (isSeçao) {
@@ -332,10 +359,10 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
         row.getCell(12).value = { formula: `J${currentRow}+K${currentRow}` };
       }
 
-      // Estilização das linhas de dados
+      // Estilização das linhas de dados: Negrito para Seções e Composições, Normal/TitleCase para Insumos
       for (let col = 2; col <= 12; col++) {
         const cell = row.getCell(col);
-        cell.font = { size: 10, bold: isSeçao, color: { argb: 'FF1E293B' } };
+        cell.font = { size: 10, bold: isComposicaoOuSeçao, color: { argb: 'FF1E293B' } };
         cell.fill = {
           type: 'pattern',
           pattern: 'solid',
@@ -539,9 +566,26 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     const itemEap = String(m.item_eap || `${i + 1}`).trim();
     row.outlineLevel = (itemEap.match(/\./g) || []).length;
 
+    const codLower = String(m.codigo || '').trim().toLowerCase();
+    const isSeçao = m.isSecao || m.is_secao || !m.codigo || m.codigo === '-';
+    const isInsumo = !isSeçao && (
+      codLower.startsWith('mat.') ||
+      codLower.startsWith('mo.') ||
+      codLower.startsWith('eq.') ||
+      codLower.startsWith('trans.') ||
+      codLower.startsWith('alg.') ||
+      codLower.startsWith('serv.') ||
+      codLower.startsWith('ins.') ||
+      m.tipo === 'Insumo'
+    );
+    const isComposicaoOuSeçao = !isInsumo;
+
+    const rawDesc = m.descricao || '';
+    const descricao = isInsumo ? toTitleCase(rawDesc) : rawDesc;
+
     row.getCell(2).value = itemEap;
-    row.getCell(3).value = m.tipo || (m.codigo ? 'Composição' : 'Seção');
-    row.getCell(4).value = m.descricao || '';
+    row.getCell(3).value = m.tipo || (isInsumo ? 'Insumo' : (m.codigo ? 'Composição' : 'Seção'));
+    row.getCell(4).value = descricao;
     row.getCell(5).value = m.unidade || '';
     row.getCell(6).value = Number(m.quantidade || 0);
     row.getCell(7).value = m.equacaoLiteral || m.equacao_literal || '';
@@ -550,7 +594,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
 
     for (let col = 2; col <= 9; col++) {
       const cell = row.getCell(col);
-      cell.font = { size: 10 };
+      cell.font = { size: 10, bold: isComposicaoOuSeçao };
       cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
       cell.border = {
         top: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
@@ -646,7 +690,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     const horasDisp = eq.horas_disp ?? eq['Horas Disponíveis / Pessoa'] ?? '';
     const equipe = eq.equipe ?? eq['Equipe Necessária'] ?? '';
 
-    const isSeçao = tipo === 'SEÇÃO';
+    const isComposicaoOuSeçao = tipo === 'SEÇÃO' || tipo === 'COMPOSIÇÃO';
 
     row.getCell(2).value = itemEap;
     row.getCell(3).value = atividade;
@@ -660,11 +704,11 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
 
     for (let col = 2; col <= 10; col++) {
       const cell = row.getCell(col);
-      cell.font = { size: 10, bold: isSeçao, color: { argb: 'FF1E293B' } };
+      cell.font = { size: 10, bold: isComposicaoOuSeçao, color: { argb: 'FF1E293B' } };
       cell.fill = {
         type: 'pattern',
         pattern: 'solid',
-        fgColor: { argb: isSeçao ? 'FFE2E8F0' : 'FFF8FAFC' }
+        fgColor: { argb: (tipo === 'SEÇÃO') ? 'FFE2E8F0' : 'FFF8FAFC' }
       };
       cell.border = {
         top: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
