@@ -8,6 +8,7 @@ import {
   Layers,
   Calculator,
   LogOut,
+  Settings,
   Menu,
   X,
   BarChart3,
@@ -16,6 +17,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  FileText,
   BookOpen,
   GitBranch,
   Handshake,
@@ -81,6 +83,9 @@ const navSections: NavSection[] = [
   { name: 'Cotações', path: '/cotacoes', icon: Handshake },
   { name: 'Fluxo de Aprovação', path: '/fluxo-aprovacao', icon: GitBranch },
   { name: 'Padrões Técnicos', path: '/padroes-tecnicos', icon: BookOpen },
+  { name: 'Relatórios', path: '/relatorios', icon: FileText },
+  { name: 'Aprendizado', path: '/aprendizado', icon: GraduationCap },
+  { name: 'Configurações', path: '/configuracoes', icon: Settings },
 ];
 
 const isSystemAdminEmail = (email?: string | null) => {
