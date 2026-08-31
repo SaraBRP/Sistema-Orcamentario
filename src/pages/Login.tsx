@@ -12,10 +12,9 @@ export default function Login() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   
-  // Estados de Cadastro
+  // Estados de Cadastro (Campos iniciam 100% VAZIOS)
   const [nomeReg, setNomeReg] = useState('');
   const [emailReg, setEmailReg] = useState('');
-  const [cargoReg, setCargoReg] = useState('Orçamentista');
   const [passwordReg, setPasswordReg] = useState('');
   const [confirmPasswordReg, setConfirmPasswordReg] = useState('');
 
@@ -28,6 +27,16 @@ export default function Login() {
   if (session) {
     return <Navigate to="/" replace />;
   }
+
+  const handleSwitchMode = (targetMode: 'login' | 'register') => {
+    setMode(targetMode);
+    setError(null);
+    setRegisterSuccess(null);
+    setNomeReg('');
+    setEmailReg('');
+    setPasswordReg('');
+    setConfirmPasswordReg('');
+  };
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -51,7 +60,7 @@ export default function Login() {
           return;
         }
         if (solicitacao.status === 'reprovado') {
-          setError('❌ A sua solicitação de cadastro foi RECUSADA pelo Gestor. Entre em contato com a Engenharia.');
+          setError('❌ A sua solicitação de cadastro foi RECUSADA pelo Gestor. Faça um novo cadastro.');
           setLoading(false);
           return;
         }
@@ -92,6 +101,12 @@ export default function Login() {
     setError(null);
     setRegisterSuccess(null);
 
+    if (!nomeReg.trim() || !emailReg.trim() || !passwordReg || !confirmPasswordReg) {
+      setError('Por favor, preencha todos os campos.');
+      setLoading(false);
+      return;
+    }
+
     if (passwordReg !== confirmPasswordReg) {
       setError('As senhas digitadas não coincidem.');
       setLoading(false);
@@ -130,7 +145,7 @@ export default function Login() {
         id: `sol-${Date.now()}`,
         nome: nomeTrim,
         email: emailTrim,
-        cargo: cargoReg,
+        cargo: 'Pendente de Definição pelo Gestor',
         senhaHash: passwordReg,
         status: 'pendente',
         dataSolicitacao: new Date().toLocaleString('pt-BR')
@@ -148,14 +163,14 @@ export default function Login() {
             id: novaSolicitacao.id,
             nome: nomeTrim,
             email: emailTrim,
-            cargo: cargoReg,
+            cargo: 'Pendente de Definição pelo Gestor',
             status: 'pendente'
           });
       } catch {}
 
-      setRegisterSuccess(`Solicitação enviada com sucesso! A conta de "${nomeTrim}" está pendente de aprovação pelo Gestor.`);
+      setRegisterSuccess(`Solicitação enviada com sucesso! A conta de "${nomeTrim}" foi enviada para análise e definição de perfil pelo Gestor.`);
       
-      // Limpa formulário
+      // Reseta campos
       setNomeReg('');
       setEmailReg('');
       setPasswordReg('');
@@ -206,7 +221,7 @@ export default function Login() {
               </div>
               <p>{registerSuccess}</p>
               <button
-                onClick={() => { setMode('login'); setRegisterSuccess(null); }}
+                onClick={() => handleSwitchMode('login')}
                 className="mt-2 text-xs text-sky-300 hover:underline font-bold cursor-pointer"
               >
                 Voltar para a tela de Login →
@@ -216,25 +231,29 @@ export default function Login() {
 
           {/* Formulário de LOGIN */}
           {mode === 'login' && !registerSuccess && (
-            <form onSubmit={handleLogin} className="space-y-4">
+            <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">E-mail</label>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">E-mail</label>
                 <input
                   type="email"
+                  name="user_email_login"
+                  autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-800/60 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white placeholder-slate-500 outline-none text-xs font-medium transition-all"
+                  className="w-full px-4 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
                   placeholder="seu.email@brpengenharia.com.br"
                   required
                 />
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-300 mb-1">Senha</label>
+                <label className="block text-xs font-semibold text-slate-200 mb-1">Senha</label>
                 <input
                   type="password"
+                  name="user_password_login"
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-800/60 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white placeholder-slate-500 outline-none text-xs font-medium transition-all"
+                  className="w-full px-4 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
                   placeholder="••••••••"
                   required
                 />
@@ -252,7 +271,7 @@ export default function Login() {
               <div className="pt-4 border-t border-white/10 text-center">
                 <button
                   type="button"
-                  onClick={() => { setMode('register'); setError(null); setRegisterSuccess(null); }}
+                  onClick={() => handleSwitchMode('register')}
                   className="text-xs text-sky-400 hover:text-sky-300 font-semibold cursor-pointer transition-colors inline-flex items-center gap-1.5"
                 >
                   <UserPlus className="w-3.5 h-3.5" />
@@ -262,74 +281,71 @@ export default function Login() {
             </form>
           )}
 
-          {/* Formulário de CADASTRO */}
+          {/* Formulário de CADASTRO (100% VAZIO E COM FONTE BRANCA DE ALTO CONTRASTE) */}
           {mode === 'register' && !registerSuccess && (
-            <form onSubmit={handleRegisterSubmit} className="space-y-3.5">
+            <form onSubmit={handleRegisterSubmit} className="space-y-3.5" autoComplete="off">
               <div className="text-center mb-1">
                 <span className="text-xs font-extrabold text-sky-300 uppercase tracking-wider">
                   Solicitação de Novo Acesso
                 </span>
-                <p className="text-[11px] text-slate-400">Preencha seus dados para enviar ao Gestor</p>
+                <p className="text-[11px] text-slate-300">Digite seus dados para enviar ao Gestor</p>
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Nome Completo</label>
+                <label className="block text-[11px] font-bold text-slate-200 mb-1">Nome Completo</label>
                 <input
                   type="text"
+                  name="reg_full_name"
+                  id="reg_full_name"
+                  autoComplete="off"
                   value={nomeReg}
                   onChange={(e) => setNomeReg(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-800/60 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white placeholder-slate-500 outline-none text-xs font-medium transition-all"
-                  placeholder="Ex: João Silva"
+                  className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                  placeholder="Digite seu nome completo"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">E-mail Corporativo</label>
+                <label className="block text-[11px] font-bold text-slate-200 mb-1">E-mail Corporativo</label>
                 <input
                   type="email"
+                  name="reg_email"
+                  id="reg_email"
+                  autoComplete="off"
                   value={emailReg}
                   onChange={(e) => setEmailReg(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-800/60 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white placeholder-slate-500 outline-none text-xs font-medium transition-all"
-                  placeholder="joao.silva@brpengenharia.com.br"
+                  className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                  placeholder="seu.email@brpengenharia.com.br"
                   required
                 />
-              </div>
-
-              <div>
-                <label className="block text-[11px] font-semibold text-slate-300 mb-1">Cargo / Função</label>
-                <select
-                  value={cargoReg}
-                  onChange={(e) => setCargoReg(e.target.value)}
-                  className="w-full px-3.5 py-2 bg-slate-800/80 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white outline-none text-xs font-medium transition-all"
-                >
-                  <option value="Orçamentista">Orçamentista</option>
-                  <option value="Engenheiro Civil">Engenheiro Civil</option>
-                  <option value="Gestor de Projetos">Gestor de Projetos</option>
-                  <option value="Analista de Propostas">Analista de Propostas</option>
-                  <option value="Estagiário de Engenharia">Estagiário de Engenharia</option>
-                </select>
               </div>
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Senha</label>
+                  <label className="block text-[11px] font-bold text-slate-200 mb-1">Senha</label>
                   <input
                     type="password"
+                    name="reg_new_password"
+                    id="reg_new_password"
+                    autoComplete="new-password"
                     value={passwordReg}
                     onChange={(e) => setPasswordReg(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800/60 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white placeholder-slate-500 outline-none text-xs font-medium transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
                     placeholder="••••••••"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-semibold text-slate-300 mb-1">Confirmar Senha</label>
+                  <label className="block text-[11px] font-bold text-slate-200 mb-1">Confirmar Senha</label>
                   <input
                     type="password"
+                    name="reg_confirm_password"
+                    id="reg_confirm_password"
+                    autoComplete="new-password"
                     value={confirmPasswordReg}
                     onChange={(e) => setConfirmPasswordReg(e.target.value)}
-                    className="w-full px-3 py-2 bg-slate-800/60 border border-slate-700/80 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-transparent text-white placeholder-slate-500 outline-none text-xs font-medium transition-all"
+                    className="w-full px-3 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
                     placeholder="••••••••"
                     required
                   />
@@ -339,7 +355,7 @@ export default function Login() {
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-2.5 px-4 bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-500 hover:to-sky-400 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-500/25 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:pointer-events-none mt-3 cursor-pointer flex items-center justify-center gap-2"
+                className="w-full py-3 px-4 bg-gradient-to-r from-blue-600 to-sky-500 hover:from-blue-500 hover:to-sky-400 text-white rounded-xl font-bold text-xs shadow-lg shadow-blue-500/25 transition-all hover:-translate-y-0.5 disabled:opacity-50 disabled:pointer-events-none mt-3 cursor-pointer flex items-center justify-center gap-2"
               >
                 <UserPlus className="w-4 h-4" />
                 <span>{loading ? 'Enviando Solicitação...' : 'Enviar Solicitação ao Gestor'}</span>
@@ -348,8 +364,8 @@ export default function Login() {
               <div className="pt-3 border-t border-white/10 text-center">
                 <button
                   type="button"
-                  onClick={() => { setMode('login'); setError(null); setRegisterSuccess(null); }}
-                  className="text-xs text-slate-400 hover:text-white font-semibold cursor-pointer transition-colors inline-flex items-center gap-1.5"
+                  onClick={() => handleSwitchMode('login')}
+                  className="text-xs text-slate-300 hover:text-white font-semibold cursor-pointer transition-colors inline-flex items-center gap-1.5"
                 >
                   <LogIn className="w-3.5 h-3.5" />
                   <span>Já possui uma conta? <strong>Fazer Login</strong></span>
