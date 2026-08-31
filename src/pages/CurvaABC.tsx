@@ -171,11 +171,7 @@ export default function CurvaABC() {
         const match = data.find(o => o.id === urlOrcId);
         if (match) {
           setSelectedOrcamento(match);
-        } else if (data.length > 0) {
-          setSelectedOrcamento(data[0]);
         }
-      } else if (data && data.length > 0 && !selectedOrcamento) {
-        setSelectedOrcamento(data[0]);
       }
     } catch (err) {
       console.error('Erro ao carregar orçamentos:', err);
@@ -523,6 +519,7 @@ export default function CurvaABC() {
                     type="button"
                     onClick={() => {
                       setOrcamentoSearchQuery('');
+                      setSelectedOrcamento(null);
                       setIsOrcamentoDropdownOpen(true);
                     }}
                     className="p-1 text-slate-400 hover:text-slate-600 rounded-full transition-colors cursor-pointer"
@@ -636,7 +633,26 @@ export default function CurvaABC() {
       </div>
 
       {/* PAINEL PRINCIPAL DE ANÁLISE (LARGURA TOTAL 100%) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-6">
+      {!selectedOrcamento ? (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-12 text-center flex flex-col items-center justify-center gap-3">
+          <div className="w-14 h-14 bg-blue-50 text-blue-600 rounded-2xl flex items-center justify-center shadow-2xs">
+            <Search className="w-7 h-7 text-blue-600" />
+          </div>
+          <h3 className="text-base font-bold text-slate-800">Nenhum Orçamento Selecionado</h3>
+          <p className="text-xs text-slate-500 max-w-md">
+            Pesquise e selecione um orçamento no campo de busca acima para visualizar a análise da Curva ABC e o gráfico Pareto.
+          </p>
+          <button
+            type="button"
+            onClick={() => setIsOrcamentoDropdownOpen(true)}
+            className="mt-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-xs transition-all cursor-pointer flex items-center gap-2"
+          >
+            <Search className="w-4 h-4" />
+            <span>Pesquisar Orçamento</span>
+          </button>
+        </div>
+      ) : (
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 sm:p-6 space-y-6">
         
         {/* BARRA DE FILTROS ESPAÇOSA E BEM ORGANIZADA */}
         <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-200/80 space-y-3">
@@ -1208,6 +1224,7 @@ export default function CurvaABC() {
         )}
 
       </div>
+      )}
     </div>
   );
 }
