@@ -101,39 +101,56 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
     const item = solicitacoes.find(s => s.id === id);
     if (!item) return;
 
-    const listaAtualizada = solicitacoes.map(s => {
-      if (s.id === id) {
-        return {
-          ...s,
-          status: novoStatus,
-          dataAnalise: dataAnaliseStr,
-          analisadoPor: 'Gestor (Sara)'
-        };
-      }
-      return s;
-    });
+    if (novoStatus === 'reprovado') {
+      // Se for recusa, deleta/descarta completamente os dados do usuário para exigir um novo cadastro do zero
+      const listaAtualizada = solicitacoes.filter(s => s.id !== id);
+      salvarLista(listaAtualizada);
 
-    salvarLista(listaAtualizada);
+      try {
+        await supabase
+          .schema('engenharia')
+          .from('solicitacoes_cadastro')
+          .delete()
+          .eq('id', id);
+      } catch {}
 
-    // Tenta atualizar no Supabase se aplicável
-    try {
-      await supabase
-        .schema('engenharia')
-        .from('solicitacoes_cadastro')
-        .update({
-          status: novoStatus,
-          data_analise: new Date().toISOString(),
-          analisado_por: 'Gestor'
-        })
-        .eq('id', id);
-    } catch {}
+      setFeedbackMessage({
+        text: `Solicitação de ${item.nome} foi RECUSADA e os dados foram excluídos. O usuário deverá fazer um novo cadastro se desejar enviar outra solicitação.`,
+        type: 'error'
+      });
+    } else {
+      // Se for aprovação, marca o status como aprovado e libera o acesso
+      const listaAtualizada = solicitacoes.map(s => {
+        if (s.id === id) {
+          return {
+            ...s,
+            status: 'aprovado' as const,
+            dataAnalise: dataAnaliseStr,
+            analisadoPor: 'Gestor (Sara)'
+          };
+        }
+        return s;
+      });
 
-    setFeedbackMessage({
-      text: novoStatus === 'aprovado' 
-        ? `Cadastro de ${item.nome} APROVADO com sucesso! O usuário já pode acessar o sistema.` 
-        : `Solicitação de cadastro de ${item.nome} foi RECUSADA.`,
-      type: novoStatus === 'aprovado' ? 'success' : 'error'
-    });
+      salvarLista(listaAtualizada);
+
+      try {
+        await supabase
+          .schema('engenharia')
+          .from('solicitacoes_cadastro')
+          .update({
+            status: 'aprovado',
+            data_analise: new Date().toISOString(),
+            analisado_por: 'Gestor'
+          })
+          .eq('id', id);
+      } catch {}
+
+      setFeedbackMessage({
+        text: `Cadastro de ${item.nome} APROVADO com sucesso! O usuário já pode acessar o sistema.`,
+        type: 'success'
+      });
+    }
 
     setTimeout(() => {
       setFeedbackMessage(null);
