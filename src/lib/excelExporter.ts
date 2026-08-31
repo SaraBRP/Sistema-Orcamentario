@@ -219,7 +219,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   // ABA 1: PLANILHA ORÇAMENTÁRIA
   // ==========================================
   const wsOrcamento = workbook.addWorksheet('Planilha Orçamentária', {
-    views: [{ showGridLines: true }]
+    views: [{ showGridLines: false }]
   });
 
   wsOrcamento.properties.outlineProperties = {
@@ -375,6 +375,13 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
           right: { style: 'dotted', color: { argb: 'FFCBD5E1' } }
         };
 
+        // Alinhamento & Quebra Automática de Texto na Coluna 4 (Descrição)
+        if (col === 4) {
+          cell.alignment = { vertical: 'middle', wrapText: true };
+        } else {
+          cell.alignment = { vertical: 'middle' };
+        }
+
         // Formatação numéricas
         if (col === 6 && typeof cell.value === 'number') cell.numFmt = '#,##0.00';
         if (col >= 7 && col <= 12 && typeof cell.value === 'number') cell.numFmt = 'R$ #,##0.00';
@@ -487,7 +494,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   // ABA 2: MEMÓRIA DE CÁLCULO
   // ==========================================
   const wsMemoria = workbook.addWorksheet('Memória de Cálculo', {
-    views: [{ showGridLines: true }]
+    views: [{ showGridLines: false }]
   });
 
   wsMemoria.properties.outlineProperties = {
@@ -602,6 +609,13 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
         left: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
         right: { style: 'dotted', color: { argb: 'FFCBD5E1' } }
       };
+
+      if (col === 4 || col === 7 || col === 8 || col === 9) {
+        cell.alignment = { vertical: 'middle', wrapText: true };
+      } else {
+        cell.alignment = { vertical: 'middle' };
+      }
+
       if (col === 6) cell.numFmt = '#,##0.00';
     }
   });
@@ -610,7 +624,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   // ABA 3: DISTRIBUIÇÃO DE EQUIPE
   // ==========================================
   const wsEquipe = workbook.addWorksheet('Distribuição de Equipe', {
-    views: [{ showGridLines: true }]
+    views: [{ showGridLines: false }]
   });
 
   wsEquipe.properties.outlineProperties = {
@@ -716,6 +730,12 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
         left: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
         right: { style: 'dotted', color: { argb: 'FFCBD5E1' } }
       };
+
+      if (col === 3) {
+        cell.alignment = { vertical: 'middle', wrapText: true };
+      } else {
+        cell.alignment = { vertical: 'middle' };
+      }
 
       if ((col === 6 || col === 7 || col === 8 || col === 9) && typeof cell.value === 'number') {
         cell.numFmt = '#,##0.00';
