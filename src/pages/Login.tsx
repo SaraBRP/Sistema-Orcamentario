@@ -95,17 +95,18 @@ export default function Login() {
     if (!authError) {
       let nome = emailTrim.split('@')[0];
       nome = nome.charAt(0).toUpperCase() + nome.slice(1);
-      let cargo = emailTrim.includes('sara') ? 'Gestor' : 'Orçamentista';
+      let cargo = emailTrim.includes('sara') ? 'Administrador' : 'Orçamentista';
 
       if (dadosSolicitacao) {
         if (dadosSolicitacao.nome) nome = dadosSolicitacao.nome;
         if (dadosSolicitacao.cargo) cargo = dadosSolicitacao.cargo;
       }
 
+      const isSara = emailTrim.includes('sara');
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
-        nome,
+        nome: isSara ? 'Sara' : nome,
         email: emailTrim,
-        funcao: cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista',
+        funcao: isSara || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
         avatarUrl: ''
       }));
 
@@ -115,13 +116,14 @@ export default function Login() {
 
     // 3. Se a conta for aprovada via Gestor (independente de ter conta no Supabase Auth)
     if (statusSolicitacao === 'aprovado' || (dadosSolicitacao && dadosSolicitacao.status === 'aprovado')) {
+      const isSara = emailTrim.includes('sara');
       const nome = dadosSolicitacao?.nome || emailTrim.split('@')[0];
-      const cargo = dadosSolicitacao?.cargo || 'Orçamentista';
+      const cargo = dadosSolicitacao?.cargo || (isSara ? 'Administrador' : 'Orçamentista');
 
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
-        nome,
+        nome: isSara ? 'Sara' : nome,
         email: emailTrim,
-        funcao: cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista',
+        funcao: isSara || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista'),
         avatarUrl: ''
       }));
 

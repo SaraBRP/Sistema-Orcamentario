@@ -212,9 +212,22 @@ export default function Configuracoes() {
     }
   };
 
-  // Filtragem de registros válidos (ignora contas de sistema sem e-mail e excluidos)
+  // Filtragem de registros válidos (ignora contas de sistema sem e-mail, excluídos e a conta de Administrador/Criador do sistema)
   const validProfiles = useMemo(() => {
-    return profiles.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
+    return profiles.filter(p => {
+      if (!p.email) return false;
+      if (p.nome === 'Time Comercial') return false;
+      if (p.status === 'excluido') return false;
+
+      const emailLower = p.email.toLowerCase();
+      const cargoLower = (p.cargo || '').toLowerCase();
+
+      // Exclui a conta Administrador / Criador (Sara) das tabelas de gestão de usuários
+      if (emailLower.includes('sara') || cargoLower === 'administrador' || cargoLower === 'administradora') {
+        return false;
+      }
+      return true;
+    });
   }, [profiles]);
 
   // Separação entre Aprovados e Pendentes

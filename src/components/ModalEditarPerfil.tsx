@@ -12,7 +12,7 @@ import {
 export interface UserProfileData {
   nome: string;
   email: string;
-  funcao: 'Gestor' | 'Orçamentista';
+  funcao: 'Administrador' | 'Gestor' | 'Orçamentista';
   avatarUrl: string;
 }
 

@@ -108,9 +108,12 @@ export default function Layout() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.email) {
+          const isSaraSaved = parsed.email.toLowerCase().includes('sara');
           return {
             ...parsed,
-            funcao: parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' ? 'Gestor' : 'Orçamentista'
+            funcao: isSaraSaved || parsed.cargo?.toLowerCase() === 'administrador' || parsed.funcao === 'Administrador'
+              ? 'Administrador'
+              : (parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' ? 'Gestor' : 'Orçamentista')
           };
         }
       }
@@ -121,7 +124,7 @@ export default function Layout() {
     return {
       nome: isSara ? 'Sara' : currentUserEmail.split('@')[0],
       email: currentUserEmail,
-      funcao: isSara ? 'Gestor' : 'Orçamentista',
+      funcao: isSara ? 'Administrador' : 'Orçamentista',
       avatarUrl: ''
     };
   });
@@ -143,12 +146,13 @@ export default function Layout() {
       if (!activeEmail) return;
 
       const emailLower = activeEmail.toLowerCase();
+      const isSaraEmail = emailLower.includes('sara');
 
-      // Se o perfil atual em memória for de outro e-mail, sincroniza imediatamente
-      if (!userProfile.email || userProfile.email.toLowerCase() !== emailLower) {
+      // Se o perfil atual em memória for de outro e-mail ou não for Administrador para Sara, sincroniza imediatamente
+      if (!userProfile.email || userProfile.email.toLowerCase() !== emailLower || (isSaraEmail && userProfile.funcao !== 'Administrador')) {
         let nome = emailLower.split('@')[0];
         nome = nome.charAt(0).toUpperCase() + nome.slice(1);
-        let cargo = emailLower.includes('sara') ? 'Gestor' : 'Orçamentista';
+        let cargo = isSaraEmail ? 'Administrador' : 'Orçamentista';
 
         try {
           const { data: sol } = await supabase
@@ -175,10 +179,15 @@ export default function Layout() {
           }
         } catch {}
 
+        const finalFuncao: 'Administrador' | 'Gestor' | 'Orçamentista' =
+          isSaraEmail || cargo.toLowerCase() === 'administrador'
+            ? 'Administrador'
+            : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
+
         const newProfile: UserProfileData = {
-          nome,
+          nome: isSaraEmail ? 'Sara' : nome,
           email: activeEmail,
-          funcao: cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista',
+          funcao: finalFuncao,
           avatarUrl: userProfile.avatarUrl || ''
         };
 
