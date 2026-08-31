@@ -7,6 +7,7 @@ import {
 import { clsx } from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ModalImportarExcel } from '../components/ModalImportarExcel';
+import { getClientesCadastrados, type ClienteData } from '../lib/clientes';
 
 const statusBadgeClasses = (status: string) => {
   switch (status) {
@@ -187,11 +188,13 @@ export default function Orcamentos() {
   });
 
   const [usuariosCadastrados, setUsuariosCadastrados] = useState<any[]>([]);
+  const [clientesCadastrados, setClientesCadastrados] = useState<ClienteData[]>([]);
 
   useEffect(() => {
     fetchOrcamentos();
     fetchImportados();
     fetchUsuariosCadastrados();
+    getClientesCadastrados().then(setClientesCadastrados);
   }, []);
 
   const formatCidadeUpperNoAccents = (text: string) => {
@@ -1163,14 +1166,41 @@ export default function Orcamentos() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
-                <input 
-                  type="text"
-                  value={newOrcamentoData.cliente}
-                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cliente: e.target.value})}
-                  placeholder="Ex: Metalúrgica BRP Ltda"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
-                />
+                <label className="block font-bold text-slate-700 mb-1">Cliente / Empresa</label>
+                <div className="relative">
+                  <input 
+                    type="text"
+                    list="clientes-registrados-list"
+                    value={newOrcamentoData.cliente}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const matched = clientesCadastrados.find(c =>
+                        c.razao_social.toLowerCase() === val.toLowerCase() ||
+                        (c.nome_fantasia && c.nome_fantasia.toLowerCase() === val.toLowerCase())
+                      );
+                      if (matched) {
+                        setNewOrcamentoData({
+                          ...newOrcamentoData,
+                          cliente: matched.nome_fantasia || matched.razao_social,
+                          gestor_cliente: matched.responsavel || newOrcamentoData.gestor_cliente,
+                          cidade: matched.cidade || newOrcamentoData.cidade,
+                          estado: matched.uf || newOrcamentoData.estado
+                        });
+                      } else {
+                        setNewOrcamentoData({...newOrcamentoData, cliente: val});
+                      }
+                    }}
+                    placeholder="Selecione ou digite a Empresa/Cliente..."
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
+                  />
+                  <datalist id="clientes-registrados-list">
+                    {clientesCadastrados.map(c => (
+                      <option key={c.id} value={c.nome_fantasia || c.razao_social}>
+                        {c.razao_social} {c.cnpj ? `(CNPJ: ${c.cnpj})` : ''} - {c.cidade}/{c.uf}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
               </div>
 
               <div>
