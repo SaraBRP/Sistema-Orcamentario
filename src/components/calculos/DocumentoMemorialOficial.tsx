@@ -2097,31 +2097,23 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     const item = itens[index];
     setEditingItemIndex(index);
 
-    // Garante que o item possui um array formulasLista consistente
     if (!item.formulasLista) {
       item.formulasLista = [];
     }
 
     setEditingItemModal(item);
     setTargetBindingItemId(item.id);
-    setSelectedActiveCalcId(null);
-    setEditingTabId(null);
-
-    // Inicializa a modal sem nenhuma fórmula pré-selecionada
-    setModoCalculoModal('');
 
     const initialList = [...item.formulasLista];
-
     setTempFormulas(initialList);
     setSelectedFormula(null);
     setCustomTextLiteral('');
     setCustomTextSubst('');
     setCustomQtd(item.quantidade || 0);
 
-    // Inicializa a lista de parâmetros da fórmula sempre limpa com 1 parâmetro inicial limpo (Parâmetro 1)
     const listaBase = getParametrosCadastrados();
     const defaultBase = listaBase.find(p => p.sigla === 'A' || p.unidade === 'm²') || listaBase[0];
-    const initialParams = [{
+    const defaultParams = [{
       id: `cp-${Date.now()}-1`,
       nome: 'Parâmetro 1',
       parametroBaseId: defaultBase ? defaultBase.id : 'p-8',
@@ -2130,7 +2122,55 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       unidade: defaultBase ? defaultBase.unidade : 'm²',
       valor: ''
     }];
-    setCustomParamsList(initialParams);
+
+    if (initialList.length > 0) {
+      const customFormulasInSteps: any[] = [];
+      initialList.forEach(f => {
+        if (Array.isArray((f as any).savedCustomFormulas) && (f as any).savedCustomFormulas.length > 0) {
+          customFormulasInSteps.push(...(f as any).savedCustomFormulas);
+        } else if (f.equacaoLiteral || f.substituicaoNumerica) {
+          customFormulasInSteps.push({
+            id: f.id || `cf-${Date.now()}`,
+            nome: f.observacao || 'Cálculo',
+            equacaoLiteral: f.equacaoLiteral || '',
+            substituicaoNumerica: f.substituicaoNumerica || '',
+            resultado: f.resultado || 0,
+            unidade: item.unidade || 'm²',
+            customParamsList: (f as any).customParamsList || []
+          });
+        }
+      });
+
+      const uniqueCustoms: any[] = [];
+      const seen = new Set<string>();
+      customFormulasInSteps.forEach(cf => {
+        const key = cf.id || `${cf.nome}-${cf.resultado}`;
+        if (!seen.has(key)) {
+          seen.add(key);
+          uniqueCustoms.push(cf);
+        }
+      });
+
+      setSavedCustomFormulas(uniqueCustoms);
+
+      const firstStep = initialList[0];
+      setSelectedActiveCalcId(firstStep.id);
+      setEditingTabId(firstStep.id);
+      const modo = firstStep.modoCalculo || inferModoFromObs(firstStep.observacao || '') || 'formula';
+      setModoCalculoModal(modo as any);
+
+      if (Array.isArray((firstStep as any).customParamsList) && (firstStep as any).customParamsList.length > 0) {
+        setCustomParamsList((firstStep as any).customParamsList);
+      } else {
+        setCustomParamsList(defaultParams);
+      }
+    } else {
+      setSavedCustomFormulas([]);
+      setSelectedActiveCalcId(null);
+      setEditingTabId(null);
+      setModoCalculoModal('');
+      setCustomParamsList(defaultParams);
+    }
   };
 
   const handleAddFormulaStep = () => {
@@ -2933,7 +2973,9 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
         equacaoLiteral: stepEq,
         substituicaoNumerica: stepSubst,
         resultado: stepResult,
-        modoCalculo: modoCalculoModal
+        modoCalculo: modoCalculoModal || 'formula',
+        savedCustomFormulas: [...savedCustomFormulas],
+        customParamsList: [...customParamsList]
       };
 
       // Só substitui a aba quando o cálculo aplicado é o mesmo que estava selecionado.
@@ -4399,6 +4441,13 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                           } else {
                             setSelectedActiveCalcId(calc.id);
                             setEditingTabId(calc.id);
+                            const targetStep = (editingItemModal?.formulasLista || []).find(f => f.id === calc.id);
+                            if (targetStep && Array.isArray((targetStep as any).savedCustomFormulas) && (targetStep as any).savedCustomFormulas.length > 0) {
+                              setSavedCustomFormulas((targetStep as any).savedCustomFormulas);
+                            }
+                            if (targetStep && Array.isArray((targetStep as any).customParamsList) && (targetStep as any).customParamsList.length > 0) {
+                              setCustomParamsList((targetStep as any).customParamsList);
+                            }
                             const targetModo = calc.modoCalculo || inferModoFromObs(calc.observacao);
                             if (targetModo) setModoCalculoModal(targetModo as any);
                           }
