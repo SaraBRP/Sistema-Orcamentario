@@ -26,64 +26,6 @@ export interface CardOrcamentoKanban {
   orcamentista: string;
 }
 
-const ORCAMENTOS_INICIAIS_MOCK: CardOrcamentoKanban[] = [
-  {
-    id: 'k-1',
-    codigo: 'ORÇ-2026-001',
-    nome: 'Infraestrutura Galpão Industrial BRP',
-    cliente: 'BRP Metalica - Unidade 01',
-    valorTotal: 485900.00,
-    revisao: 'R1',
-    status: 'em_andamento',
-    dataUltimaModificacao: '18/08/2026 09:30',
-    orcamentista: 'Sara (Orçamentista)'
-  },
-  {
-    id: 'k-2',
-    codigo: 'ORÇ-2026-002',
-    nome: 'Fundação Profunda Tubulões Ø80cm',
-    cliente: 'Consultoria PPT Encontro',
-    valorTotal: 230400.50,
-    revisao: 'R0',
-    status: 'aguardando_aprovacao',
-    dataUltimaModificacao: '17/08/2026 16:45',
-    orcamentista: 'Sara (Orçamentista)'
-  },
-  {
-    id: 'k-3',
-    codigo: 'ORÇ-2026-003',
-    nome: 'Vigas Baldrames & Sapatas Isoladas',
-    cliente: 'Engenharia Comercial BRP',
-    valorTotal: 154200.00,
-    revisao: 'R2',
-    status: 'aprovado',
-    dataUltimaModificacao: '16/08/2026 11:20',
-    orcamentista: 'Sara (Orçamentista)'
-  },
-  {
-    id: 'k-4',
-    codigo: 'ORÇ-2026-004',
-    nome: 'Estaca Hélice Contínua Ø70cm',
-    cliente: 'Geral Metálica PPT',
-    valorTotal: 389000.00,
-    revisao: 'R0',
-    status: 'em_andamento',
-    dataUltimaModificacao: '18/08/2026 10:15',
-    orcamentista: 'Sara (Orçamentista)'
-  },
-  {
-    id: 'k-5',
-    codigo: 'ORÇ-2026-005',
-    nome: 'Superestrutura Metálica & Cobertura',
-    cliente: 'Empresa Cliente Terceiro',
-    valorTotal: 620000.00,
-    revisao: 'R1',
-    status: 'reprovado',
-    dataUltimaModificacao: '14/08/2026 14:00',
-    orcamentista: 'Sara (Orçamentista)'
-  }
-];
-
 interface ModalKanbanOrcamentosProps {
   isOpen: boolean;
   onClose: () => void;
@@ -110,40 +52,76 @@ function isDentroDos7Dias(dateStr: string): boolean {
 
 export function ModalKanbanOrcamentos({ isOpen, onClose }: ModalKanbanOrcamentosProps) {
   const navigate = useNavigate();
-  const [orcamentos, setOrcamentos] = useState<CardOrcamentoKanban[]>(ORCAMENTOS_INICIAIS_MOCK);
+  const [orcamentos, setOrcamentos] = useState<CardOrcamentoKanban[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Tenta buscar orçamentos reais do Supabase para enriquecer a visão Kanban
+  // Busca orçamentos reais do Supabase e LocalStorage para o Kanban
   useEffect(() => {
     async function carregarOrcamentosBanco() {
       try {
-        const { data, error } = await supabase
-          .from('orcamentos')
-          .select('*')
-          .order('updated_at', { ascending: false });
+        let dbData: any[] = [];
+        try {
+          const { data } = await supabase
+            .schema('engenharia')
+            .from('orcamentos')
+            .select('*')
+            .order('created_at', { ascending: false });
+          if (data) dbData = data;
+        } catch (e) {}
 
-        if (!error && data && data.length > 0) {
-          const formatados: CardOrcamentoKanban[] = data.map((o: any) => ({
-            id: o.id,
-            codigo: o.codigo || `ORÇ-${o.id.substring(0, 5).toUpperCase()}`,
-            nome: o.cliente_nome ? `Orçamento - ${o.cliente_nome}` : 'Orçamento sem nome',
-            cliente: o.cliente_nome || 'Cliente BRP',
-            valorTotal: Number(o.valor_total || 0),
-            revisao: `R${o.versao || 0}`,
-            status: (o.status as any) || 'em_andamento',
-            dataUltimaModificacao: new Date(o.updated_at || Date.now()).toLocaleDateString('pt-BR', {
-              day: '2-digit',
-              month: '2-digit',
-              year: 'numeric',
-              hour: '2-digit',
-              minute: '2-digit'
-            }),
-            orcamentista: 'Sara (Orçamentista)'
-          }));
-          setOrcamentos(formatados);
-        }
+        let localData: any[] = [];
+        try {
+          const raw = localStorage.getItem('brp_orcamentos_list');
+          if (raw) localData = JSON.parse(raw);
+        } catch (e) {}
+
+        const mapOrcs = new Map<string, any>();
+        dbData.forEach(o => {
+          if (o.id) mapOrcs.set(String(o.id), o);
+          if (o.codigo) mapOrcs.set(String(o.codigo).trim(), o);
+        });
+        localData.forEach(o => {
+          if (o.id && !mapOrcs.has(String(o.id))) mapOrcs.set(String(o.id), o);
+          if (o.codigo && !mapOrcs.has(String(o.codigo).trim())) mapOrcs.set(String(o.codigo).trim(), o);
+        });
+
+        const allOrcs = Array.from(mapOrcs.values());
+
+        const formatados: CardOrcamentoKanban[] = allOrcs.map((o: any) => {
+          const stRaw = String(o.status || '').toLowerCase();
+          let st: CardOrcamentoKanban['status'] = 'em_andamento';
+          if (stRaw.includes('aprovado')) {
+            st = 'aprovado';
+          } else if (stRaw.includes('reprovado') || stRaw.includes('cancelad') || stRaw.includes('recusad')) {
+            st = 'reprovado';
+          } else if (stRaw.includes('aguardando') || stRaw.includes('valida') || stRaw.includes('análise')) {
+            st = 'aguardando_aprovacao';
+          }
+
+          const rawDate = o.updated_at || o.created_at || o.dataCriacao;
+          const dtFormated = rawDate 
+            ? new Date(rawDate).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+            : new Date().toLocaleDateString('pt-BR');
+
+          const rev = o.revisao ? `R${o.revisao}` : 'R0';
+
+          return {
+            id: String(o.id),
+            codigo: o.codigo || `ORÇ-${String(o.id).substring(0, 5)}`,
+            nome: o.projeto || o.nome || 'Orçamento sem nome',
+            cliente: o.cliente || 'Cliente BRP',
+            valorTotal: Number(o.valor_total || o.valorTotal || 0),
+            revisao: rev,
+            status: st,
+            dataUltimaModificacao: dtFormated,
+            orcamentista: o.responsavel || 'Sara (Orçamentista)'
+          };
+        });
+
+        setOrcamentos(formatados);
       } catch (err) {
-        console.warn('Usando orçamentos mock para o Kanban:', err);
+        console.warn('Erro ao carregar orçamentos para o Kanban:', err);
+        setOrcamentos([]);
       }
     }
 

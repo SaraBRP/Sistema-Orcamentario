@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
 import {
@@ -24,7 +25,6 @@ import {
   LayoutGrid,
   User,
 } from 'lucide-react';
-import { useState } from 'react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { ModalKanbanOrcamentos } from './ModalKanbanOrcamentos';
@@ -131,32 +131,23 @@ export default function Layout() {
   const [notificacoesOpen, setNotificacoesOpen] = useState(false);
   const [perfilOpen, setPerfilOpen] = useState(false);
 
-  const [notificacoes, setNotificacoes] = useState<NotificacaoItem[]>([
-    {
-      id: 'n-1',
-      tipo: 'aprovado',
-      titulo: 'Orçamento Aprovado! 🎉',
-      mensagem: 'O orçamento "ORÇ-2026-003 - Vigas Baldrames & Sapatas" foi aprovado pela diretoria.',
-      tempo: 'Há 10 min',
-      lida: false
-    },
-    {
-      id: 'n-2',
-      tipo: 'reprovado',
-      titulo: 'Revisão Solicitada ⚠️',
-      mensagem: 'A proposta "ORÇ-2026-005 - Superestrutura Metálica" requer ajuste na taxa de BDI.',
-      tempo: 'Há 45 min',
-      lida: false
-    },
-    {
-      id: 'n-3',
-      tipo: 'cotacao',
-      titulo: 'Cotação de Insumo Recebida 💬',
-      mensagem: 'Fornecedor respondeu a cotação de Aço CA-50 para o projeto Galpão BRP.',
-      tempo: 'Há 2h',
-      lida: false
-    }
-  ]);
+  const [notificacoes, setNotificacoes] = useState<NotificacaoItem[]>([]);
+  const [kanbanCount, setKanbanCount] = useState<number>(0);
+
+  useEffect(() => {
+    const updateCount = () => {
+      try {
+        const saved = localStorage.getItem('brp_orcamentos_list');
+        if (saved) {
+          const list = JSON.parse(saved);
+          if (Array.isArray(list)) setKanbanCount(list.length);
+        }
+      } catch (e) {}
+    };
+    updateCount();
+    window.addEventListener('storage', updateCount);
+    return () => window.removeEventListener('storage', updateCount);
+  }, []);
 
   const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
 
@@ -449,9 +440,11 @@ export default function Layout() {
               title="Abrir Quadro Kanban de Orçamentos"
             >
               <LayoutGrid className="w-4.5 h-4.5 text-slate-700" />
-              <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white font-bold text-[9.5px] rounded-full flex items-center justify-center shadow-xs">
-                5
-              </span>
+              {kanbanCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white font-bold text-[9.5px] rounded-full flex items-center justify-center shadow-xs">
+                  {kanbanCount}
+                </span>
+              )}
             </button>
 
             {/* Botão 2: Notificações com Badge */}
@@ -497,22 +490,30 @@ export default function Layout() {
                   </div>
 
                   <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-                    {notificacoes.map((n) => (
-                      <div 
-                        key={n.id} 
-                        className={`p-3 rounded-xl border text-xs space-y-1 transition-all ${
-                          n.lida ? 'bg-slate-50 border-slate-200 opacity-75' : 'bg-blue-50/50 border-blue-200'
-                        }`}
-                      >
-                        <div className="flex items-center justify-between font-bold">
-                          <span className={n.tipo === 'aprovado' ? 'text-emerald-700' : n.tipo === 'reprovado' ? 'text-rose-700' : 'text-blue-700'}>
-                            {n.titulo}
-                          </span>
-                          <span className="text-[10px] text-slate-400 font-normal">{n.tempo}</span>
-                        </div>
-                        <p className="text-slate-600 text-[11px] leading-relaxed">{n.mensagem}</p>
+                    {notificacoes.length === 0 ? (
+                      <div className="py-8 text-center text-slate-400 text-xs font-medium space-y-1">
+                        <Bell className="w-7 h-7 mx-auto text-slate-300 mb-1 opacity-60" />
+                        <p className="font-semibold text-slate-600">Nenhuma notificação no momento</p>
+                        <p className="text-[11px] text-slate-400">As notificações de aprovações e cotações surgirão aqui.</p>
                       </div>
-                    ))}
+                    ) : (
+                      notificacoes.map((n) => (
+                        <div 
+                          key={n.id} 
+                          className={`p-3 rounded-xl border text-xs space-y-1 transition-all ${
+                            n.lida ? 'bg-slate-50 border-slate-200 opacity-75' : 'bg-blue-50/50 border-blue-200'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between font-bold">
+                            <span className={n.tipo === 'aprovado' ? 'text-emerald-700' : n.tipo === 'reprovado' ? 'text-rose-700' : 'text-blue-700'}>
+                              {n.titulo}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-normal">{n.tempo}</span>
+                          </div>
+                          <p className="text-slate-600 text-[11px] leading-relaxed">{n.mensagem}</p>
+                        </div>
+                      ))
+                    )}
                   </div>
 
                   <div className="pt-2 border-t border-slate-100 text-center">
