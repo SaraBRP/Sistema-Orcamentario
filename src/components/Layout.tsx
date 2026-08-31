@@ -132,22 +132,57 @@ export default function Layout() {
   const [perfilOpen, setPerfilOpen] = useState(false);
 
   const [notificacoes, setNotificacoes] = useState<NotificacaoItem[]>([]);
-  const [kanbanCount, setKanbanCount] = useState<number>(0);
+  const [kanbanUnreadCount, setKanbanUnreadCount] = useState<number>(0);
 
   useEffect(() => {
-    const updateCount = () => {
+    const updateUnreadCount = () => {
       try {
+        const lastViewedRaw = localStorage.getItem('kanban_last_viewed_time');
+        
+        // Se o usuário nunca abriu o Kanban nesta sessão/dispositivo, inicializamos com o timestamp atual
+        // para que não mostre o badge "1" desnecessariamente sem haver mudança recente.
+        if (!lastViewedRaw) {
+          localStorage.setItem('kanban_last_viewed_time', String(Date.now()));
+          setKanbanUnreadCount(0);
+          return;
+        }
+
+        const lastViewed = parseInt(lastViewedRaw, 10);
         const saved = localStorage.getItem('brp_orcamentos_list');
         if (saved) {
           const list = JSON.parse(saved);
-          if (Array.isArray(list)) setKanbanCount(list.length);
+          if (Array.isArray(list)) {
+            let unread = 0;
+            list.forEach((item: any) => {
+              const itemTime = item.updated_at ? new Date(item.updated_at).getTime() : (item.dataCriacao ? new Date(item.dataCriacao).getTime() : 0);
+              if (itemTime > lastViewed) {
+                unread++;
+              }
+            });
+            setKanbanUnreadCount(unread);
+          }
         }
-      } catch (e) {}
+      } catch (e) {
+        setKanbanUnreadCount(0);
+      }
     };
-    updateCount();
-    window.addEventListener('storage', updateCount);
-    return () => window.removeEventListener('storage', updateCount);
+
+    updateUnreadCount();
+    window.addEventListener('storage', updateUnreadCount);
+    const interval = setInterval(updateUnreadCount, 8000);
+    return () => {
+      window.removeEventListener('storage', updateUnreadCount);
+      clearInterval(interval);
+    };
   }, []);
+
+  const handleOpenKanban = () => {
+    setKanbanModalOpen(true);
+    setKanbanUnreadCount(0);
+    try {
+      localStorage.setItem('kanban_last_viewed_time', String(Date.now()));
+    } catch (e) {}
+  };
 
   const notificacoesNaoLidas = notificacoes.filter(n => !n.lida).length;
 
@@ -435,14 +470,14 @@ export default function Layout() {
             {/* Botão 1: Kanban de Orçamentos (APENAS ÍCONE) */}
             <button
               type="button"
-              onClick={() => setKanbanModalOpen(true)}
+              onClick={handleOpenKanban}
               className="p-2 bg-slate-100 hover:bg-slate-200/80 text-slate-700 rounded-xl transition-all relative cursor-pointer border border-slate-200"
               title="Abrir Quadro Kanban de Orçamentos"
             >
               <LayoutGrid className="w-4.5 h-4.5 text-slate-700" />
-              {kanbanCount > 0 && (
-                <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white font-bold text-[9.5px] rounded-full flex items-center justify-center shadow-xs">
-                  {kanbanCount}
+              {kanbanUnreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 w-4 h-4 bg-blue-600 text-white font-bold text-[9.5px] rounded-full flex items-center justify-center shadow-xs animate-pulse">
+                  {kanbanUnreadCount}
                 </span>
               )}
             </button>
