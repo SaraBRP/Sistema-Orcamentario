@@ -61,6 +61,7 @@ export default function Configuracoes() {
   const [activeTab, setActiveTab] = useState<Tab>('usuarios');
   const [subTabUsuarios, setSubTabUsuarios] = useState<SubTabUsuarios>('lista');
   const [profiles, setProfiles] = useState<Profile[]>([]);
+  const [cargoDefinidoMap, setCargoDefinidoMap] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [cargoFiltro, setCargoFiltro] = useState('Todos');
@@ -237,18 +238,22 @@ export default function Configuracoes() {
     return list;
   }, [approvedProfiles, pendingProfiles, subTabUsuarios, searchTerm, cargoFiltro, sortField, sortDirection]);
 
-  // Aprovar Acesso de Usuário Pendente
+  // Aprovar Acesso de Usuário Pendente (Atribuindo o Cargo Escolhido pelo Gestor)
   const handleAprovar = async (id: string, email?: string | null) => {
+    const rawCargo = cargoDefinidoMap[id] || 'orcamentista';
+    const cargoDisplay = rawCargo === 'gestor' || rawCargo === 'Gestor' ? 'Gestor' : 'Orçamentista';
+    const cargoDb = rawCargo === 'gestor' || rawCargo === 'Gestor' ? 'gestor' : 'orcamentista';
+
     try {
       if (isExclusiveTable) {
-        await supabase.schema('engenharia').from('usuarios').update({ approved: true, status: 'ativo' }).eq('id', id);
+        await supabase.schema('engenharia').from('usuarios').update({ approved: true, status: 'ativo', cargo: cargoDb }).eq('id', id);
       } else {
-        await supabase.from('profiles').update({ approved: true, status: 'ativo' }).eq('id', id);
+        await supabase.from('profiles').update({ approved: true, status: 'ativo', cargo: cargoDb }).eq('id', id);
       }
     } catch {}
 
     try {
-      await supabase.schema('engenharia').from('solicitacoes_cadastro').update({ status: 'aprovado' }).eq('id', id);
+      await supabase.schema('engenharia').from('solicitacoes_cadastro').update({ status: 'aprovado', cargo: cargoDisplay }).eq('id', id);
     } catch {}
 
     try {
@@ -257,7 +262,7 @@ export default function Configuracoes() {
         const list = JSON.parse(saved);
         const updated = list.map((s: any) => 
           s.id === id || (email && s.email.toLowerCase() === email.toLowerCase()) 
-            ? { ...s, status: 'aprovado' } 
+            ? { ...s, status: 'aprovado', cargo: cargoDisplay } 
             : s
         );
         localStorage.setItem('brp_solicitacoes_cadastro_usuarios', JSON.stringify(updated));
@@ -618,14 +623,25 @@ export default function Configuracoes() {
                       <td className="px-3 py-2 text-left font-mono text-slate-600 truncate">{user.email || '-'}</td>
 
                       <td className="px-3 py-2 text-center truncate">
-                        <span className={clsx(
-                          'px-2 py-0.5 rounded font-bold text-[10px] uppercase border inline-block',
-                          user.cargo === 'gestor'
-                            ? 'bg-purple-50 text-purple-700 border-purple-200'
-                            : 'bg-slate-100 text-slate-700 border-slate-200'
-                        )}>
-                          {user.cargo || 'orçamentista'}
-                        </span>
+                        {subTabUsuarios === 'pendentes' ? (
+                          <select
+                            value={cargoDefinidoMap[user.id] || (user.cargo === 'gestor' || user.cargo === 'Gestor' ? 'gestor' : 'orcamentista')}
+                            onChange={(e) => setCargoDefinidoMap({ ...cargoDefinidoMap, [user.id]: e.target.value })}
+                            className="px-2.5 py-1 text-xs bg-white border border-blue-300 rounded-lg font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-2xs"
+                          >
+                            <option value="orcamentista">Orçamentista</option>
+                            <option value="gestor">Gestor</option>
+                          </select>
+                        ) : (
+                          <span className={clsx(
+                            'px-2 py-0.5 rounded font-bold text-[10px] uppercase border inline-block',
+                            user.cargo === 'gestor' || user.cargo === 'Gestor'
+                              ? 'bg-purple-50 text-purple-700 border-purple-200'
+                              : 'bg-slate-100 text-slate-700 border-slate-200'
+                          )}>
+                            {user.cargo || 'orçamentista'}
+                          </span>
+                        )}
                       </td>
 
                       <td className="px-3 py-2 text-center truncate">
