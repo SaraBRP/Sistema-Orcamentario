@@ -129,7 +129,8 @@ export default function Login() {
       return;
     }
 
-    setError(authError?.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : 'E-mail ou senha incorretos.');
+    // 4. Se o usuário foi excluído ou não possui cadastro ativo/aprovado no sistema
+    setError('🔍 Usuário não encontrado. Por favor, solicite um novo cadastro para acessar.');
     setLoading(false);
   };
 
@@ -245,9 +246,21 @@ export default function Login() {
 
           {/* Mensagens de Alerta */}
           {error && (
-            <div className="mb-4 bg-rose-500/20 border border-rose-500/50 text-rose-200 p-3.5 rounded-xl text-xs leading-relaxed text-center flex items-center justify-center gap-2">
-              <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
-              <span>{error}</span>
+            <div className="mb-4 bg-rose-500/20 border border-rose-500/50 text-rose-200 p-3.5 rounded-xl text-xs leading-relaxed text-center flex flex-col items-center justify-center gap-2">
+              <div className="flex items-center justify-center gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 text-rose-400" />
+                <span>{error}</span>
+              </div>
+              {(error.includes('não encontrado') || error.includes('RECUSADA') || error.includes('recusada')) && (
+                <button
+                  type="button"
+                  onClick={() => handleSwitchMode('register')}
+                  className="mt-1 px-3.5 py-1.5 bg-sky-500 hover:bg-sky-400 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Criar Nova Conta / Solicitar Cadastro</span>
+                </button>
+              )}
             </div>
           )}
 
