@@ -12,6 +12,176 @@ export interface ExportOrcamentoOptions {
   itens?: any[];
   memoriaCalculo?: any[];
   distribuicaoEquipe?: any[];
+  duracoesMap?: Record<string, string>;
+  jornadasMap?: Record<string, string>;
+}
+
+export function buildDistribuicaoEquipeRows(
+  itens: any[],
+  duracoesMap: Record<string, string> = {},
+  jornadasMap: Record<string, string> = {}
+) {
+  const isMaoDeObra = (item: any) => {
+    const cod = (item.codigo || '').trim().toLowerCase();
+    if (cod.startsWith('mo.') || cod.startsWith('mo') || cod.includes('mo.')) return true;
+    const fonte = (item.banco_fonte || '').trim().toUpperCase();
+    if (fonte.includes('MO') || fonte.includes('MÃO DE OBRA')) return true;
+    const un = (item.unidade || '').trim().toLowerCase();
+    if ((un === 'h' || un === 'hs' || un === 'hr' || un === 'hrs') && (item.valor_unitario_mo > 0 || (item.total_mo && item.total_mo > 0))) return true;
+    return false;
+  };
+
+  const getDirectParentEap = (eap: string): string => {
+    const parts = (eap || '').trim().split('.').filter(Boolean);
+    if (parts.length <= 1) return '';
+    return parts.slice(0, -1).join('.');
+  };
+
+  const compareEap = (a: string, b: string) => {
+    const partsA = (a || '').split('.').map(n => parseInt(n, 10) || 0);
+    const partsB = (b || '').split('.').map(n => parseInt(n, 10) || 0);
+    const maxLen = Math.max(partsA.length, partsB.length);
+    for (let i = 0; i < maxLen; i++) {
+      const valA = partsA[i] ?? 0;
+      const valB = partsB[i] ?? 0;
+      if (valA !== valB) return valA - valB;
+    }
+    return 0;
+  };
+
+  const eapMap = new Map<string, any>();
+  itens.forEach(i => {
+    if (i.item_eap) eapMap.set(i.item_eap.trim(), i);
+  });
+
+  const findItemInMap = (targetEap: string): any => {
+    const trimmed = targetEap.trim();
+    if (eapMap.has(trimmed)) return eapMap.get(trimmed);
+    if (eapMap.has(trimmed + '.0')) return eapMap.get(trimmed + '.0');
+    if (eapMap.has(trimmed.replace(/\.0$/, ''))) return eapMap.get(trimmed.replace(/\.0$/, ''));
+    for (const [key, item] of eapMap.entries()) {
+      if ((item.isSecao || item.is_secao || !item.unidade) && (key === trimmed || key.startsWith(trimmed + '.'))) {
+        return item;
+      }
+    }
+    return undefined;
+  };
+
+  const getSectionForItem = (itemEap: string): { eap: string; descricao: string } => {
+    const parts = itemEap.trim().split('.').filter(Boolean);
+    const rootNum = parts[0] || '1';
+    if (parts.length <= 1) {
+      const item = findItemInMap(rootNum);
+      return { eap: rootNum, descricao: item?.descricao || rootNum };
+    }
+    for (let len = parts.length - 1; len >= 1; len--) {
+      const ancestorEap = parts.slice(0, len).join('.');
+      const ancestorItem = findItemInMap(ancestorEap);
+      if (ancestorItem && (ancestorItem.isSecao || ancestorItem.is_secao || !ancestorItem.unidade) && ancestorItem.descricao) {
+        return { eap: ancestorEap, descricao: ancestorItem.descricao };
+      }
+    }
+    const rootItem = findItemInMap(rootNum);
+    return { eap: rootNum, descricao: rootItem?.descricao || rootNum };
+  };
+
+  const compsWithLaborMap = new Map<string, {
+    comp: any;
+    laborInsumos: Array<{ insumo: any; totalHoras: number }>;
+  }>();
+
+  itens.forEach(item => {
+    const itemEap = (item.item_eap || '').trim();
+    if (!itemEap) return;
+
+    const directLaborChildren = itens.filter(child => {
+      const parentEap = getDirectParentEap(child.item_eap);
+      return parentEap === itemEap && isMaoDeObra(child);
+    });
+
+    if (directLaborChildren.length > 0) {
+      directLaborChildren.sort((a, b) => compareEap(a.item_eap, b.item_eap));
+      compsWithLaborMap.set(itemEap, {
+        comp: item,
+        laborInsumos: directLaborChildren.map(ins => ({
+          insumo: ins,
+          totalHoras: ins.displayQuantidade !== undefined ? ins.displayQuantidade : (ins.quantidade || 0)
+        }))
+      });
+    }
+  });
+
+  const sectionsMap = new Map<string, {
+    eap: string;
+    descricao: string;
+    compositions: Array<{
+      comp: any;
+      laborInsumos: Array<{ insumo: any; totalHoras: number }>;
+    }>;
+  }>();
+
+  compsWithLaborMap.forEach(({ comp, laborInsumos }) => {
+    const { eap: sectionEap, descricao: sectionDesc } = getSectionForItem(comp.item_eap);
+    if (!sectionsMap.has(sectionEap)) {
+      sectionsMap.set(sectionEap, { eap: sectionEap, descricao: sectionDesc, compositions: [] });
+    }
+    sectionsMap.get(sectionEap)!.compositions.push({ comp, laborInsumos });
+  });
+
+  const sortedSections = Array.from(sectionsMap.values()).sort((a, b) => compareEap(a.eap, b.eap));
+  const exportRows: any[] = [];
+
+  sortedSections.forEach(sec => {
+    exportRows.push({
+      item_eap: sec.eap,
+      atividade: `SEÇÃO: ${sec.descricao}`,
+      tipo: 'SEÇÃO',
+      unidade: '',
+      qtd_horas: '',
+      duracao: '',
+      carga_horaria: '',
+      horas_disp: '',
+      equipe: ''
+    });
+
+    sec.compositions.sort((a, b) => compareEap(a.comp.item_eap, b.comp.item_eap));
+
+    sec.compositions.forEach(({ comp, laborInsumos }) => {
+      const dur = parseFloat(duracoesMap[comp.id] || '1') || 1;
+      const jor = parseFloat(jornadasMap[comp.id] || '5') || 5;
+      const hrsDisp = dur * jor;
+
+      exportRows.push({
+        item_eap: comp.item_eap,
+        atividade: comp.descricao,
+        tipo: 'COMPOSIÇÃO',
+        unidade: comp.unidade || '',
+        qtd_horas: comp.quantidade || 0,
+        duracao: dur,
+        carga_horaria: jor,
+        horas_disp: hrsDisp,
+        equipe: ''
+      });
+
+      laborInsumos.forEach(({ insumo, totalHoras }) => {
+        const eqNecessaria = hrsDisp > 0 && totalHoras > 0 ? Math.ceil(totalHoras / hrsDisp) : 0;
+
+        exportRows.push({
+          item_eap: insumo.item_eap,
+          atividade: `↳ ${insumo.descricao}`,
+          tipo: 'MÃO DE OBRA',
+          unidade: insumo.unidade || 'H',
+          qtd_horas: totalHoras,
+          duracao: dur,
+          carga_horaria: jor,
+          horas_disp: hrsDisp,
+          equipe: eqNecessaria > 0 ? `${eqNecessaria} Colaboradores` : '-'
+        });
+      });
+    });
+  });
+
+  return exportRows;
 }
 
 export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptions): Promise<void> {
@@ -89,7 +259,6 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   let currentRow = startRow;
 
   if (itens.length === 0) {
-    // Exemplo de linha se não houver itens fornecidos
     const row = wsOrcamento.getRow(currentRow);
     row.getCell(2).value = '1.0';
     row.getCell(3).value = 'COMP.001';
@@ -106,21 +275,37 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   } else {
     itens.forEach((item, index) => {
       const row = wsOrcamento.getRow(currentRow);
-      const isSeçao = item.tipo === 'secao' || item.tipo === 'etapa' || !item.codigo;
+      const isSeçao = item.isSecao || item.is_secao || item.isSummary || !item.codigo || item.codigo === '-';
+
+      const matUnit = Number(item.valor_unitario_mat ?? item.valor_material_unitario ?? item.mat_unit ?? 0);
+      const moUnit = Number(item.valor_unitario_mo ?? item.valor_mao_obra_unitario ?? item.mo_unit ?? 0);
+      const qtd = Number(item.quantidade ?? item.qtd ?? 0);
+
+      const totalMat = Number(item.total_mat ?? (qtd * matUnit));
+      const totalMo = Number(item.total_mo ?? (qtd * moUnit));
 
       row.getCell(2).value = item.item_eap || item.item || `${index + 1}`;
       row.getCell(3).value = item.codigo || '-';
       row.getCell(4).value = item.descricao || item.nome || '';
-      row.getCell(5).value = item.unidade || item.und || '';
-      row.getCell(6).value = Number(item.quantidade || item.qtd || 0);
-      row.getCell(7).value = Number(item.valor_material_unitario || item.mat_unit || 0);
-      row.getCell(8).value = Number(item.valor_mao_obra_unitario || item.mo_unit || 0);
+      row.getCell(5).value = isSeçao ? '' : (item.unidade || item.und || '');
 
-      // Fórmulas
-      row.getCell(9).value = { formula: `G${currentRow}+H${currentRow}` };
-      row.getCell(10).value = { formula: `F${currentRow}*G${currentRow}` };
-      row.getCell(11).value = { formula: `F${currentRow}*H${currentRow}` };
-      row.getCell(12).value = { formula: `J${currentRow}+K${currentRow}` };
+      if (isSeçao) {
+        row.getCell(6).value = '';
+        row.getCell(7).value = '';
+        row.getCell(8).value = '';
+        row.getCell(9).value = '';
+        row.getCell(10).value = totalMat;
+        row.getCell(11).value = totalMo;
+        row.getCell(12).value = { formula: `J${currentRow}+K${currentRow}` };
+      } else {
+        row.getCell(6).value = qtd;
+        row.getCell(7).value = matUnit;
+        row.getCell(8).value = moUnit;
+        row.getCell(9).value = { formula: `G${currentRow}+H${currentRow}` };
+        row.getCell(10).value = { formula: `F${currentRow}*G${currentRow}` };
+        row.getCell(11).value = { formula: `F${currentRow}*H${currentRow}` };
+        row.getCell(12).value = { formula: `J${currentRow}+K${currentRow}` };
+      }
 
       // Estilização das linhas de dados
       for (let col = 2; col <= 12; col++) {
@@ -139,8 +324,8 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
         };
 
         // Formatação numéricas
-        if (col === 6) cell.numFmt = '#,##0.00';
-        if (col >= 7 && col <= 12) cell.numFmt = 'R$ #,##0.00';
+        if (col === 6 && typeof cell.value === 'number') cell.numFmt = '#,##0.00';
+        if (col >= 7 && col <= 12 && typeof cell.value === 'number') cell.numFmt = 'R$ #,##0.00';
       }
 
       currentRow++;
@@ -188,7 +373,7 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     cell.fill = {
       type: 'pattern',
       pattern: 'solid',
-      fgColor: { argb: 'FFED7D31' } // Laranja corporativo vibrante
+      fgColor: { argb: 'FFED7D31' }
     };
   });
 
@@ -314,13 +499,13 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     const rIdx = 8 + i;
     const row = wsMemoria.getRow(rIdx);
     row.getCell(2).value = m.item_eap || `${i + 1}`;
-    row.getCell(3).value = m.tipo || 'Composição';
+    row.getCell(3).value = m.tipo || (m.codigo ? 'Composição' : 'Seção');
     row.getCell(4).value = m.descricao || '';
     row.getCell(5).value = m.unidade || '';
     row.getCell(6).value = Number(m.quantidade || 0);
-    row.getCell(7).value = m.equacao_literal || '';
-    row.getCell(8).value = m.substituicao_numerica || '';
-    row.getCell(9).value = m.observacao || '';
+    row.getCell(7).value = m.equacaoLiteral || m.equacao_literal || '';
+    row.getCell(8).value = m.substituicaoNumerica || m.substituicao_numerica || '';
+    row.getCell(9).value = m.observacaoMemoria || m.observacao_memoria || m.observacao || '';
 
     for (let col = 2; col <= 9; col++) {
       const cell = row.getCell(col);
@@ -345,14 +530,14 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
 
   wsEquipe.getColumn(1).width = 4;
   wsEquipe.getColumn(2).width = 12; // Item EAP
-  wsEquipe.getColumn(3).width = 50; // Estrutura / Mão de Obra
+  wsEquipe.getColumn(3).width = 55; // Estrutura / Mão de Obra
   wsEquipe.getColumn(4).width = 14; // Tipo
   wsEquipe.getColumn(5).width = 10; // Unidade
-  wsEquipe.getColumn(6).width = 16; // Qtd Totais
+  wsEquipe.getColumn(6).width = 18; // Qtd Totais
   wsEquipe.getColumn(7).width = 14; // Duração (Dias)
   wsEquipe.getColumn(8).width = 16; // Carga Horária
-  wsEquipe.getColumn(9).width = 20; // Horas Disp / Pessoa
-  wsEquipe.getColumn(10).width = 16; // Equipe Necessária
+  wsEquipe.getColumn(9).width = 22; // Horas Disp / Pessoa
+  wsEquipe.getColumn(10).width = 18; // Equipe Necessária
 
   wsEquipe.getCell('B2').value = 'CLIENTE:';
   wsEquipe.getCell('B2').font = { bold: true, size: 10 };
@@ -394,36 +579,55 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFED7D31' } };
   });
 
-  const equipeRows = options.distribuicaoEquipe && options.distribuicaoEquipe.length > 0
+  // Constrói linhas reais da Distribuição de Equipe se não forem passadas
+  const equipeRows = (options.distribuicaoEquipe && options.distribuicaoEquipe.length > 0)
     ? options.distribuicaoEquipe
-    : [
-        { item_eap: '1', atividade: 'SEÇÃO: INFRAESTRUTURA', tipo: 'SEÇÃO', unidade: '', qtd_horas: '', duracao: '', carga_horaria: '', horas_disp: '', equipe: '' },
-        { item_eap: '1.1', atividade: 'MONTAGEM E ESTRUTURA METÁLICA', tipo: 'COMPOSIÇÃO', unidade: 'H', qtd_horas: 120, duracao: 10, carga_horaria: 8, horas_disp: 80, equipe: 1.5 }
-      ];
+    : buildDistribuicaoEquipeRows(itens, options.duracoesMap, options.jornadasMap);
 
   equipeRows.forEach((eq, i) => {
     const rIdx = 8 + i;
     const row = wsEquipe.getRow(rIdx);
-    row.getCell(2).value = eq.item_eap || `${i + 1}`;
-    row.getCell(3).value = eq.atividade || eq.nome || '';
-    row.getCell(4).value = eq.tipo || 'MÃO DE OBRA';
-    row.getCell(5).value = eq.unidade || 'H';
-    row.getCell(6).value = eq.qtd_horas || '';
-    row.getCell(7).value = eq.duracao || '';
-    row.getCell(8).value = eq.carga_horaria || '';
-    row.getCell(9).value = eq.horas_disp || '';
-    row.getCell(10).value = eq.equipe || '';
+
+    const itemEap = eq.item_eap || eq['Item EAP'] || `${i + 1}`;
+    const atividade = eq.atividade || eq['Estrutura / Seção / Atividade / Mão de Obra'] || eq.nome || '';
+    const tipo = eq.tipo || eq['Tipo'] || 'MÃO DE OBRA';
+    const unidade = eq.unidade || eq['Unidade'] || '';
+    const qtdHoras = eq.qtd_horas ?? eq['Qtd / Horas Totais'] ?? '';
+    const duracao = eq.duracao ?? eq['Duração (Dias)'] ?? '';
+    const cargaHoraria = eq.carga_horaria ?? eq['Carga Horária (h/dia)'] ?? '';
+    const horasDisp = eq.horas_disp ?? eq['Horas Disponíveis / Pessoa'] ?? '';
+    const equipe = eq.equipe ?? eq['Equipe Necessária'] ?? '';
+
+    const isSeçao = tipo === 'SEÇÃO';
+
+    row.getCell(2).value = itemEap;
+    row.getCell(3).value = atividade;
+    row.getCell(4).value = tipo;
+    row.getCell(5).value = unidade;
+    row.getCell(6).value = typeof qtdHoras === 'number' ? qtdHoras : qtdHoras;
+    row.getCell(7).value = typeof duracao === 'number' ? duracao : duracao;
+    row.getCell(8).value = typeof cargaHoraria === 'number' ? cargaHoraria : cargaHoraria;
+    row.getCell(9).value = typeof horasDisp === 'number' ? horasDisp : horasDisp;
+    row.getCell(10).value = equipe;
 
     for (let col = 2; col <= 10; col++) {
       const cell = row.getCell(col);
-      cell.font = { size: 10 };
-      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
+      cell.font = { size: 10, bold: isSeçao, color: { argb: 'FF1E293B' } };
+      cell.fill = {
+        type: 'pattern',
+        pattern: 'solid',
+        fgColor: { argb: isSeçao ? 'FFE2E8F0' : 'FFF8FAFC' }
+      };
       cell.border = {
         top: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
         bottom: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
         left: { style: 'dotted', color: { argb: 'FFCBD5E1' } },
         right: { style: 'dotted', color: { argb: 'FFCBD5E1' } }
       };
+
+      if ((col === 6 || col === 7 || col === 8 || col === 9) && typeof cell.value === 'number') {
+        cell.numFmt = '#,##0.00';
+      }
     }
   });
 

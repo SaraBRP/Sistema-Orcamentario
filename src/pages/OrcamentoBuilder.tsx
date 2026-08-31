@@ -775,6 +775,19 @@ export default function OrcamentoBuilder() {
       return;
     }
 
+    let duracoesMap: Record<string, string> = {};
+    let jornadasMap: Record<string, string> = {};
+    if (id) {
+      try {
+        const saved = localStorage.getItem(`orcamento_equipe_${id}`);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          duracoesMap = parsed.duracoes || {};
+          jornadasMap = parsed.jornadas || {};
+        }
+      } catch (e) {}
+    }
+
     // Exportação para Excel (.xlsx) utilizando o Padrão Oficial Formatado da BRP Engenharia
     exportarOrcamentoExcelPadrao({
       codigo: orcamento?.codigo || (configData as any)?.codigo || 'BRP',
@@ -787,7 +800,8 @@ export default function OrcamentoBuilder() {
       estado: orcamento?.estado || (configData as any)?.estado || 'GO',
       itens: computedItens,
       memoriaCalculo: itens,
-      distribuicaoEquipe: []
+      duracoesMap,
+      jornadasMap
     }).catch(err => {
       alert('Erro ao gerar arquivo Excel formatado: ' + err.message);
     });
