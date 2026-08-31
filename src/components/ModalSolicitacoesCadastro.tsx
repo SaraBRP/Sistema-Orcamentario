@@ -171,8 +171,8 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
     filterTab === 'aprovados' ? aprovados : reprovados;
 
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-50 animate-in fade-in duration-200">
-      <div className="bg-white rounded-3xl w-full max-w-3xl flex flex-col shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh]">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-3 sm:p-6 z-50 animate-in fade-in duration-200 overflow-y-auto">
+      <div className="bg-white rounded-3xl w-full max-w-4xl flex flex-col shadow-2xl border border-slate-200 overflow-hidden max-h-[90vh] my-auto">
         
         {/* Header do Modal */}
         <div className="bg-slate-900 p-5 text-white flex items-center justify-between shrink-0">
@@ -188,7 +188,7 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Analise, defina a função e libere o acesso para novos usuários solicitantes.
+                Analise, defina a função (Orçamentista ou Gestor) e libere o acesso para novos usuários solicitantes.
               </p>
             </div>
           </div>
@@ -240,8 +240,8 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
           </button>
         </div>
 
-        {/* Lista de Solicitações */}
-        <div className="flex-1 p-5 overflow-y-auto space-y-3">
+        {/* Lista de Solicitações sem estouro horizontal */}
+        <div className="flex-1 p-4 sm:p-6 overflow-y-auto space-y-3">
           {itensExibidos.length === 0 ? (
             <div className="py-12 border-2 border-dashed border-slate-200 rounded-2xl text-center space-y-2">
               <User className="w-8 h-8 mx-auto text-slate-300" />
@@ -255,44 +255,42 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
               return (
                 <div 
                   key={sol.id} 
-                  className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-2xs hover:shadow-sm transition-all"
+                  className="bg-white border border-slate-200 rounded-2xl p-4 sm:p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 shadow-2xs hover:shadow-sm transition-all"
                 >
-                  <div className="space-y-1.5">
-                    <div className="flex items-center gap-2">
+                  {/* Informações do Solicitante */}
+                  <div className="space-y-2 min-w-0">
+                    <div className="flex items-center gap-2.5 flex-wrap">
                       <span className="font-extrabold text-sm text-slate-900">{sol.nome}</span>
-                      <span className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 font-bold text-[10px] rounded-md flex items-center gap-1">
+                      <span className="px-2 py-0.5 bg-purple-50 text-purple-700 border border-purple-200 font-bold text-[10px] rounded-md flex items-center gap-1 shrink-0">
                         <Briefcase className="w-3 h-3 text-purple-600" />
                         {sol.status === 'pendente' ? cargoSelecionado : sol.cargo}
                       </span>
                     </div>
 
-                    <div className="flex items-center gap-4 text-xs text-slate-500">
-                      <span className="flex items-center gap-1 font-mono">
-                        <Mail className="w-3.5 h-3.5 text-slate-400" />
+                    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 font-medium">
+                      <span className="flex items-center gap-1 font-mono text-slate-600">
+                        <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         {sol.email}
                       </span>
-                      <span className="flex items-center gap-1">
-                        <Clock className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="flex items-center gap-1 text-slate-400">
+                        <Clock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                         Solicitado em: {sol.dataSolicitacao}
                       </span>
                     </div>
                   </div>
 
-                  {/* Seletor de Cargo & Botões de Ação para o Gestor */}
-                  <div className="flex flex-wrap items-center gap-3 shrink-0">
+                  {/* Seletor de Cargo & Botões de Ação para o Gestor (Apenas Orçamentista e Gestor) */}
+                  <div className="flex flex-wrap items-center gap-2.5 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-slate-100">
                     {sol.status === 'pendente' && (
-                      <div className="flex items-center gap-2 bg-slate-50 p-1.5 rounded-xl border border-slate-200">
-                        <span className="text-[11px] font-extrabold text-slate-600 pl-1">Atribuir Cargo:</span>
+                      <div className="flex items-center gap-2 bg-slate-100/80 px-2.5 py-1.5 rounded-xl border border-slate-200">
+                        <span className="text-[11px] font-extrabold text-slate-700">Atribuir Cargo:</span>
                         <select
-                          value={cargoSelecionado}
+                          value={cargoSelecionado === 'Gestor' ? 'Gestor' : 'Orçamentista'}
                           onChange={(e) => setCargoDefinidoMap({ ...cargoDefinidoMap, [sol.id]: e.target.value })}
                           className="px-2 py-1 text-xs bg-white border border-slate-300 rounded-lg font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                         >
                           <option value="Orçamentista">Orçamentista</option>
-                          <option value="Engenheiro Civil">Engenheiro Civil</option>
-                          <option value="Gestor de Projetos">Gestor de Projetos</option>
-                          <option value="Analista de Propostas">Analista de Propostas</option>
-                          <option value="Diretoria / Administrador">Diretoria / Admin</option>
+                          <option value="Gestor">Gestor</option>
                         </select>
                       </div>
                     )}
@@ -301,14 +299,16 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
                       {sol.status === 'pendente' && (
                         <>
                           <button
+                            type="button"
                             onClick={() => handleAtualizarStatus(sol.id, 'aprovado')}
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-xs flex items-center gap-1.5 transition-colors cursor-pointer"
+                            className="px-3.5 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs rounded-xl shadow-2xs flex items-center gap-1.5 transition-colors cursor-pointer"
                           >
                             <UserCheck className="w-4 h-4" />
                             <span>Aprovar Acesso</span>
                           </button>
 
                           <button
+                            type="button"
                             onClick={() => handleAtualizarStatus(sol.id, 'reprovado')}
                             className="px-3 py-2 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 font-bold text-xs rounded-xl flex items-center gap-1 transition-colors cursor-pointer"
                           >
@@ -325,6 +325,7 @@ export function ModalSolicitacoesCadastro({ isOpen, onClose }: Props) {
                             Acesso Liberado ({sol.cargo})
                           </span>
                           <button
+                            type="button"
                             onClick={() => handleAtualizarStatus(sol.id, 'reprovado')}
                             className="text-xs text-rose-600 hover:underline font-semibold cursor-pointer"
                           >

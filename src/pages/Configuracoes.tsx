@@ -536,8 +536,6 @@ export default function Configuracoes() {
                 <option value="Todos">Todos os Cargos</option>
                 <option value="gestor">Gestor</option>
                 <option value="orcamentista">Orçamentista</option>
-                <option value="engenheiro">Engenheiro</option>
-                <option value="diretoria">Diretoria</option>
               </select>
             </div>
           </div>
@@ -600,8 +598,6 @@ export default function Configuracoes() {
                           'px-2 py-0.5 rounded font-bold text-[10px] uppercase border inline-block',
                           user.cargo === 'gestor'
                             ? 'bg-purple-50 text-purple-700 border-purple-200'
-                            : user.cargo === 'diretoria'
-                            ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
                             : 'bg-slate-100 text-slate-700 border-slate-200'
                         )}>
                           {user.cargo || 'orçamentista'}
@@ -673,7 +669,7 @@ export default function Configuracoes() {
                             </button>
 
                             <button
-                              onClick={() => handleRecusarOuExcluir(user.id, user.nome)}
+                              onClick={() => handleRecusarOuExcluir(user.id, user.nome, user.email)}
                               className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded transition-colors"
                               title="Excluir usuário"
                             >
@@ -805,14 +801,14 @@ export default function Configuracoes() {
         </div>
       )}
 
-      {/* MODAL DE EDIÇÃO DE USUÁRIO E PERMISSÕES */}
+      {/* MODAL DE EDIÇÃO DE PERFIL / PERMISSÕES */}
       {isEditModalOpen && selectedUser && (
         <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-xl overflow-hidden flex flex-col">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden flex flex-col">
             <div className="px-6 py-4 border-b border-slate-200 flex items-center justify-between bg-slate-50">
               <h3 className="font-bold text-slate-800 text-sm flex items-center gap-2">
                 <Edit2 className="w-4 h-4 text-blue-600" />
-                Editar Cadastro de Colaborador
+                Editar Colaborador
               </h3>
               <button onClick={() => setIsEditModalOpen(false)} className="p-1 text-slate-400 hover:text-slate-600 rounded-lg">
                 <X className="w-5 h-5" />
@@ -826,7 +822,7 @@ export default function Configuracoes() {
                   type="text"
                   value={editNome}
                   onChange={(e) => setEditNome(e.target.value)}
-                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold"
                 />
               </div>
 
@@ -848,10 +844,8 @@ export default function Configuracoes() {
                     onChange={(e) => setEditCargo(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 font-bold"
                   >
-                    <option value="gestor">Gestor</option>
                     <option value="orcamentista">Orçamentista</option>
-                    <option value="engenheiro">Engenheiro</option>
-                    <option value="diretoria">Diretoria</option>
+                    <option value="gestor">Gestor</option>
                   </select>
                 </div>
 
@@ -931,8 +925,6 @@ export default function Configuracoes() {
                 >
                   <option value="orcamentista">Orçamentista</option>
                   <option value="gestor">Gestor</option>
-                  <option value="engenheiro">Engenheiro</option>
-                  <option value="diretoria">Diretoria</option>
                 </select>
               </div>
             </div>
