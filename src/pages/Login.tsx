@@ -240,7 +240,7 @@ export default function Login() {
                   autoComplete="off"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-900 font-normal text-xs placeholder:text-slate-400 outline-none transition-all shadow-2xs"
                   placeholder="seu.email@brpengenharia.com.br"
                   required
                 />
@@ -253,7 +253,7 @@ export default function Login() {
                   autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full px-4 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                  className="w-full px-4 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-900 font-normal text-xs placeholder:text-slate-400 outline-none transition-all shadow-2xs"
                   placeholder="••••••••"
                   required
                 />
@@ -281,7 +281,7 @@ export default function Login() {
             </form>
           )}
 
-          {/* Formulário de CADASTRO (100% VAZIO E COM FONTE BRANCA DE ALTO CONTRASTE) */}
+          {/* Formulário de CADASTRO */}
           {mode === 'register' && !registerSuccess && (
             <form onSubmit={handleRegisterSubmit} className="space-y-3.5" autoComplete="off">
               <div className="text-center mb-1">
@@ -292,7 +292,7 @@ export default function Login() {
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-200 mb-1">Nome Completo</label>
+                <label className="block text-[11px] font-semibold text-slate-200 mb-1">Nome Completo</label>
                 <input
                   type="text"
                   name="reg_full_name"
@@ -300,14 +300,14 @@ export default function Login() {
                   autoComplete="off"
                   value={nomeReg}
                   onChange={(e) => setNomeReg(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-900 font-normal text-xs placeholder:text-slate-400 outline-none transition-all shadow-2xs"
                   placeholder="Digite seu nome completo"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-[11px] font-bold text-slate-200 mb-1">E-mail Corporativo</label>
+                <label className="block text-[11px] font-semibold text-slate-200 mb-1">E-mail Corporativo</label>
                 <input
                   type="email"
                   name="reg_email"
@@ -315,7 +315,7 @@ export default function Login() {
                   autoComplete="off"
                   value={emailReg}
                   onChange={(e) => setEmailReg(e.target.value)}
-                  className="w-full px-3.5 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                  className="w-full px-3.5 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-900 font-normal text-xs placeholder:text-slate-400 outline-none transition-all shadow-2xs"
                   placeholder="seu.email@brpengenharia.com.br"
                   required
                 />
@@ -323,7 +323,7 @@ export default function Login() {
 
               <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-200 mb-1">Senha</label>
+                  <label className="block text-[11px] font-semibold text-slate-200 mb-1">Senha</label>
                   <input
                     type="password"
                     name="reg_new_password"
@@ -331,13 +331,13 @@ export default function Login() {
                     autoComplete="new-password"
                     value={passwordReg}
                     onChange={(e) => setPasswordReg(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-900 font-normal text-xs placeholder:text-slate-400 outline-none transition-all shadow-2xs"
                     placeholder="••••••••"
                     required
                   />
                 </div>
                 <div>
-                  <label className="block text-[11px] font-bold text-slate-200 mb-1">Confirmar Senha</label>
+                  <label className="block text-[11px] font-semibold text-slate-200 mb-1">Confirmar Senha</label>
                   <input
                     type="password"
                     name="reg_confirm_password"
@@ -345,7 +345,7 @@ export default function Login() {
                     autoComplete="new-password"
                     value={confirmPasswordReg}
                     onChange={(e) => setConfirmPasswordReg(e.target.value)}
-                    className="w-full px-3 py-2.5 bg-slate-900/90 border border-slate-600 rounded-xl focus:ring-2 focus:ring-sky-400 focus:border-sky-400 text-white font-extrabold text-xs placeholder:text-slate-400 outline-none transition-all"
+                    className="w-full px-3 py-2.5 bg-white border border-slate-300 rounded-xl focus:ring-2 focus:ring-sky-500 focus:border-sky-500 text-slate-900 font-normal text-xs placeholder:text-slate-400 outline-none transition-all shadow-2xs"
                     placeholder="••••••••"
                     required
                   />
