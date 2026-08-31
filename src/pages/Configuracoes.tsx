@@ -113,7 +113,12 @@ export default function Configuracoes() {
       .order('created_at', { ascending: false });
 
     if (!engError && engData) {
-      dbProfiles = engData.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
+      dbProfiles = engData
+        .filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido')
+        .map(p => ({
+          ...p,
+          nome: formatUserDisplayName(p.nome, p.email)
+        }));
       isExclusive = true;
     } else {
       const { data: pubData, error: pubError } = await supabase
@@ -122,7 +127,12 @@ export default function Configuracoes() {
         .order('created_at', { ascending: false });
 
       if (!pubError && pubData) {
-        dbProfiles = pubData.filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido');
+        dbProfiles = pubData
+          .filter(p => p.email && p.nome !== 'Time Comercial' && p.status !== 'excluido')
+          .map(p => ({
+            ...p,
+            nome: formatUserDisplayName(p.nome, p.email)
+          }));
       }
       isExclusive = false;
     }
@@ -630,9 +640,9 @@ export default function Configuracoes() {
                       <td className="px-3 py-2 text-left font-semibold text-slate-900 truncate">
                         <div className="flex items-center justify-start gap-2.5">
                           <div className="w-6 h-6 bg-blue-100 text-blue-800 rounded-full flex items-center justify-center font-bold text-[10px] shrink-0">
-                            {(user.nome || user.email || 'U').charAt(0).toUpperCase()}
+                            {formatUserDisplayName(user.nome, user.email).charAt(0).toUpperCase()}
                           </div>
-                          <span className="truncate font-semibold">{user.nome || 'Sem nome'}</span>
+                          <span className="truncate font-semibold">{formatUserDisplayName(user.nome, user.email)}</span>
                         </div>
                       </td>
 
