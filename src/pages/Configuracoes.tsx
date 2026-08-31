@@ -95,7 +95,7 @@ export default function Configuracoes() {
     let dbProfiles: Profile[] = [];
     let isExclusive = false;
 
-    // 1. Busca perfis de usuários salvos no banco
+    // 1. Busca perfis de usuários salvos na tabela principal do banco (engenharia.usuarios ou public.profiles)
     const { data: engData, error: engError } = await supabase
       .schema('engenharia')
       .from('usuarios')
@@ -119,63 +119,66 @@ export default function Configuracoes() {
 
     setIsExclusiveTable(isExclusive);
 
-    // 2. Busca solicitações de cadastro pendentes enviadas da tela de login (LocalStorage + Supabase)
-    let localPending: any[] = [];
+    // 2. Busca solicitações de cadastro enviadas da tela de login (LocalStorage + Supabase solicitacoes_cadastro)
+    let localRequests: any[] = [];
     try {
       const savedSol = localStorage.getItem('brp_solicitacoes_cadastro_usuarios');
       if (savedSol) {
-        const list = JSON.parse(savedSol);
-        localPending = list.filter((s: any) => s.status === 'pendente');
+        localRequests = JSON.parse(savedSol);
       }
     } catch {}
 
-    let dbPending: any[] = [];
+    let dbRequests: any[] = [];
     try {
       const { data } = await supabase
         .schema('engenharia')
         .from('solicitacoes_cadastro')
-        .select('*')
-        .eq('status', 'pendente');
-      if (data) dbPending = data;
+        .select('*');
+      if (data) dbRequests = data;
     } catch {}
 
-    const pendingMap = new Map<string, Profile>();
+    const requestsMap = new Map<string, Profile>();
     
-    dbPending.forEach(s => {
-      pendingMap.set(s.email.toLowerCase(), {
+    // Processa registros do Supabase solicitacoes_cadastro
+    dbRequests.forEach(s => {
+      const isApproved = s.status === 'aprovado';
+      requestsMap.set(s.email.toLowerCase(), {
         id: s.id,
         nome: s.nome,
         email: s.email,
         cargo: s.cargo || 'orcamentista',
-        status: 'pendente',
-        approved: false,
+        status: isApproved ? 'ativo' : 'pendente',
+        approved: isApproved,
         created_at: s.data_solicitacao || s.created_at || new Date().toISOString()
       });
     });
 
-    localPending.forEach(s => {
-      if (!pendingMap.has(s.email.toLowerCase())) {
-        pendingMap.set(s.email.toLowerCase(), {
+    // Processa registros do LocalStorage
+    localRequests.forEach(s => {
+      if (!requestsMap.has(s.email.toLowerCase())) {
+        const isApproved = s.status === 'aprovado';
+        requestsMap.set(s.email.toLowerCase(), {
           id: s.id,
           nome: s.nome,
           email: s.email,
           cargo: s.cargo || 'orcamentista',
-          status: 'pendente',
-          approved: false,
+          status: isApproved ? 'ativo' : 'pendente',
+          approved: isApproved,
           created_at: s.dataSolicitacao || new Date().toISOString()
         });
       }
     });
 
+    // Inclui cadastros que ainda não possuem perfil duplicado em dbProfiles
     const existingEmails = new Set(dbProfiles.map(p => (p.email || '').toLowerCase()));
-    const finalPendingList: Profile[] = [];
-    pendingMap.forEach((p, emailKey) => {
+    const additionalProfiles: Profile[] = [];
+    requestsMap.forEach((p, emailKey) => {
       if (emailKey && !existingEmails.has(emailKey)) {
-        finalPendingList.push(p);
+        additionalProfiles.push(p);
       }
     });
 
-    setProfiles([...dbProfiles, ...finalPendingList]);
+    setProfiles([...dbProfiles, ...additionalProfiles]);
     setLoading(false);
   };
 
@@ -339,16 +342,37 @@ export default function Configuracoes() {
       ? supabase.schema('engenharia').from('usuarios').update(payload).eq('id', selectedUser.id)
       : supabase.from('profiles').update(payload).eq('id', selectedUser.id);
 
-    const { error } = await query;
+    await query;
+
+    try {
+      await supabase
+        .schema('engenharia')
+        .from('solicitacoes_cadastro')
+        .update({
+          nome: editNome,
+          cargo: editCargo
+        })
+        .eq('id', selectedUser.id);
+    } catch {}
+
+    try {
+      const saved = localStorage.getItem('brp_solicitacoes_cadastro_usuarios');
+      if (saved) {
+        const list = JSON.parse(saved);
+        const updated = list.map((s: any) =>
+          s.id === selectedUser.id || (selectedUser.email && s.email.toLowerCase() === selectedUser.email.toLowerCase())
+            ? { ...s, nome: editNome, cargo: editCargo }
+            : s
+        );
+        localStorage.setItem('brp_solicitacoes_cadastro_usuarios', JSON.stringify(updated));
+      }
+    } catch {}
 
     setSavingUser(false);
-    if (error) {
-      alert('Erro ao salvar usuário: ' + error.message);
-    } else {
-      setIsEditModalOpen(false);
-      setSelectedUser(null);
-      fetchProfiles();
-    }
+    setIsEditModalOpen(false);
+    setSelectedUser(null);
+    window.dispatchEvent(new Event('storage'));
+    fetchProfiles();
   };
 
   // Cadastrar Novo Usuário Manualmente
