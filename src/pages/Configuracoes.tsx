@@ -57,6 +57,15 @@ const MODULOS_SISTEMA = [
   { id: 'configuracoes', name: 'Configurações', icon: Settings, desc: 'Gestão de usuários e permissões de acesso' },
 ];
 
+const formatUserDisplayName = (nome?: string | null, email?: string | null) => {
+  if (nome && nome.trim() && nome !== 'Sem nome') return nome.trim();
+  if (email) {
+    const prefix = email.split('@')[0];
+    return prefix.charAt(0).toUpperCase() + prefix.slice(1);
+  }
+  return 'Usuário';
+};
+
 export default function Configuracoes() {
   const [activeTab, setActiveTab] = useState<Tab>('usuarios');
   const [subTabUsuarios, setSubTabUsuarios] = useState<SubTabUsuarios>('lista');
@@ -145,7 +154,7 @@ export default function Configuracoes() {
       const isApproved = s.status === 'aprovado';
       requestsMap.set(s.email.toLowerCase(), {
         id: s.id,
-        nome: s.nome,
+        nome: formatUserDisplayName(s.nome, s.email),
         email: s.email,
         cargo: s.cargo || 'orcamentista',
         status: isApproved ? 'ativo' : 'pendente',
@@ -160,7 +169,7 @@ export default function Configuracoes() {
         const isApproved = s.status === 'aprovado';
         requestsMap.set(s.email.toLowerCase(), {
           id: s.id,
-          nome: s.nome,
+          nome: formatUserDisplayName(s.nome, s.email),
           email: s.email,
           cargo: s.cargo || 'orcamentista',
           status: isApproved ? 'ativo' : 'pendente',
@@ -315,31 +324,38 @@ export default function Configuracoes() {
     }
   };
 
-  // Selecionar Usuário apenas para matriz de permissões (sem abrir modal de edição)
+  // Selecionar Usuário apenas para matriz de permissões (carregando todos os campos para não zerar o nome!)
   const handleSelectUserForPermissions = (user: Profile) => {
     setSelectedUser(user);
+    setEditNome(formatUserDisplayName(user.nome, user.email));
+    setEditCargo(user.cargo || 'orcamentista');
+    setEditStatus((user.status as 'ativo' | 'inativo') || 'ativo');
     setEditScreens(user.permitted_screens || MODULOS_SISTEMA.map(m => m.id));
   };
 
   // Abrir Modal de Edição (Somente quando clicado no ícone de editar da tabela)
   const handleOpenEdit = (user: Profile) => {
     setSelectedUser(user);
-    setEditNome(user.nome || '');
+    setEditNome(formatUserDisplayName(user.nome, user.email));
     setEditCargo(user.cargo || 'orcamentista');
     setEditStatus((user.status as 'ativo' | 'inativo') || 'ativo');
     setEditScreens(user.permitted_screens || MODULOS_SISTEMA.map(m => m.id));
     setIsEditModalOpen(true);
   };
 
-  // Salvar Edição de Usuário
+  // Salvar Edição de Usuário / Permissões
   const handleSaveEdit = async () => {
     if (!selectedUser) return;
     setSavingUser(true);
 
+    const finalNome = formatUserDisplayName(editNome, selectedUser.email);
+    const finalCargo = editCargo || selectedUser.cargo || 'orcamentista';
+    const finalStatus = editStatus || selectedUser.status || 'ativo';
+
     const payload = {
-      nome: editNome,
-      cargo: editCargo,
-      status: editStatus,
+      nome: finalNome,
+      cargo: finalCargo,
+      status: finalStatus,
       permitted_screens: editScreens
     };
 
@@ -354,8 +370,8 @@ export default function Configuracoes() {
         .schema('engenharia')
         .from('solicitacoes_cadastro')
         .update({
-          nome: editNome,
-          cargo: editCargo
+          nome: finalNome,
+          cargo: finalCargo
         })
         .eq('id', selectedUser.id);
     } catch {}
@@ -366,7 +382,7 @@ export default function Configuracoes() {
         const list = JSON.parse(saved);
         const updated = list.map((s: any) =>
           s.id === selectedUser.id || (selectedUser.email && s.email.toLowerCase() === selectedUser.email.toLowerCase())
-            ? { ...s, nome: editNome, cargo: editCargo }
+            ? { ...s, nome: finalNome, cargo: finalCargo }
             : s
         );
         localStorage.setItem('brp_solicitacoes_cadastro_usuarios', JSON.stringify(updated));
@@ -759,7 +775,7 @@ export default function Configuracoes() {
                       )}
                     >
                       <div className="truncate">
-                        <p className="font-bold truncate">{u.nome || 'Sem nome'}</p>
+                        <p className="font-bold truncate">{formatUserDisplayName(u.nome, u.email)}</p>
                         <p className="text-[10px] text-slate-400 font-mono truncate">{u.email}</p>
                       </div>
                       <span className="text-[10px] uppercase font-bold px-1.5 py-0.5 rounded bg-slate-100 border text-slate-600 shrink-0">
@@ -776,7 +792,7 @@ export default function Configuracoes() {
                   <>
                     <div className="bg-blue-50/70 p-4 rounded-xl border border-blue-200 flex items-center justify-between">
                       <div>
-                        <p className="text-xs font-bold text-blue-900">{selectedUser.nome} ({selectedUser.email})</p>
+                        <p className="text-xs font-bold text-blue-900">{formatUserDisplayName(selectedUser.nome, selectedUser.email)} ({selectedUser.email})</p>
                         <p className="text-[11px] text-blue-700">Cargo: <strong className="uppercase">{selectedUser.cargo || 'Orçamentista'}</strong></p>
                       </div>
                       <button
