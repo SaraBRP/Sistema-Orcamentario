@@ -1828,6 +1828,8 @@ export default function OrcamentoBuilder() {
         total_mat: parseFloat(i.total_mat || 0),
         total_mo: parseFloat(i.total_mo || 0),
         total: parseFloat(i.total || 0),
+        equacaoLiteral: i.equacao_literal || i.equacaoLiteral || '',
+        substituicaoNumerica: i.substituicao_numerica || i.substituicaoNumerica || '',
         observacaoMemoria: i.observacao_memoria || i.observacaoMemoria || '',
         formulasLista: Array.isArray(i.formulas_lista) ? i.formulas_lista : (Array.isArray(i.formulasLista) ? i.formulasLista : [])
       })).sort(sortEap);
@@ -2673,6 +2675,8 @@ export default function OrcamentoBuilder() {
             total_mat: item.total_mat,
             total_mo: item.total_mo,
             composicao_id: item.composicao_id || null,
+            equacao_literal: (item as any).equacao_literal || (item as any).equacaoLiteral || null,
+            substituicao_numerica: (item as any).substituicao_numerica || (item as any).substituicaoNumerica || null,
             observacao_memoria: (item as any).observacao_memoria || (item as any).observacaoMemoria || null,
             formulas_lista: (item as any).formulas_lista || (item as any).formulasLista || []
           };

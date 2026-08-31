@@ -3120,19 +3120,25 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     (dadosCompList || []).forEach(dc => {
       const linkedIds = dc.itemIds && dc.itemIds.length > 0 ? dc.itemIds : (dc.itemId ? [dc.itemId] : []);
       linkedIds.forEach(id => {
-        if (id) itemToParamMap.set(id, dc);
+        if (id) {
+          itemToParamMap.set(id, dc);
+          const foundIt = itensList.find(x => x.id === id);
+          if (foundIt && foundIt.item_eap) {
+            itemToParamMap.set(foundIt.item_eap, dc);
+          }
+        }
       });
     });
 
     return itensList.map(it => {
-      const boundParam = itemToParamMap.get(it.id);
+      const boundParam = itemToParamMap.get(it.id) || (it.item_eap ? itemToParamMap.get(it.item_eap) : undefined);
       if (boundParam) {
         const valNum = typeof boundParam.valor === 'number' ? boundParam.valor : parseFloat(String(boundParam.valor)) || 0;
         const paramLabel = boundParam.parametro || boundParam.parametroNome || 'Parâmetro Global';
         const paramUnit = boundParam.unidade || '';
 
-        const obs = '';
-        const eqLit = '';
+        const obs = it.observacaoMemoria || '';
+        const eqLit = it.equacaoLiteral || '';
         const subst = `${paramLabel} = ${valNum.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 4 })} ${paramUnit}`.trim();
 
         return {
@@ -3153,15 +3159,6 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
           ]
         };
       } else {
-        if (it.substituicaoNumerica && (it.observacaoMemoria?.startsWith('PARÂMETRO GLOBAL:') || !it.observacaoMemoria)) {
-          return {
-            ...it,
-            observacaoMemoria: '',
-            equacaoLiteral: '',
-            substituicaoNumerica: '',
-            formulasLista: []
-          };
-        }
         return it;
       }
     });
