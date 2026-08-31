@@ -69,7 +69,47 @@ export default function Login() {
 
     // 2. Tenta autenticação no Supabase ou Mock
     const { error } = await supabase.auth.signInWithPassword({ email: emailTrim, password });
-    if (error) {
+    if (!error) {
+      // Login com sucesso no Supabase! Salva o perfil do usuário logado
+      let nome = emailTrim.split('@')[0];
+      nome = nome.charAt(0).toUpperCase() + nome.slice(1);
+      let cargo = emailTrim.includes('sara') ? 'Gestor' : 'Orçamentista';
+
+      try {
+        const { data: sol } = await supabase
+          .schema('engenharia')
+          .from('solicitacoes_cadastro')
+          .select('*')
+          .eq('email', emailTrim)
+          .maybeSingle();
+
+        if (sol) {
+          if (sol.nome) nome = sol.nome;
+          if (sol.cargo) cargo = sol.cargo;
+        } else {
+          const { data: usr } = await supabase
+            .schema('engenharia')
+            .from('usuarios')
+            .select('*')
+            .eq('email', emailTrim)
+            .maybeSingle();
+          if (usr) {
+            if (usr.nome) nome = usr.nome;
+            if (usr.cargo) cargo = usr.cargo;
+          }
+        }
+      } catch {}
+
+      localStorage.setItem('orcabrp_user_profile', JSON.stringify({
+        nome,
+        email: emailTrim,
+        funcao: cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista',
+        avatarUrl: ''
+      }));
+
+      window.location.href = '/';
+      return;
+    } else {
       // Se der erro no Supabase Auth, verifica se é um usuário recém aprovado localmente
       try {
         const saved = localStorage.getItem(LOCAL_STORAGE_SOLICITACOES_KEY);

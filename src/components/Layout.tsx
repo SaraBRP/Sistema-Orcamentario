@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../hooks/useAuth';
+import { supabase } from '../lib/supabase';
 import {
   LayoutDashboard,
   Package,
@@ -100,31 +101,110 @@ export default function Layout() {
     }
   });
 
-  // Estado do Perfil do Usuário (Persistido no localStorage)
+  // Estado do Perfil do Usuário (Persistido no localStorage e sincronizado por e-mail)
   const [userProfile, setUserProfile] = useState<UserProfileData>(() => {
     try {
       const saved = localStorage.getItem('orcabrp_user_profile');
       if (saved) {
         const parsed = JSON.parse(saved);
-        return {
-          ...parsed,
-          funcao: parsed.funcao === 'Gestor' ? 'Gestor' : 'Orçamentista'
-        };
+        if (parsed && parsed.email) {
+          return {
+            ...parsed,
+            funcao: parsed.funcao === 'Gestor' || parsed.funcao === 'gestor' ? 'Gestor' : 'Orçamentista'
+          };
+        }
       }
     } catch {}
+
+    const currentUserEmail = user?.email || 'sara.alves@brpmetalica.com';
+    const isSara = currentUserEmail.toLowerCase().includes('sara');
     return {
-      nome: 'Sara',
-      email: user?.email || 'sara.alves@brpmetalica.com',
-      funcao: 'Orçamentista',
+      nome: isSara ? 'Sara' : currentUserEmail.split('@')[0],
+      email: currentUserEmail,
+      funcao: isSara ? 'Gestor' : 'Orçamentista',
       avatarUrl: ''
     };
   });
+
+  // Efeito para manter o perfil sincronizado com o e-mail ativo do usuário
+  useEffect(() => {
+    const syncActiveUserProfile = async () => {
+      let activeEmail = user?.email;
+      if (!activeEmail) {
+        try {
+          const saved = localStorage.getItem('orcabrp_user_profile');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (parsed.email) activeEmail = parsed.email;
+          }
+        } catch {}
+      }
+
+      if (!activeEmail) return;
+
+      const emailLower = activeEmail.toLowerCase();
+
+      // Se o perfil atual em memória for de outro e-mail, sincroniza imediatamente
+      if (!userProfile.email || userProfile.email.toLowerCase() !== emailLower) {
+        let nome = emailLower.split('@')[0];
+        nome = nome.charAt(0).toUpperCase() + nome.slice(1);
+        let cargo = emailLower.includes('sara') ? 'Gestor' : 'Orçamentista';
+
+        try {
+          const { data: sol } = await supabase
+            .schema('engenharia')
+            .from('solicitacoes_cadastro')
+            .select('*')
+            .eq('email', emailLower)
+            .maybeSingle();
+
+          if (sol) {
+            if (sol.nome) nome = sol.nome;
+            if (sol.cargo) cargo = sol.cargo;
+          } else {
+            const { data: usr } = await supabase
+              .schema('engenharia')
+              .from('usuarios')
+              .select('*')
+              .eq('email', emailLower)
+              .maybeSingle();
+            if (usr) {
+              if (usr.nome) nome = usr.nome;
+              if (usr.cargo) cargo = usr.cargo;
+            }
+          }
+        } catch {}
+
+        const newProfile: UserProfileData = {
+          nome,
+          email: activeEmail,
+          funcao: cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista',
+          avatarUrl: userProfile.avatarUrl || ''
+        };
+
+        setUserProfile(newProfile);
+        try {
+          localStorage.setItem('orcabrp_user_profile', JSON.stringify(newProfile));
+        } catch {}
+      }
+    };
+
+    syncActiveUserProfile();
+  }, [user]);
 
   const handleSaveProfile = (updated: UserProfileData) => {
     setUserProfile(updated);
     try {
       localStorage.setItem('orcabrp_user_profile', JSON.stringify(updated));
     } catch {}
+  };
+
+  const handleLogout = async () => {
+    try {
+      localStorage.removeItem('orcabrp_user_profile');
+    } catch {}
+    await signOut();
+    window.location.href = '/login';
   };
 
   // Estados dos Modais e Popovers
@@ -477,7 +557,7 @@ export default function Layout() {
 
         <div className="p-3 border-t border-slate-800/80">
           <button
-            onClick={signOut}
+            onClick={handleLogout}
             className={cn(
               "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full group cursor-pointer",
               sidebarCollapsed && "justify-center"
@@ -716,7 +796,7 @@ export default function Layout() {
                   <div className="pt-2 border-t border-slate-100">
                     <button
                       type="button"
-                      onClick={signOut}
+                      onClick={handleLogout}
                       className="w-full text-left px-3 py-2 rounded-xl text-rose-600 hover:bg-rose-50 font-bold transition-colors flex items-center gap-2 cursor-pointer"
                     >
                       <LogOut className="w-4 h-4" />
