@@ -16,6 +16,7 @@ type ImportadoItem = {
   orcamento_importado_id: string;
   item_eap: string;
   descricao: string;
+  texto_empresa?: string | null;
   unidade: string;
   quantidade: number;
   valor_unitario_orig: number;
@@ -351,14 +352,23 @@ export default function OrcamentoDeParaStudio() {
   const [inlineEditingRowId, setInlineEditingRowId] = useState<string | null>(null);
   const [inlineTextValue, setInlineTextValue] = useState<string>('');
 
+  const getCompanyText = (item: ImportadoItem): string | null => {
+    if (item.texto_empresa !== undefined && item.texto_empresa !== null) {
+      return item.texto_empresa;
+    }
+    if (item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente') {
+      return item.descricao || null;
+    }
+    return null;
+  };
+
   const handleSaveInlineText = async (targetItem: ImportadoItem, newText: string) => {
     setInlineEditingRowId(null);
     const trimmed = newText.trim();
 
     try {
       const payload: any = {
-        descricao: trimmed,
-        tipo_vinculo: 'texto',
+        tipo_vinculo: trimmed ? 'texto' : null,
         composicao_id: null,
         insumo_id: null,
         valor_unitario_empresa: 0,
@@ -378,6 +388,7 @@ export default function OrcamentoDeParaStudio() {
           return {
             ...item,
             ...payload,
+            texto_empresa: trimmed ? trimmed : null,
             composicao: undefined,
             insumo: undefined
           };
@@ -2091,8 +2102,8 @@ export default function OrcamentoDeParaStudio() {
                         e.stopPropagation();
                         if (!linkedRef) {
                           setInlineEditingRowId(item.id);
-                          const initialVal = (item.tipo_vinculo === 'texto' || isInsertedByEmpresa) ? (item.descricao || '') : '';
-                          setInlineTextValue(initialVal);
+                          const companyText = getCompanyText(item);
+                          setInlineTextValue(companyText || '');
                         }
                       }}
                       className={clsx(
@@ -2132,7 +2143,7 @@ export default function OrcamentoDeParaStudio() {
                                 await handleSaveInlineText(item, inlineTextValue);
                               }}
                               autoFocus
-                              placeholder="Digite um texto..."
+                              placeholder="Digite um texto ou vincule a um item do banco..."
                               className="w-full bg-white border-2 border-purple-500 rounded-lg px-2 py-0.5 text-[11px] font-semibold text-slate-800 focus:outline-none shadow-xs"
                             />
                           </div>
@@ -2194,12 +2205,14 @@ export default function OrcamentoDeParaStudio() {
                             </span>
                             <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{linkedRef?.descricao}</span>
                           </div>
-                        ) : (item.tipo_vinculo === 'texto' || isInsertedByEmpresa) && item.descricao && item.descricao.trim().length > 0 ? (
+                        ) : getCompanyText(item) ? (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{item.descricao}</span>
+                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{getCompanyText(item)}</span>
                           </div>
                         ) : (
-                          <span className="text-slate-400 italic text-[11px] cursor-pointer hover:text-slate-600">Digite um texto</span>
+                          <span className="text-slate-400 italic text-[11px] cursor-pointer hover:text-slate-600">
+                            Digite um texto ou vincule a um item do banco
+                          </span>
                         )}
                       </div>
                     </td>
