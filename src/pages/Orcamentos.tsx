@@ -8,6 +8,7 @@ import { clsx } from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ModalImportarExcel } from '../components/ModalImportarExcel';
 import { ClienteSelect } from '../components/ClienteSelect';
+import { getUsuariosCadastrados } from '../lib/usuarios';
 
 const statusBadgeClasses = (status: string) => {
   switch (status) {
@@ -276,12 +277,6 @@ export default function Orcamentos() {
 
   const [usuariosCadastrados, setUsuariosCadastrados] = useState<any[]>([]);
 
-  useEffect(() => {
-    fetchOrcamentos();
-    fetchImportados();
-    fetchUsuariosCadastrados();
-  }, []);
-
   const formatCidadeUpperNoAccents = (text: string) => {
     if (!text) return '';
     return text
@@ -290,33 +285,11 @@ export default function Orcamentos() {
       .toUpperCase();
   };
 
-  const fetchUsuariosCadastrados = async () => {
-    try {
-      const { data: engData, error: engError } = await supabase
-        .schema('engenharia')
-        .from('usuarios')
-        .select('id, nome, email, status')
-        .order('nome', { ascending: true });
-
-      if (!engError && engData && engData.length > 0) {
-        const valid = engData.filter((u: any) => u.nome && u.nome !== 'Time Comercial' && u.status !== 'excluido');
-        setUsuariosCadastrados(valid);
-        return;
-      }
-
-      const { data: pubData, error: pubError } = await supabase
-        .from('profiles')
-        .select('id, nome, email, status')
-        .order('nome', { ascending: true });
-
-      if (!pubError && pubData) {
-        const valid = pubData.filter((u: any) => u.nome && u.nome !== 'Time Comercial' && u.status !== 'excluido');
-        setUsuariosCadastrados(valid);
-      }
-    } catch (err) {
-      console.error('Erro ao buscar usuários:', err);
-    }
-  };
+  useEffect(() => {
+    fetchOrcamentos();
+    fetchImportados();
+    getUsuariosCadastrados().then(setUsuariosCadastrados);
+  }, []);
 
   // Função para calcular os totais reais do orçamento respeitando a hierarquia EAP (evitando triplicar/duplicar somas de seções e filhas)
   const calculateBudgetTotalsFromItems = (itensList: any[]) => {

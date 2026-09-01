@@ -7,6 +7,7 @@ import { GerenciadorFormulas } from '../components/calculos/GerenciadorFormulas'
 import { TabelaMemoriaisCalculo, type MemorialCalculoRecord } from '../components/calculos/TabelaMemoriaisCalculo';
 import { TabelaParametrosCadastro } from '../components/calculos/TabelaParametrosCadastro';
 import { ClienteSelect } from '../components/ClienteSelect';
+import { getUsuariosCadastrados } from '../lib/usuarios';
 import type { ItemMemoriaOficial, DadosComplementaresHeader } from '../types/calculos';
 
 const LOCAL_STORAGE_MEMORIAIS_KEY = 'brp_memoriais_list';
@@ -89,30 +90,7 @@ export default function CalculosQuantitativosPage() {
   });
 
   useEffect(() => {
-    const fetchUsuarios = async () => {
-      try {
-        const { data: engData } = await supabase
-          .schema('engenharia')
-          .from('usuarios')
-          .select('id, nome, email, status')
-          .order('nome', { ascending: true });
-
-        if (engData && engData.length > 0) {
-          const valid = engData.filter((u: any) => u.nome && u.nome !== 'Time Comercial' && u.status !== 'excluido');
-          setUsuariosCadastrados(valid);
-          return;
-        }
-
-        const { data: pubData } = await supabase
-          .from('profiles')
-          .select('id, nome, email')
-          .order('nome', { ascending: true });
-        if (pubData) setUsuariosCadastrados(pubData);
-      } catch (e) {
-        console.error('Erro ao buscar usuários:', e);
-      }
-    };
-    fetchUsuarios();
+    getUsuariosCadastrados().then(setUsuariosCadastrados);
   }, []);
 
   const fetchTodosMemoriaisEOrcamentos = useCallback(async () => {
