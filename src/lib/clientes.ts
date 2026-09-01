@@ -1,4 +1,5 @@
 import { supabase } from './supabase';
+import clientesImportadosData from './clientes_importados.json';
 
 export interface ClienteData {
   id: string;
@@ -15,6 +16,7 @@ export interface ClienteData {
 }
 
 export const LOCAL_STORAGE_CLIENTES_KEY = 'brp_clientes_cadastrados';
+export const CLIENTES_BASE_INICIAL: ClienteData[] = clientesImportadosData as ClienteData[];
 
 // Formatação utilitária de CNPJ: 00.000.000/0001-00
 export function formatCNPJ(value: string): string {
@@ -27,7 +29,7 @@ export function formatCNPJ(value: string): string {
     .replace(/(\d{4})(\d)/, '$1-$2');
 }
 
-// Buscar todos os clientes cadastrados (Supabase + LocalStorage)
+// Buscar todos os clientes cadastrados (Supabase + LocalStorage + Base Importada da planilha)
 export async function getClientesCadastrados(): Promise<ClienteData[]> {
   let clientes: ClienteData[] = [];
 
@@ -78,7 +80,7 @@ export async function getClientesCadastrados(): Promise<ClienteData[]> {
     }
   } catch {}
 
-  // 2. Mesclar/Fallback com LocalStorage
+  // 2. Mesclar com LocalStorage
   try {
     const saved = localStorage.getItem(LOCAL_STORAGE_CLIENTES_KEY);
     if (saved) {
@@ -94,18 +96,35 @@ export async function getClientesCadastrados(): Promise<ClienteData[]> {
     }
   } catch {}
 
-  // Filtra/Remove quaisquer registros de exemplo de teste anteriores (cli_votorantim / cli_brp_metalica)
+  // 3. Incluir clientes da planilha importada se ainda não existirem no cadastro
+  const existingNames = new Set(clientes.map(c => c.razao_social.toLowerCase().trim()));
+  CLIENTES_BASE_INICIAL.forEach(baseClient => {
+    if (!existingNames.has(baseClient.razao_social.toLowerCase().trim())) {
+      clientes.push(baseClient);
+      existingNames.add(baseClient.razao_social.toLowerCase().trim());
+    }
+  });
+
+  // Filtra/Remove quaisquer registros de teste antigos
   clientes = clientes.filter(c => 
     c.id !== 'cli_votorantim' && 
-    c.id !== 'cli_brp_metalica' &&
-    !c.razao_social?.toLowerCase().includes('votorantim cimentos') &&
-    !c.razao_social?.toLowerCase().includes('brp soluções metálicas ltda')
+    c.id !== 'cli_brp_metalica'
   );
 
-  // Atualiza LocalStorage limpo sem os registros de teste
+  // Ordena alfabeticamente pela razão social
+  clientes.sort((a, b) => a.razao_social.localeCompare(b.razao_social));
+
+  // Atualiza LocalStorage sincronizado com a base importada
   try {
     localStorage.setItem(LOCAL_STORAGE_CLIENTES_KEY, JSON.stringify(clientes));
   } catch {}
+
+  // Tenta salvar/sincronizar no Supabase em segundo plano
+  (async () => {
+    try {
+      await supabase.schema('engenharia').from('clientes').upsert(clientes);
+    } catch {}
+  })();
 
   return clientes;
 }
