@@ -5,7 +5,7 @@ import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
 import { 
   ArrowLeft, Search, Plus, Trash2, CheckCircle2, 
-  Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X, Edit3, Type,
+  Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X, Type,
   ChevronDown, ChevronRight, Folder, FolderOpen, Strikethrough, Download, Sparkles, PlusCircle, GripVertical,
   FilePlus, FileMinus
 } from 'lucide-react';
@@ -805,46 +805,39 @@ export default function OrcamentoDeParaStudio() {
         }
         return;
       }
+
+      // 7. Tecla Insert: Inserir Linha acima da selecionada ou no final
+      if (e.key === 'Insert') {
+        e.preventDefault();
+        handleInsertRow();
+        return;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedRowIndex, selectedRowIndexes, lastClickedRowIndex, items]);
 
-  // --- INSERIR NOVA LINHA DA EMPRESA ---
-  const handleInsertRowBelow = async (targetItem: ImportadoItem) => {
-    const targetIndex = items.findIndex(i => i.id === targetItem.id);
-    if (targetIndex === -1) return;
+  // --- INSERIR NOVA LINHA (ACIMA DA SELECIONADA OU NO FINAL) ---
+  const handleInsertRow = async () => {
+    let insertIndex = items.length;
+    let targetEap = `${items.length + 1}`;
 
-    const parentEap = targetItem.item_eap;
-    const prefix = parentEap + '.';
-
-    // Localiza filhos diretos para achar o próximo número sequencial
-    const directChildren = items.filter(i => {
-      if (!i.item_eap.startsWith(prefix)) return false;
-      const remainder = i.item_eap.substring(prefix.length);
-      return !remainder.includes('.');
-    });
-
-    let nextNum = 1;
-    if (directChildren.length > 0) {
-      const lastPartNumbers = directChildren.map(c => {
-        const parts = c.item_eap.split('.');
-        return parseInt(parts[parts.length - 1], 10);
-      }).filter(n => !isNaN(n));
-
-      if (lastPartNumbers.length > 0) {
-        nextNum = Math.max(...lastPartNumbers) + 1;
-      }
+    if (selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < items.length) {
+      insertIndex = selectedRowIndex;
+      targetEap = items[selectedRowIndex].item_eap || '1';
+    } else if (items.length > 0) {
+      const lastEap = items[items.length - 1].item_eap || '1';
+      const parts = lastEap.split('.');
+      const lastNum = parseInt(parts[0], 10);
+      targetEap = !isNaN(lastNum) ? String(lastNum + 1) : `${items.length + 1}`;
     }
-
-    const newEap = `${parentEap}.${nextNum}`;
 
     try {
       const payload: Omit<ImportadoItem, 'id'> = {
         orcamento_importado_id: importId!,
-        item_eap: newEap,
-        descricao: '', // Lado cliente fica limpo!
+        item_eap: targetEap,
+        descricao: 'Nova Linha Inserida',
         unidade: 'un',
         quantidade: 1,
         valor_unitario_orig: 0,
@@ -870,15 +863,9 @@ export default function OrcamentoDeParaStudio() {
 
       setItems(prev => {
         const copy = [...prev];
-        // Encontra a posição após o target e todos os seus filhos desdobrados
-        let insertPos = targetIndex + 1;
-        while (insertPos < copy.length && copy[insertPos].item_eap.startsWith(targetItem.item_eap + '.')) {
-          insertPos++;
-        }
-        copy.splice(insertPos, 0, newItem);
+        copy.splice(insertIndex, 0, newItem);
         const rebuilt = rebuildStudioEaps(copy);
-        
-        // Atualiza os EAPs reconstruídos de fundo no Supabase
+
         rebuilt.forEach(it => {
           if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
             supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
@@ -887,6 +874,9 @@ export default function OrcamentoDeParaStudio() {
 
         return rebuilt;
       });
+
+      setSelectedRowIndex(insertIndex);
+      setSelectedRowIndexes(new Set([insertIndex]));
     } catch (err: any) {
       console.error(err);
       alert('Erro ao inserir linha: ' + err.message);
@@ -1692,6 +1682,17 @@ export default function OrcamentoDeParaStudio() {
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
               <button
+                onClick={handleInsertRow}
+                className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer shadow-xs transition-all"
+                title="Inserir Nova Linha acima da selecionada (ou no final) [Tecla Insert]"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>+ Inserir Linha</span>
+              </button>
+
+              <div className="w-px h-4 bg-slate-200 mx-1"></div>
+
+              <button
                 onClick={handleOutdentSelectedRow}
                 disabled={selectedRowIndex === null && selectedRowIndexes.size === 0}
                 className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
@@ -1973,7 +1974,15 @@ export default function OrcamentoDeParaStudio() {
                   >
                     <td className={clsx("p-2 font-mono font-bold text-slate-700 text-[11px]", clientBg)}>{item.item_eap}</td>
                     
-                    <td className={clsx("p-2 font-medium text-slate-800 text-[11px]", clientBg)}>
+                    <td
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        setEditingCustomItem(item);
+                        setCustomText(item.descricao || linkedRef?.descricao || '');
+                      }}
+                      className={clsx("p-2 font-medium text-slate-800 text-[11px] cursor-pointer", clientBg)}
+                      title="Clique duas vezes para editar o texto desta linha"
+                    >
                       <div className="flex items-center gap-1" style={{ paddingLeft: `${(level - 1) * 18}px` }}>
                         {hasChildrenBool ? (
                           <button
@@ -2182,58 +2191,33 @@ export default function OrcamentoDeParaStudio() {
                             </button>
                           )}
 
-                          {/* Inserir Linha Abaixo */}
-                         {!(item.tipo_vinculo === 'insumo' || item.insumo_id) && (
-                           <button
-                             onClick={() => handleInsertRowBelow(item)}
-                             title="Inserir Sub-linha / Insumo Abaixo"
-                             className="p-1 hover:bg-slate-100 text-slate-400 hover:text-slate-600 rounded-lg cursor-pointer transition-all"
-                           >
-                             <Plus className="w-3.5 h-3.5" />
-                           </button>
-                         )}
-
-                         {!isInactive && (!isSecaoTexto || linkedRef) && (
-                           <button
-                             onClick={() => {
-                               setSelectedItemForLink(item);
-                               setShowLinkDrawer(true);
-                             }}
-                             title={linkedRef ? "Trocar Vínculo (Banco Próprio)" : "Vincular do Banco Próprio"}
-                             className={clsx(
-                               "p-1 rounded-lg cursor-pointer transition-all",
-                               linkedRef
-                                 ? "text-blue-600 hover:text-blue-800 hover:bg-blue-50/60"
-                                 : "text-amber-600 hover:text-amber-700 hover:bg-amber-50 bg-amber-50/80 font-bold border border-amber-200"
-                             )}
-                           >
-                             {linkedRef ? <RefreshCw className="w-3.5 h-3.5" /> : <PlusCircle className="w-3.5 h-3.5" />}
-                           </button>
-                         )}
+                          {!isInactive && (!isSecaoTexto || linkedRef) && (
+                            <button
+                              onClick={() => {
+                                setSelectedItemForLink(item);
+                                setShowLinkDrawer(true);
+                              }}
+                              title={linkedRef ? "Trocar Vínculo (Banco Próprio)" : "Vincular do Banco Próprio"}
+                              className={clsx(
+                                "p-1 rounded-lg cursor-pointer transition-all",
+                                linkedRef
+                                  ? "text-blue-600 hover:text-blue-800 hover:bg-blue-50/60"
+                                  : "text-amber-600 hover:text-amber-700 hover:bg-amber-50 bg-amber-50/80 font-bold border border-amber-200"
+                              )}
+                            >
+                              {linkedRef ? <RefreshCw className="w-3.5 h-3.5" /> : <PlusCircle className="w-3.5 h-3.5" />}
+                            </button>
+                          )}
  
-                         {!isInactive && linkedRef && (
-                           <button
-                             onClick={() => handleUnlinkItem(item)}
-                             title="Desvincular Composição ou Insumo (Desfazer De-Para)"
-                             className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition-all"
-                           >
-                             <X className="w-3.5 h-3.5" />
-                           </button>
-                         )}
- 
-                        {/* Editar Texto */}
-                        {!linkedRef && (isSecaoTexto || isCustomText || isInsertedByEmpresa) && (
-                          <button
-                            onClick={() => {
-                              setEditingCustomItem(item);
-                              setCustomText(item.descricao);
-                            }}
-                            title="Editar Texto / Título"
-                            className="p-1 hover:bg-purple-100 text-purple-700 rounded cursor-pointer"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                        )}
+                          {!isInactive && linkedRef && (
+                            <button
+                              onClick={() => handleUnlinkItem(item)}
+                              title="Desvincular Composição ou Insumo (Desfazer De-Para)"
+                              className="p-1 text-rose-500 hover:text-rose-700 hover:bg-rose-50 rounded-lg cursor-pointer transition-all"
+                            >
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                          )}
 
                         {/* Confirmar Inserção / Desinserção na Planilha do Cliente */}
                         {isInsertedOrDesdobrado && (
