@@ -458,7 +458,7 @@ export default function Layout() {
       {/* Sidebar */}
       <aside
         className={cn(
-          'bg-slate-900 flex flex-col transition-all duration-300 fixed md:sticky top-0 z-20 h-screen overflow-hidden border-r border-slate-800/80',
+          'bg-slate-900 flex flex-col transition-all duration-300 fixed md:sticky top-0 z-20 h-screen overflow-hidden border-r border-slate-800/80 print:hidden',
           sidebarCollapsed ? 'w-20' : 'w-64',
           !sidebarOpen && '-translate-x-full md:translate-x-0'
         )}
@@ -641,8 +641,8 @@ export default function Layout() {
         </div>
       </aside>
 
-      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100">
-        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex items-center justify-between shadow-2xs z-10 shrink-0">
+      <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 print:bg-white print:h-auto print:overflow-visible">
+        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex items-center justify-between shadow-2xs z-10 shrink-0 print:hidden">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
               <span>{obterTituloPagina(location.pathname)}</span>

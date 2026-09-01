@@ -5387,6 +5387,268 @@ export default function OrcamentoBuilder() {
           </div>
         </div>
       )}
+
+      {/* ==========================================================================
+          DOCUMENTO OFICIAL DE IMPRESSÃO / EXPORTAÇÃO EM PDF (EXIBIDO APENAS AO IMPRIMIR)
+          ========================================================================== */}
+      <div id="brp-official-print-report" className="hidden print:block w-full text-slate-900 font-sans p-2 bg-white">
+        {/* Cabeçalho do Documento */}
+        <div className="border-b-2 border-slate-900 pb-3 mb-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-950 text-white font-extrabold text-xl px-3 py-1 rounded-lg flex items-center gap-1.5 shrink-0">
+                <span className="text-amber-500">Orça</span>BRP
+              </div>
+              <div>
+                <h1 className="text-base font-extrabold text-slate-900 leading-tight uppercase">
+                  {orcamento?.empresa || (configData as any)?.empresa || 'BRP ENGENHARIA & SOLUÇÕES METÁLICAS'}
+                </h1>
+                <p className="text-[11px] text-slate-600 font-medium">Relatório Oficial de Orçamento e Proposta Técnica</p>
+              </div>
+            </div>
+            <div className="text-right">
+              <span className="inline-block bg-slate-900 text-white text-[10px] font-extrabold px-2.5 py-0.5 rounded uppercase">
+                PROPOSTA COMERCIAL
+              </span>
+              <p className="text-xs font-mono font-bold text-slate-800 mt-1">CÓDIGO: {orcamento?.codigo || (configData as any)?.codigo || '0109.001.0-2026'}</p>
+              <p className="text-xs font-bold text-blue-700">REVISÃO: REV {orcamento?.revisao || (configData as any)?.revisao || '0'}</p>
+            </div>
+          </div>
+
+          {/* Grid de Informações da Proposta */}
+          <div className="mt-3 grid grid-cols-3 gap-2 bg-slate-50 p-2.5 rounded-lg border border-slate-300 text-[11px]">
+            <div>
+              <span className="text-slate-500 font-bold block uppercase text-[9px]">Cliente / Obra:</span>
+              <span className="font-bold text-slate-900">{orcamento?.cliente || (configData as any)?.cliente || 'Não informado'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block uppercase text-[9px]">Gestor do Cliente:</span>
+              <span className="font-bold text-slate-900">{orcamento?.gestor_cliente || (configData as any)?.gestor_cliente || 'Não informado'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block uppercase text-[9px]">Responsável BRP:</span>
+              <span className="font-bold text-slate-900">{orcamento?.responsavel || (configData as any)?.responsavel || 'Equipe Metálica BRP'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block uppercase text-[9px]">Localidade:</span>
+              <span className="font-bold text-slate-900">
+                {orcamento?.cidade ? `${orcamento.cidade} - ${orcamento.estado || 'GO'}` : ((configData as any)?.cidade ? `${(configData as any).cidade} - ${(configData as any).estado || 'GO'}` : 'Goiânia - GO')}
+              </span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block uppercase text-[9px]">Empresa Emissora:</span>
+              <span className="font-bold text-slate-900">{orcamento?.empresa || (configData as any)?.empresa || 'BRP Soluções Metálicas'}</span>
+            </div>
+            <div>
+              <span className="text-slate-500 font-bold block uppercase text-[9px]">Data de Emissão:</span>
+              <span className="font-bold text-slate-900">{new Date().toLocaleDateString('pt-BR')}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* 1. SEÇÃO: PLANILHA ORÇAMENTÁRIA */}
+        {(exportScope === 'full' || activeSubTab === 'planilha') && (
+          <div className="space-y-3 mb-6 print:break-inside-avoid-page">
+            <div className="flex items-center justify-between border-b border-slate-400 pb-1">
+              <h2 className="text-xs font-extrabold uppercase text-slate-900 tracking-wider">
+                1. PLANILHA ORÇAMENTÁRIA DE SERVIÇOS E FORNECIMENTOS
+              </h2>
+              <span className="text-[10px] text-slate-500 font-medium">Valores expressos em Reais (R$)</span>
+            </div>
+
+            <table className="w-full text-[10px] border-collapse border border-slate-400">
+              <thead>
+                <tr className="bg-slate-900 text-white font-bold text-center">
+                  <th className="border border-slate-500 p-1 w-12">ITEM</th>
+                  <th className="border border-slate-500 p-1 text-left">DESCRIÇÃO DOS SERVIÇOS E INSUMOS</th>
+                  <th className="border border-slate-500 p-1 w-10">UNID.</th>
+                  <th className="border border-slate-500 p-1 w-14 text-right">QTDE.</th>
+                  {!exibirBdi && <th className="border border-slate-500 p-1 w-16 text-right">MAT. UNIT</th>}
+                  {!exibirBdi && <th className="border border-slate-500 p-1 w-16 text-right">M.O. UNIT</th>}
+                  <th className="border border-slate-500 p-1 w-16 text-right">UNIT (R$)</th>
+                  <th className="border border-slate-500 p-1 w-20 text-right">MAT. TOTAL</th>
+                  <th className="border border-slate-500 p-1 w-20 text-right">M.O. TOTAL</th>
+                  <th className="border border-slate-500 p-1 w-22 text-right">TOTAL GERAL</th>
+                </tr>
+              </thead>
+              <tbody>
+                {computedItens
+                  .filter(item => (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '')
+                  .map((item, idx) => {
+                    const eapClean = (item.item_eap || '').trim();
+                    const level = (item as any).level !== undefined ? (item as any).level : ((item as any).isSecao ? 0 : 1);
+                    const isSecaoRow = (item as any).isSecao || level === 0;
+                    const isCompMother = !isSecaoRow && (item.hasChildren || item.codigo);
+
+                    const factor = exibirBdi ? bdiFactor : 1;
+                    const valMat = Math.round((item.valor_unitario_mat || 0) * factor * 100) / 100;
+                    const valMo = Math.round((item.valor_unitario_mo || 0) * factor * 100) / 100;
+                    const valUnit = Math.round((item.valor_unitario || 0) * factor * 100) / 100;
+
+                    const totMat = Math.round((item.total_mat || 0) * factor * 100) / 100;
+                    const totMo = Math.round((item.total_mo || 0) * factor * 100) / 100;
+                    const totGrand = Math.round((item.total || 0) * factor * 100) / 100;
+
+                    return (
+                      <tr
+                        key={item.id || idx}
+                        className={clsx(
+                          "border-b border-slate-300",
+                          isSecaoRow ? "bg-slate-800 text-white font-bold text-xs" :
+                          isCompMother ? "bg-slate-100 font-bold text-slate-900" :
+                          "bg-white text-slate-800"
+                        )}
+                      >
+                        <td className={clsx("border border-slate-300 p-1 text-center font-mono", isSecaoRow ? "text-white font-bold" : "")}>
+                          {eapClean}
+                        </td>
+                        <td className="border border-slate-300 p-1">
+                          <div style={{ paddingLeft: `${Math.max(0, level - 1) * 12}px` }}>
+                            {item.descricao}
+                          </div>
+                        </td>
+                        <td className="border border-slate-300 p-1 text-center font-mono">
+                          {isSecaoRow ? '' : item.unidade}
+                        </td>
+                        <td className="border border-slate-300 p-1 text-right font-mono">
+                          {isSecaoRow || item.quantidade === 0 ? '' : item.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}
+                        </td>
+                        {!exibirBdi && (
+                          <td className="border border-slate-300 p-1 text-right font-mono">
+                            {isSecaoRow || valMat === 0 ? '' : valMat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        )}
+                        {!exibirBdi && (
+                          <td className="border border-slate-300 p-1 text-right font-mono">
+                            {isSecaoRow || valMo === 0 ? '' : valMo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                          </td>
+                        )}
+                        <td className="border border-slate-300 p-1 text-right font-mono">
+                          {isSecaoRow || valUnit === 0 ? '' : valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="border border-slate-300 p-1 text-right font-mono">
+                          {totMat === 0 ? '-' : totMat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className="border border-slate-300 p-1 text-right font-mono">
+                          {totMo === 0 ? '-' : totMo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                        <td className={clsx("border border-slate-300 p-1 text-right font-mono font-bold", isSecaoRow ? "text-white" : "text-blue-900")}>
+                          {totGrand === 0 ? '-' : totGrand.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+
+            {/* QUADRO DE RESUMO FINANCEIRO E TOTAL GERAL */}
+            <div className="flex justify-end pt-2">
+              <div className="w-80 bg-slate-50 border-2 border-slate-900 rounded-lg p-2.5 space-y-1 text-xs">
+                <div className="flex justify-between font-semibold text-slate-700">
+                  <span>Total Materiais:</span>
+                  <span className="font-mono">
+                    {(totals.mat * (exibirBdi ? bdiFactor : 1)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <div className="flex justify-between font-semibold text-slate-700">
+                  <span>Total Mão de Obra:</span>
+                  <span className="font-mono">
+                    {(totals.mo * (exibirBdi ? bdiFactor : 1)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+                <div className="border-t border-slate-400 pt-1 flex justify-between font-extrabold text-xs text-blue-900">
+                  <span>VALOR TOTAL DA PROPOSTA:</span>
+                  <span className="font-mono text-sm">
+                    {(totals.total * (exibirBdi ? bdiFactor : 1)).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                  </span>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* 2. SEÇÃO: MEMÓRIA DE CÁLCULO DE ENGENHARIA */}
+        {(exportScope === 'full' || activeSubTab === 'memoria_calculo') && (
+          <div className="space-y-3 mb-6 print:break-inside-avoid-page">
+            <div className="flex items-center justify-between border-b border-slate-400 pb-1">
+              <h2 className="text-xs font-extrabold uppercase text-slate-900 tracking-wider">
+                {exportScope === 'full' ? '2. MEMÓRIA DE CÁLCULO E DETALHAMENTO QUANTITATIVO' : '1. MEMÓRIA DE CÁLCULO E DETALHAMENTO QUANTITATIVO'}
+              </h2>
+              <span className="text-[10px] text-slate-500 font-medium">Detalhamento Físico de Serviços</span>
+            </div>
+
+            <table className="w-full text-[10px] border-collapse border border-slate-400">
+              <thead>
+                <tr className="bg-slate-900 text-white font-bold text-center">
+                  <th className="border border-slate-500 p-1 w-12">ITEM</th>
+                  <th className="border border-slate-500 p-1 text-left">DESCRIÇÃO DOS SERVIÇOS</th>
+                  <th className="border border-slate-500 p-1 w-12 text-center">UNID.</th>
+                  <th className="border border-slate-500 p-1 w-16 text-right">QTDE. TOTAL</th>
+                  <th className="border border-slate-500 p-1 text-left">MEMÓRIA DE CÁLCULO / FÓRMULA DETALHADA</th>
+                </tr>
+              </thead>
+              <tbody>
+                {itens
+                  .filter(item => (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '')
+                  .map((item, idx) => {
+                    const level = (item as any).level !== undefined ? (item as any).level : ((item as any).isSecao ? 0 : 1);
+                    const isSecaoRow = (item as any).isSecao || level === 0;
+
+                    return (
+                      <tr
+                        key={item.id || idx}
+                        className={clsx(
+                          "border-b border-slate-300",
+                          isSecaoRow ? "bg-slate-800 text-white font-bold text-xs" : "bg-white text-slate-800"
+                        )}
+                      >
+                        <td className="border border-slate-300 p-1 text-center font-mono font-bold">
+                          {item.item_eap}
+                        </td>
+                        <td className="border border-slate-300 p-1">
+                          <div style={{ paddingLeft: `${Math.max(0, level - 1) * 12}px` }}>
+                            {item.descricao}
+                          </div>
+                        </td>
+                        <td className="border border-slate-300 p-1 text-center font-mono">
+                          {isSecaoRow ? '' : item.unidade}
+                        </td>
+                        <td className="border border-slate-300 p-1 text-right font-mono font-bold">
+                          {isSecaoRow || item.quantidade === 0 ? '' : item.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 })}
+                        </td>
+                        <td className="border border-slate-300 p-1 font-mono text-[9px] text-slate-700">
+                          {(item as any).formulaCalculada || (item as any).formula_calculada || ((item as any).calculoExpressao ? `${(item as any).calculoExpressao}` : '')}
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* 3. ASSINATURAS E TERMOS DE ACEITE */}
+        <div className="mt-8 border-t border-slate-300 pt-6 print:break-inside-avoid">
+          <div className="grid grid-cols-2 gap-12 text-center text-xs">
+            <div>
+              <div className="border-t border-slate-800 w-3/4 mx-auto pt-1 font-bold text-slate-900">
+                {orcamento?.responsavel || (configData as any)?.responsavel || 'Equipe de Engenharia BRP'}
+              </div>
+              <span className="text-[10px] text-slate-500">{orcamento?.empresa || (configData as any)?.empresa || 'BRP Soluções Metálicas'}</span>
+            </div>
+            <div>
+              <div className="border-t border-slate-800 w-3/4 mx-auto pt-1 font-bold text-slate-900">
+                {orcamento?.cliente || (configData as any)?.cliente || 'De acordo / Aceite do Cliente'}
+              </div>
+              <span className="text-[10px] text-slate-500">Aprovação de Orçamento e Proposta Comercial</span>
+            </div>
+          </div>
+
+          <div className="mt-4 text-center text-[9px] text-slate-400 border-t border-slate-200 pt-1.5">
+            Relatório gerado eletronicamente via OrçaBRP em {new Date().toLocaleString('pt-BR')} • Cód. {orcamento?.codigo || (configData as any)?.codigo || '0109.001.0-2026'} (REV {orcamento?.revisao || (configData as any)?.revisao || '0'})
+          </div>
+        </div>
+      </div>
     </div>
   );
 }

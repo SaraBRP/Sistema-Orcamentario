@@ -43,3 +43,82 @@ input::-webkit-inner-spin-button {
 input[type=number] {
   -moz-appearance: textfield;
 }
+
+/* ==========================================================================
+   CONFIGURAÇÃO PROFISSIONAL DE IMPRESSÃO / EXPORTAÇÃO PDF (@media print)
+   ========================================================================== */
+@media print {
+  /* 1. Oculta toda a interface web do aplicativo (menus, botões, modais, headers) */
+  aside,
+  nav,
+  header,
+  .print\:hidden,
+  button,
+  .no-print,
+  [role="dialog"],
+  .fixed:not(#brp-official-print-report),
+  .shadow-2xl,
+  .z-50,
+  #root > div > div:first-child,
+  #root > div > div > header,
+  div[class*="backdrop-blur"],
+  div[class*="bg-slate-900/"] {
+    display: none !important;
+  }
+
+  /* 2. Força a exibição do documento de relatório oficial de impressão */
+  #brp-official-print-report {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    visibility: visible !important;
+  }
+
+  /* 3. Limpa o container raiz para ocupação total de página */
+  html, body, #root, main {
+    background: #ffffff !important;
+    color: #0f172a !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+  }
+
+  /* 4. Configuração de página A4 Paisagem com margens padrão de engenharia */
+  @page {
+    size: A4 landscape;
+    margin: 8mm 10mm 10mm 10mm;
+  }
+
+  /* 5. Regras de quebra de página de alta qualidade para tabelas */
+  table {
+    page-break-inside: auto;
+    border-collapse: collapse !important;
+    width: 100% !important;
+  }
+
+  tr {
+    page-break-inside: avoid !important;
+    page-break-after: auto !important;
+  }
+
+  thead {
+    display: table-header-group !important;
+  }
+
+  tfoot {
+    display: table-footer-group !important;
+  }
+
+  /* Força a fidelidade de cores de fundo e bordas ao salvar em PDF */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}
