@@ -3545,31 +3545,81 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                           </span>
                         </div>
 
-                        <div className="bg-white p-2 rounded-lg border border-blue-200 max-h-44 overflow-y-auto space-y-1 divide-y divide-slate-100 text-xs shadow-inner">
+                        <div className="bg-white p-2 rounded-lg border border-blue-200 max-h-56 overflow-y-auto space-y-1 divide-y divide-slate-100 text-xs shadow-inner">
                           {validItens.length === 0 ? (
                             <div className="text-slate-400 text-xs italic p-2 text-center">Nenhum item cadastrado no orçamento.</div>
                           ) : (
                             validItens.map((it) => {
                               const isChecked = activeLinkedIds.includes(it.id);
+
+                              // Verifica se o item já possui vínculo com algum Parâmetro Global da Obra
+                              const linkedGlobalParam = (header.dadosComplementares || []).find(dc => {
+                                const ids = dc.itemIds || (dc as any).itensVinculadosIds || (dc as any).linkedItemIds || (dc.itemId ? [dc.itemId] : []);
+                                return ids.includes(it.id) || (it as any).parametroGlobalId === dc.id;
+                              });
+
+                              // Verifica se o item possui fórmulas ou cálculos de memorial vinculados
+                              const hasFormulasLista = Boolean(it.formulasLista && it.formulasLista.length > 0);
+                              const hasFormulaDirect = Boolean((it as any).formulaCalculada || (it as any).formula_calculada || (it as any).calculoExpressao || (it.observacaoMemoria && (it.observacaoMemoria || '').trim() !== ''));
+
+                              const isAlreadyLinked = Boolean(linkedGlobalParam || hasFormulasLista || hasFormulaDirect);
+
+                              // Nome/Descrição amigável do vínculo atual
+                              let bindingLabel = '';
+                              if (linkedGlobalParam) {
+                                bindingLabel = `Parâmetro: ${linkedGlobalParam.parametro} (${linkedGlobalParam.valor} ${linkedGlobalParam.unidade || ''})`;
+                              } else if (hasFormulasLista) {
+                                const listObs = it.formulasLista!.map(f => f.observacao || 'Cálculo').join(', ');
+                                bindingLabel = `Fórmula: ${listObs}`;
+                              } else if (hasFormulaDirect) {
+                                bindingLabel = `Fórmula: ${(it as any).formulaCalculada || (it as any).calculoExpressao || it.observacaoMemoria}`;
+                              }
+
                               return (
-                                <label
+                                <div
                                   key={it.id}
-                                  className={`flex items-center gap-2.5 p-1.5 rounded-md transition-colors cursor-pointer ${
-                                    isChecked ? 'bg-blue-50 text-blue-950 font-bold' : 'hover:bg-slate-50 text-slate-700'
+                                  className={`flex items-center justify-between gap-2 p-1.5 rounded-lg transition-all ${
+                                    isChecked 
+                                      ? 'bg-blue-50 text-blue-950 font-bold border border-blue-200 shadow-2xs' 
+                                      : isAlreadyLinked 
+                                        ? 'bg-emerald-50/90 text-emerald-950 font-semibold border border-emerald-300 hover:bg-emerald-100/90 shadow-2xs' 
+                                        : 'hover:bg-slate-50 text-slate-700 border border-transparent'
                                   }`}
                                 >
-                                  <input
-                                    type="checkbox"
-                                    checked={isChecked}
-                                    onChange={() => handleToggleItemLinkToParam(safeIdx, it.id)}
-                                    className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                  />
-                                  <span className="flex-1 text-xs">
-                                    {it.item_eap ? <span className="font-mono text-blue-800 font-bold mr-1.5">{it.item_eap}</span> : null}
-                                    <span>{it.descricao || 'Item sem descrição'}</span>
-                                    {it.unidade ? <span className="text-slate-400 font-normal ml-1">({it.unidade})</span> : null}
-                                  </span>
-                                </label>
+                                  <label className="flex items-center gap-2.5 flex-1 cursor-pointer min-w-0">
+                                    <input
+                                      type="checkbox"
+                                      checked={isChecked}
+                                      onChange={() => handleToggleItemLinkToParam(safeIdx, it.id)}
+                                      className="rounded text-blue-600 focus:ring-blue-500 cursor-pointer shrink-0"
+                                    />
+                                    <span className="flex-1 text-xs truncate">
+                                      {it.item_eap ? <span className="font-mono text-blue-800 font-bold mr-1.5">{it.item_eap}</span> : null}
+                                      <span className={isAlreadyLinked && !isChecked ? 'text-emerald-950 font-bold' : ''}>{it.descricao || 'Item sem descrição'}</span>
+                                      {it.unidade ? <span className="text-slate-400 font-normal ml-1">({it.unidade})</span> : null}
+                                    </span>
+                                  </label>
+
+                                  {/* Badge de Destaque Verde e Olhinho com Popover de Informações */}
+                                  {isAlreadyLinked && (
+                                    <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
+                                      <span 
+                                        className="text-[10px] bg-emerald-100 text-emerald-900 font-bold px-2 py-0.5 rounded-md border border-emerald-300 shadow-2xs max-w-[200px] truncate"
+                                        title={`Já vinculado! ${bindingLabel}`}
+                                      >
+                                        🔗 {bindingLabel}
+                                      </span>
+                                      <ItemBindingInfoEye 
+                                        item={{
+                                          ...it,
+                                          observacaoMemoria: linkedGlobalParam ? `Parâmetro Global: ${linkedGlobalParam.parametro}` : (it.observacaoMemoria || 'Fórmula do Memorial'),
+                                          equacaoLiteral: (it as any).equacaoLiteral || (linkedGlobalParam ? `${linkedGlobalParam.parametro} = ${linkedGlobalParam.valor} ${linkedGlobalParam.unidade}` : (it as any).formulaCalculada || (it as any).calculoExpressao),
+                                          substituicaoNumerica: (it as any).substituicaoNumerica || (linkedGlobalParam ? `Valor Ref. = ${linkedGlobalParam.valor} ${linkedGlobalParam.unidade}` : '')
+                                        } as any} 
+                                      />
+                                    </div>
+                                  )}
+                                </div>
                               );
                             })
                           )}
