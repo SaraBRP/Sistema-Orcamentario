@@ -6,15 +6,10 @@ import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemori
 import { GerenciadorFormulas } from '../components/calculos/GerenciadorFormulas';
 import { TabelaMemoriaisCalculo, type MemorialCalculoRecord } from '../components/calculos/TabelaMemoriaisCalculo';
 import { TabelaParametrosCadastro } from '../components/calculos/TabelaParametrosCadastro';
+import { ClienteSelect } from '../components/ClienteSelect';
 import type { ItemMemoriaOficial, DadosComplementaresHeader } from '../types/calculos';
 
 const LOCAL_STORAGE_MEMORIAIS_KEY = 'brp_memoriais_list';
-
-const ESTADOS_BRASIL_LIST = [
-  'AC', 'AL', 'AM', 'AP', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 
-  'MG', 'MS', 'MT', 'PA', 'PB', 'PE', 'PI', 'PR', 'RJ', 'RN', 
-  'RO', 'RR', 'RS', 'SC', 'SE', 'SP', 'TO'
-];
 
 const formatCidadeUpperNoAccents = (text: string) => {
   if (!text) return '';
@@ -842,12 +837,23 @@ export default function CalculosQuantitativosPage() {
                 <input type="text" required value={newOrcamentoData.projeto} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, projeto: e.target.value})} placeholder="Ex: Construção de Galpão Industrial" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white" />
               </div>
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
-                <input type="text" value={newOrcamentoData.cliente} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cliente: e.target.value})} placeholder="Selecione ou digite o Cliente..." className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white" />
+                <label className="block font-bold text-slate-700 mb-1">Cliente *</label>
+                <ClienteSelect
+                  value={newOrcamentoData.cliente}
+                  onSelectClient={(c) => {
+                    setNewOrcamentoData({
+                      ...newOrcamentoData,
+                      cliente: c.nome_fantasia || c.razao_social,
+                      gestor_cliente: c.responsavel || '',
+                      cidade: c.cidade || '',
+                      estado: c.uf || 'GO'
+                    });
+                  }}
+                />
               </div>
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
-                <input type="text" value={newOrcamentoData.gestor_cliente} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, gestor_cliente: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white" />
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente (Auto)</label>
+                <input type="text" disabled value={newOrcamentoData.gestor_cliente || ''} placeholder="Preenchido automaticamente ao selecionar o cliente..." className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed" />
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Responsável Técnico / Orçamentista</label>
@@ -858,14 +864,12 @@ export default function CalculosQuantitativosPage() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
-                  <input type="text" value={newOrcamentoData.cidade} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cidade: formatCidadeUpperNoAccents(e.target.value)})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white uppercase" />
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra (Auto)</label>
+                  <input type="text" disabled value={newOrcamentoData.cidade || ''} placeholder="Preenchido automaticamente..." className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed uppercase" />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF</label>
-                  <select value={newOrcamentoData.estado} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, estado: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-bold outline-none focus:border-blue-500 bg-white cursor-pointer">
-                    {ESTADOS_BRASIL_LIST.map(uf => <option key={uf} value={uf}>{uf}</option>)}
-                  </select>
+                  <label className="block font-bold text-slate-700 mb-1">UF (Auto)</label>
+                  <input type="text" disabled value={newOrcamentoData.estado || ''} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-bold bg-slate-100 cursor-not-allowed uppercase text-center" />
                 </div>
               </div>
               <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">

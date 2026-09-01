@@ -7,7 +7,7 @@ import {
 import { clsx } from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ModalImportarExcel } from '../components/ModalImportarExcel';
-import { getClientesCadastrados, type ClienteData } from '../lib/clientes';
+import { ClienteSelect } from '../components/ClienteSelect';
 
 const statusBadgeClasses = (status: string) => {
   switch (status) {
@@ -120,12 +120,6 @@ export const getImportadoEffectiveStatusInfo = (
 
   return { label: 'Em Vinculação', badgeCls: 'bg-amber-50 text-amber-700 border-amber-200 font-bold' };
 };
-
-const ESTADOS_BRASIL_LIST = [
-  'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 
-  'MT', 'MS', 'MG', 'PA', 'PB', 'PR', 'PE', 'PI', 'RJ', 'RN', 
-  'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
-];
 
 export const renderEmpresaBadge = (empresaName?: string) => {
   const emp = (empresaName || 'BRP Soluções Metálicas').trim();
@@ -281,13 +275,11 @@ export default function Orcamentos() {
   };
 
   const [usuariosCadastrados, setUsuariosCadastrados] = useState<any[]>([]);
-  const [clientesCadastrados, setClientesCadastrados] = useState<ClienteData[]>([]);
 
   useEffect(() => {
     fetchOrcamentos();
     fetchImportados();
     fetchUsuariosCadastrados();
-    getClientesCadastrados().then(setClientesCadastrados);
   }, []);
 
   const formatCidadeUpperNoAccents = (text: string) => {
@@ -1496,51 +1488,29 @@ export default function Orcamentos() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
-                <div className="relative">
-                  <input 
-                    type="text"
-                    list="clientes-registrados-list"
-                    value={newOrcamentoData.cliente}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const matched = clientesCadastrados.find(c =>
-                        c.razao_social.toLowerCase() === val.toLowerCase() ||
-                        (c.nome_fantasia && c.nome_fantasia.toLowerCase() === val.toLowerCase())
-                      );
-                      if (matched) {
-                        setNewOrcamentoData({
-                          ...newOrcamentoData,
-                          cliente: matched.nome_fantasia || matched.razao_social,
-                          gestor_cliente: matched.responsavel || newOrcamentoData.gestor_cliente,
-                          cidade: matched.cidade || newOrcamentoData.cidade,
-                          estado: matched.uf || newOrcamentoData.estado
-                        });
-                      } else {
-                        setNewOrcamentoData({...newOrcamentoData, cliente: val});
-                      }
-                    }}
-                    placeholder="Selecione ou digite o Cliente..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
-                  />
-                  <datalist id="clientes-registrados-list">
-                    {clientesCadastrados.map(c => (
-                      <option key={c.id} value={c.nome_fantasia || c.razao_social}>
-                        {c.razao_social} {c.cnpj ? `(CNPJ: ${c.cnpj})` : ''} - {c.cidade}/{c.uf}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
+                <label className="block font-bold text-slate-700 mb-1">Cliente *</label>
+                <ClienteSelect
+                  value={newOrcamentoData.cliente}
+                  onSelectClient={(c) => {
+                    setNewOrcamentoData({
+                      ...newOrcamentoData,
+                      cliente: c.nome_fantasia || c.razao_social,
+                      gestor_cliente: c.responsavel || '',
+                      cidade: c.cidade || '',
+                      estado: c.uf || 'GO'
+                    });
+                  }}
+                />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente (Auto)</label>
                 <input 
                   type="text"
-                  value={newOrcamentoData.gestor_cliente}
-                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, gestor_cliente: e.target.value})}
-                  placeholder="Ex: Eng. Pamella"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
+                  disabled
+                  value={newOrcamentoData.gestor_cliente || ''}
+                  placeholder="Preenchido automaticamente ao selecionar o cliente..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed"
                 />
               </div>
 
@@ -1562,34 +1532,24 @@ export default function Orcamentos() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra (Auto)</label>
                   <input 
                     type="text"
-                    value={newOrcamentoData.cidade}
-                    onChange={(e) => {
-                      const val = formatCidadeUpperNoAccents(e.target.value);
-                      setNewOrcamentoData({...newOrcamentoData, cidade: val});
-                    }}
-                    onBlur={(e) => {
-                      const trimmed = formatCidadeUpperNoAccents(e.target.value).trim();
-                      setNewOrcamentoData({...newOrcamentoData, cidade: trimmed});
-                    }}
-                    placeholder="EX: ANAPOLIS"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white uppercase"
+                    disabled
+                    value={newOrcamentoData.cidade || ''}
+                    placeholder="Preenchido automaticamente..."
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed uppercase"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF (Estado)</label>
-                  <select
-                    value={newOrcamentoData.estado}
-                    onChange={(e) => setNewOrcamentoData({...newOrcamentoData, estado: e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-bold outline-none focus:border-blue-500 bg-white cursor-pointer"
-                  >
-                    {ESTADOS_BRASIL_LIST.map(uf => (
-                      <option key={uf} value={uf} className="text-slate-900 bg-white font-bold">{uf}</option>
-                    ))}
-                  </select>
+                  <label className="block font-bold text-slate-700 mb-1">UF (Auto)</label>
+                  <input 
+                    type="text"
+                    disabled
+                    value={newOrcamentoData.estado || ''}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-bold bg-slate-100 cursor-not-allowed uppercase text-center"
+                  />
                 </div>
               </div>
 
@@ -1661,51 +1621,29 @@ export default function Orcamentos() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
-                <div className="relative">
-                  <input 
-                    type="text"
-                    list="clientes-registrados-edit-list"
-                    value={editOrcamentoData.cliente}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      const matched = clientesCadastrados.find(c =>
-                        c.razao_social.toLowerCase() === val.toLowerCase() ||
-                        (c.nome_fantasia && c.nome_fantasia.toLowerCase() === val.toLowerCase())
-                      );
-                      if (matched) {
-                        setEditOrcamentoData({
-                          ...editOrcamentoData,
-                          cliente: matched.nome_fantasia || matched.razao_social,
-                          gestor_cliente: matched.responsavel || editOrcamentoData.gestor_cliente,
-                          cidade: matched.cidade || editOrcamentoData.cidade,
-                          estado: matched.uf || editOrcamentoData.estado
-                        });
-                      } else {
-                        setEditOrcamentoData({...editOrcamentoData, cliente: val});
-                      }
-                    }}
-                    placeholder="Selecione ou digite o Cliente..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
-                  />
-                  <datalist id="clientes-registrados-edit-list">
-                    {clientesCadastrados.map(c => (
-                      <option key={c.id} value={c.nome_fantasia || c.razao_social}>
-                        {c.razao_social} {c.cnpj ? `(CNPJ: ${c.cnpj})` : ''} - {c.cidade}/{c.uf}
-                      </option>
-                    ))}
-                  </datalist>
-                </div>
+                <label className="block font-bold text-slate-700 mb-1">Cliente *</label>
+                <ClienteSelect
+                  value={editOrcamentoData.cliente}
+                  onSelectClient={(c) => {
+                    setEditOrcamentoData({
+                      ...editOrcamentoData,
+                      cliente: c.nome_fantasia || c.razao_social,
+                      gestor_cliente: c.responsavel || '',
+                      cidade: c.cidade || '',
+                      estado: c.uf || 'GO'
+                    });
+                  }}
+                />
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente (Auto)</label>
                 <input 
                   type="text"
-                  value={editOrcamentoData.gestor_cliente}
-                  onChange={(e) => setEditOrcamentoData({...editOrcamentoData, gestor_cliente: e.target.value})}
-                  placeholder="Ex: Eng. Pamella"
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
+                  disabled
+                  value={editOrcamentoData.gestor_cliente || ''}
+                  placeholder="Preenchido automaticamente ao selecionar o cliente..."
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed"
                 />
               </div>
 
@@ -1727,34 +1665,24 @@ export default function Orcamentos() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra (Auto)</label>
                   <input 
                     type="text"
-                    value={editOrcamentoData.cidade}
-                    onChange={(e) => {
-                      const val = formatCidadeUpperNoAccents(e.target.value);
-                      setEditOrcamentoData({...editOrcamentoData, cidade: val});
-                    }}
-                    onBlur={(e) => {
-                      const trimmed = formatCidadeUpperNoAccents(e.target.value).trim();
-                      setEditOrcamentoData({...editOrcamentoData, cidade: trimmed});
-                    }}
-                    placeholder="EX: ANAPOLIS"
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white uppercase"
+                    disabled
+                    value={editOrcamentoData.cidade || ''}
+                    placeholder="Preenchido automaticamente..."
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed uppercase"
                   />
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF (Estado)</label>
-                  <select
-                    value={editOrcamentoData.estado}
-                    onChange={(e) => setEditOrcamentoData({...editOrcamentoData, estado: e.target.value})}
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-bold outline-none focus:border-blue-500 bg-white cursor-pointer"
-                  >
-                    {ESTADOS_BRASIL_LIST.map(uf => (
-                      <option key={uf} value={uf} className="text-slate-900 bg-white font-bold">{uf}</option>
-                    ))}
-                  </select>
+                  <label className="block font-bold text-slate-700 mb-1">UF (Auto)</label>
+                  <input 
+                    type="text"
+                    disabled
+                    value={editOrcamentoData.estado || ''}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-bold bg-slate-100 cursor-not-allowed uppercase text-center"
+                  />
                 </div>
               </div>
 
