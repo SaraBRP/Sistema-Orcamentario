@@ -857,6 +857,8 @@ export default function OrcamentoBuilder() {
       }
     }
     setActiveCell({ rowIndex, colIndex });
+    setSelectedRowIndex(rowIndex);
+    setSelectedRowIndices(new Set([rowIndex]));
     setIsEditingCell(false);
   };
 
@@ -1521,12 +1523,13 @@ export default function OrcamentoBuilder() {
     return copy;
   };
 
-  const handleInputFocus = (index: number) => {
+  const handleInputFocus = (index: number, colIndex: number = 1) => {
     setSelectedRowIndex(index);
     setSelectedRowIndices(prev => {
-      if (prev.has(index)) return prev;
+      if (prev.has(index) && prev.size === 1) return prev;
       return new Set([index]);
     });
+    setActiveCell({ rowIndex: index, colIndex });
   };
 
   const indentMultipleRows = () => {
@@ -4369,7 +4372,7 @@ export default function OrcamentoBuilder() {
                             type="text"
                             id={`cell-input-${index}-0`}
                             value={item.item_eap}
-                            onFocus={() => handleInputFocus(index)}
+                            onFocus={() => handleInputFocus(index, 0)}
                             onKeyDown={(e) => handleInputKeyDownInCell(e, index, 0)}
                             onChange={(e) => handleCellChange(index, 'item_eap', e.target.value)}
                             className={clsx(
@@ -4421,7 +4424,7 @@ export default function OrcamentoBuilder() {
                           {item.codigo ? (
                             <div
                               id={`cell-input-${index}-1`}
-                              onFocus={() => handleInputFocus(index)}
+                              onFocus={() => handleInputFocus(index, 1)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                               tabIndex={0}
                               className={clsx(
@@ -4437,7 +4440,7 @@ export default function OrcamentoBuilder() {
                               type="text"
                               id={`cell-input-${index}-1`}
                               value={item.descricao}
-                              onFocus={() => handleInputFocus(index)}
+                              onFocus={() => handleInputFocus(index, 1)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                               onKeyDown={(e) => handleInputKeyDownInCell(e, index, 1)}
                               onChange={(e) => handleCellChange(index, 'descricao', e.target.value)}
@@ -4502,7 +4505,7 @@ export default function OrcamentoBuilder() {
                           disabled={isSectionRow || item.isSummary}
                           readOnly={!!item.codigo}
                           value={isSectionRow || item.isSummary ? '' : item.unidade}
-                          onFocus={() => handleInputFocus(index)}
+                          onFocus={() => handleInputFocus(index, 2)}
                           onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                           onKeyDown={(e) => handleInputKeyDownInCell(e, index, 2)}
                           onChange={(e) => handleCellChange(index, 'unidade', e.target.value)}
@@ -4550,7 +4553,7 @@ export default function OrcamentoBuilder() {
                             ? (item as any).displayQuantidade
                             : (isChildOfComp ? item.baseQuantidade * item.effectiveMultiplier : item.quantidade);
                           if (isSectionRow || item.isSummary) {
-                            return <div className={clsx("w-full h-full cursor-not-allowed", isHighlighted ? "bg-amber-100/60" : "bg-slate-50/50")} />;
+                            return <div onClick={(e) => handleCellClick(index, 3, e)} className={clsx("w-full h-full cursor-not-allowed", isHighlighted ? "bg-amber-100/60" : "bg-slate-50/50")} />;
                           }
                           
                           if (activeCell?.rowIndex === index && activeCell?.colIndex === 3 && isEditingCell) {
@@ -4560,7 +4563,7 @@ export default function OrcamentoBuilder() {
                                 id={`cell-input-${index}-3`}
                                 placeholder=""
                                 value={item.quantidade === 0 ? '' : item.quantidade}
-                                onFocus={() => handleInputFocus(index)}
+                                onFocus={() => handleInputFocus(index, 3)}
                                 onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                                 onKeyDown={(e) => handleInputKeyDownInCell(e, index, 3)}
                                 onChange={(e) => handleCellChange(index, 'quantidade', e.target.value)}
@@ -4575,6 +4578,7 @@ export default function OrcamentoBuilder() {
                           if (isChildOfComp) {
                             return (
                               <div
+                                onClick={(e) => handleCellClick(index, 3, e)}
                                 className={clsx(
                                   "w-full h-full text-right px-3 py-2 select-none cursor-pointer",
                                   styles.textClass,
@@ -4593,7 +4597,7 @@ export default function OrcamentoBuilder() {
                           const availableParams = sectionMemoriaItem?.parametrosLocais || [];
 
                           return (
-                            <div className="relative w-full h-full flex items-center justify-between group">
+                            <div onClick={(e) => handleCellClick(index, 3, e)} className="relative w-full h-full flex items-center justify-between group cursor-pointer">
                               {(availableParams.length > 0 || (sectionMemoriaItem && sectionMemoriaItem.quantidade > 0)) && (
                                 <div className="relative">
                                   <button
@@ -4688,7 +4692,7 @@ export default function OrcamentoBuilder() {
                           id={`cell-input-${index}-4`}
                           disabled={isSectionRow || exibirBdi || item.isSummary}
                           value={isSectionRow || item.isSummary ? '' : (!hasValues ? '' : valMat)}
-                          onFocus={() => handleInputFocus(index)}
+                          onFocus={() => handleInputFocus(index, 4)}
                           onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                           onKeyDown={(e) => handleInputKeyDownInCell(e, index, 4)}
                           onChange={(e) => handleCellChange(index, 'valor_unitario_mat', e.target.value)}
@@ -4725,7 +4729,7 @@ export default function OrcamentoBuilder() {
                           id={`cell-input-${index}-5`}
                           disabled={isSectionRow || exibirBdi || item.isSummary}
                           value={isSectionRow || item.isSummary ? '' : (!hasValues ? '' : valMo)}
-                          onFocus={() => handleInputFocus(index)}
+                          onFocus={() => handleInputFocus(index, 5)}
                           onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                           onKeyDown={(e) => handleInputKeyDownInCell(e, index, 5)}
                           onChange={(e) => handleCellChange(index, 'valor_unitario_mo', e.target.value)}
