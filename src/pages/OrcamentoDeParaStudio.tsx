@@ -2091,7 +2091,8 @@ export default function OrcamentoDeParaStudio() {
                         e.stopPropagation();
                         if (!linkedRef) {
                           setInlineEditingRowId(item.id);
-                          setInlineTextValue(item.descricao || '');
+                          const initialVal = (item.tipo_vinculo === 'texto' || isInsertedByEmpresa) ? (item.descricao || '') : '';
+                          setInlineTextValue(initialVal);
                         }
                       }}
                       className={clsx(
@@ -2193,7 +2194,7 @@ export default function OrcamentoDeParaStudio() {
                             </span>
                             <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{linkedRef?.descricao}</span>
                           </div>
-                        ) : item.descricao && item.descricao.trim().length > 0 ? (
+                        ) : (item.tipo_vinculo === 'texto' || isInsertedByEmpresa) && item.descricao && item.descricao.trim().length > 0 ? (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
                             <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{item.descricao}</span>
                           </div>
