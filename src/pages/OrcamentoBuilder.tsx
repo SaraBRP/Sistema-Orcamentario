@@ -1041,9 +1041,9 @@ export default function OrcamentoBuilder() {
       matUnit: 120,
       moUnit: 120,
       unit: 120,
-      matTotal: 130,
-      moTotal: 130,
-      total: 140
+      matTotal: 135,
+      moTotal: 135,
+      total: 145
     };
   });
 
@@ -4775,8 +4775,8 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.matTotal}px`, minWidth: `${colWidths.matTotal}px`, maxWidth: `${colWidths.matTotal}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden truncate",
-                          (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-800" :
+                          "border border-slate-200/60 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
+                          (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-900 text-[11px]" :
                           isCompActive ? "font-bold text-slate-800" :
                           item.hasChildren && hasValues ? "font-semibold text-slate-800" :
                           styles.textClass,
@@ -4799,8 +4799,8 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.moTotal}px`, minWidth: `${colWidths.moTotal}px`, maxWidth: `${colWidths.moTotal}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden truncate",
-                          (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-800" :
+                          "border border-slate-200/60 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
+                          (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-900 text-[11px]" :
                           isCompActive ? "font-bold text-slate-800" :
                           item.hasChildren && hasValues ? "font-semibold text-slate-800" :
                           styles.textClass,
@@ -4823,8 +4823,8 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px`, maxWidth: `${colWidths.total}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden truncate",
-                          (isSectionRow || item.isSummary) && hasValues ? "font-extrabold text-slate-800 text-sm" :
+                          "border border-slate-200/60 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
+                          (isSectionRow || item.isSummary) && hasValues ? "font-extrabold text-blue-900 text-[11.5px]" :
                           isCompActive ? "font-bold text-blue-700" :
                           item.hasChildren && item.codigo && hasValues ? "font-semibold text-blue-600" :
                           styles.textClass,
