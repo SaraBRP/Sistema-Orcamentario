@@ -5,8 +5,8 @@ import { supabase } from '../lib/supabase';
 import * as XLSX from 'xlsx';
 import { 
   ArrowLeft, Search, Plus, Trash2, CheckCircle2, 
-  Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X, Type,
-  ChevronDown, ChevronRight, Folder, FolderOpen, Strikethrough, Download, Sparkles, PlusCircle, GripVertical,
+  Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X,
+  ChevronDown, ChevronRight, Folder, FolderOpen, Strikethrough, Download, PlusCircle, GripVertical,
   FilePlus, FileMinus
 } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -346,6 +346,50 @@ export default function OrcamentoDeParaStudio() {
   // Modal de edição de Texto Customizado / Título da Seção
   const [editingCustomItem, setEditingCustomItem] = useState<ImportadoItem | null>(null);
   const [customText, setCustomText] = useState<string>('');
+
+  // Edição inline direta na célula de Referência Empresa
+  const [inlineEditingRowId, setInlineEditingRowId] = useState<string | null>(null);
+  const [inlineTextValue, setInlineTextValue] = useState<string>('');
+
+  const handleSaveInlineText = async (targetItem: ImportadoItem, newText: string) => {
+    setInlineEditingRowId(null);
+    const trimmed = newText.trim();
+
+    try {
+      const payload: any = {
+        descricao: trimmed,
+        tipo_vinculo: 'texto',
+        composicao_id: null,
+        insumo_id: null,
+        valor_unitario_empresa: 0,
+        total_empresa: 0
+      };
+
+      const { error } = await supabase
+        .schema('engenharia')
+        .from('orcamento_importado_itens')
+        .update(payload)
+        .eq('id', targetItem.id);
+
+      if (error) throw error;
+
+      setItems(prev => prev.map(item => {
+        if (item.id === targetItem.id) {
+          return {
+            ...item,
+            ...payload,
+            composicao: undefined,
+            insumo: undefined
+          };
+        }
+        return item;
+      }));
+
+      updateImportStatus();
+    } catch (err: any) {
+      console.error(err);
+    }
+  };
 
   useEffect(() => {
     if (importId) {
@@ -1935,7 +1979,6 @@ export default function OrcamentoDeParaStudio() {
 
                 const linked = isItemLinked(item);
                 const linkedRef = item.composicao || item.insumo;
-                const isCustomText = item.tipo_vinculo === 'texto';
                 const isInactive = item.status_linha === 'inativo';
                 const isInsertedByEmpresa = item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente';
                 const isInsertedOrDesdobrado = isInsertedByEmpresa || item.status_linha === 'desdobrado';
@@ -2047,8 +2090,8 @@ export default function OrcamentoDeParaStudio() {
                       onDoubleClick={(e) => {
                         e.stopPropagation();
                         if (!linkedRef) {
-                          setEditingCustomItem(item);
-                          setCustomText(item.descricao || '');
+                          setInlineEditingRowId(item.id);
+                          setInlineTextValue(item.descricao || '');
                         }
                       }}
                       className={clsx(
@@ -2057,7 +2100,7 @@ export default function OrcamentoDeParaStudio() {
                         companyBg ? companyBg : "bg-slate-50/40",
                         draggedRightIndex === index ? "opacity-30 border-2 border-dashed border-blue-500 bg-blue-100" : "hover:bg-blue-50/60"
                       )}
-                      title={!linkedRef ? "Clique duas vezes para escrever/editar o texto da Referência Empresa" : "Item vinculado ao banco de dados (descrição não editável)"}
+                      title={!linkedRef ? "Clique duas vezes para digitar/editar o texto da Referência Empresa" : "Item vinculado ao banco de dados (descrição não editável)"}
                     >
                       <div className={clsx("flex items-center gap-1.5", isInactive && "line-through text-slate-400 opacity-60")} style={{ paddingLeft: `${(level - 1) * 18}px` }}>
                         {/* Alça de Arraste Exclusiva do Lado Direito */}
@@ -2070,7 +2113,29 @@ export default function OrcamentoDeParaStudio() {
                           </div>
                         )}
 
-                        {isInsertedByEmpresa && linkedRef ? (
+                        {inlineEditingRowId === item.id ? (
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0" onClick={e => e.stopPropagation()}>
+                            <input
+                              type="text"
+                              value={inlineTextValue}
+                              onChange={e => setInlineTextValue(e.target.value)}
+                              onKeyDown={async (e) => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault();
+                                  await handleSaveInlineText(item, inlineTextValue);
+                                } else if (e.key === 'Escape') {
+                                  setInlineEditingRowId(null);
+                                }
+                              }}
+                              onBlur={async () => {
+                                await handleSaveInlineText(item, inlineTextValue);
+                              }}
+                              autoFocus
+                              placeholder="Digite um texto..."
+                              className="w-full bg-white border-2 border-purple-500 rounded-lg px-2 py-0.5 text-[11px] font-semibold text-slate-800 focus:outline-none shadow-xs"
+                            />
+                          </div>
+                        ) : isInsertedByEmpresa && linkedRef ? (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
                             {hasChildrenBool && (
                               <button
@@ -2128,25 +2193,12 @@ export default function OrcamentoDeParaStudio() {
                             </span>
                             <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{linkedRef?.descricao}</span>
                           </div>
-                        ) : isInsertedByEmpresa ? (
-                          <span className="text-amber-800 font-bold text-[10px] bg-amber-200/80 px-1.5 py-0.5 rounded border border-amber-300 flex items-center gap-1 w-fit">
-                            <Sparkles className="w-3 h-3 text-amber-700" />
-                            Item Inserido pela Empresa
-                          </span>
-                        ) : isCustomText ? (
+                        ) : item.descricao && item.descricao.trim().length > 0 ? (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                            <span className="text-[9px] bg-purple-100 text-purple-800 font-bold px-1 py-0.5 rounded flex items-center gap-0.5">
-                              <Type className="w-2.5 h-2.5" />
-                              TEXTO
-                            </span>
                             <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{item.descricao}</span>
                           </div>
-                        ) : isSecaoTexto ? (
-                          <span className="text-purple-700 font-bold text-[10px] bg-purple-50 px-1.5 py-0.5 rounded border border-purple-100">
-                            Seção de Texto (Ajuste de Nome)
-                          </span>
                         ) : (
-                          <span className="text-slate-400 italic text-[10px]">Pendente de vinculação</span>
+                          <span className="text-slate-400 italic text-[11px] cursor-pointer hover:text-slate-600">Digite um texto</span>
                         )}
                       </div>
                     </td>
