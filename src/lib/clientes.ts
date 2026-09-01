@@ -94,40 +94,18 @@ export async function getClientesCadastrados(): Promise<ClienteData[]> {
     }
   } catch {}
 
-  // Se não houver nenhum cliente cadastrado ainda, fornece exemplos iniciais padrão
-  if (clientes.length === 0) {
-    clientes = [
-      {
-        id: 'cli_votorantim',
-        razao_social: 'Votorantim Cimentos S.A.',
-        nome_fantasia: 'Votorantim',
-        cnpj: '01.637.892/0001-05',
-        cidade: 'ANÁPOLIS',
-        uf: 'GO',
-        responsavel: 'Eng. Pamella',
-        email: 'pamella.siqueira@brp.eng.br',
-        telefone: '(62) 99999-8888',
-        status: 'ativo',
-        created_at: new Date().toISOString()
-      },
-      {
-        id: 'cli_brp_metalica',
-        razao_social: 'BRP Soluções Metálicas Ltda',
-        nome_fantasia: 'BRP Metálica',
-        cnpj: '12.345.678/0001-90',
-        cidade: 'GOIÂNIA',
-        uf: 'GO',
-        responsavel: 'Eng. José Vicente',
-        email: 'josevicente@brpmetalica.com',
-        telefone: '(62) 98888-7777',
-        status: 'ativo',
-        created_at: new Date().toISOString()
-      }
-    ];
-    try {
-      localStorage.setItem(LOCAL_STORAGE_CLIENTES_KEY, JSON.stringify(clientes));
-    } catch {}
-  }
+  // Filtra/Remove quaisquer registros de exemplo de teste anteriores (cli_votorantim / cli_brp_metalica)
+  clientes = clientes.filter(c => 
+    c.id !== 'cli_votorantim' && 
+    c.id !== 'cli_brp_metalica' &&
+    !c.razao_social?.toLowerCase().includes('votorantim cimentos') &&
+    !c.razao_social?.toLowerCase().includes('brp soluções metálicas ltda')
+  );
+
+  // Atualiza LocalStorage limpo sem os registros de teste
+  try {
+    localStorage.setItem(LOCAL_STORAGE_CLIENTES_KEY, JSON.stringify(clientes));
+  } catch {}
 
   return clientes;
 }

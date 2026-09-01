@@ -1156,14 +1156,6 @@ export default function Configuracoes() {
                 </button>
               )}
             </div>
-
-            <button
-              onClick={handleOpenNewClienteModal}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-3 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer ml-auto"
-            >
-              <Plus className="w-4 h-4" />
-              <span>Novo Cliente</span>
-            </button>
           </div>
 
           <div className="bg-white rounded-2xl shadow-xs border border-slate-200 overflow-hidden">
@@ -1177,7 +1169,7 @@ export default function Configuracoes() {
                     <th className="px-4 py-3 text-left">Responsável / Gestor</th>
                     <th className="px-4 py-3 text-left">Contatos</th>
                     <th className="px-4 py-3 text-center">Status</th>
-                    <th className="px-4 py-3 text-center">Ações</th>
+                    <th className="px-4 py-3 text-center w-36 min-w-[130px]">AÇÕES</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -1262,32 +1254,32 @@ export default function Configuracoes() {
                         </td>
 
                         <td className="px-4 py-3 text-center">
-                          <div className="flex items-center justify-center gap-1">
+                          <div className="flex items-center justify-center gap-1.5">
                             <button
                               onClick={() => handleOpenEditClienteModal(c)}
-                              className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-600 hover:text-blue-600 hover:bg-blue-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
                               title="Editar Cliente"
                             >
-                              <Edit2 className="w-3.5 h-3.5" />
+                              <Edit2 className="w-4 h-4" />
                             </button>
 
                             <button
                               onClick={() => handleToggleClienteStatus(c)}
                               className={clsx(
-                                'p-1.5 rounded-lg transition-colors cursor-pointer',
-                                c.status === 'ativo' ? 'text-emerald-600 hover:bg-emerald-50' : 'text-slate-400 hover:bg-slate-100'
+                                'p-1.5 rounded-lg border transition-colors cursor-pointer',
+                                c.status === 'ativo' ? 'text-emerald-600 border-emerald-200 hover:bg-emerald-50' : 'text-slate-400 border-slate-200 hover:bg-slate-100'
                               )}
                               title={c.status === 'ativo' ? 'Desativar Cliente' : 'Ativar Cliente'}
                             >
-                              {c.status === 'ativo' ? <UserCheck className="w-3.5 h-3.5" /> : <UserX className="w-3.5 h-3.5" />}
+                              {c.status === 'ativo' ? <UserCheck className="w-4 h-4" /> : <UserX className="w-4 h-4" />}
                             </button>
 
                             <button
                               onClick={() => handleDeleteClienteSubmit(c.id, c.razao_social)}
-                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 border border-slate-200 rounded-lg transition-colors cursor-pointer"
                               title="Excluir Cliente"
                             >
-                              <Trash2 className="w-3.5 h-3.5" />
+                              <Trash2 className="w-4 h-4" />
                             </button>
                           </div>
                         </td>
