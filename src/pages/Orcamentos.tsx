@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { supabase } from '../lib/supabase';
 import { 
   Plus, Search, Calculator, GitBranch, Trash2, X, FileSpreadsheet,
-  ChevronDown, ChevronRight, Filter, AlertTriangle
+  ChevronDown, ChevronRight, Filter, AlertTriangle, Edit2
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { useNavigate, useSearchParams } from 'react-router-dom';
@@ -133,17 +133,15 @@ export const renderEmpresaBadge = (empresaName?: string) => {
 
   if (isEngenharia) {
     return (
-      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-md font-bold text-[10.5px] inline-flex items-center gap-1 shadow-2xs whitespace-nowrap">
-        <span>🏗️</span>
-        <span>BRP Engenharia</span>
+      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-md font-bold text-[10.5px] inline-block shadow-2xs whitespace-nowrap">
+        BRP Engenharia
       </span>
     );
   }
 
   return (
-    <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-300 rounded-md font-bold text-[10.5px] inline-flex items-center gap-1 shadow-2xs whitespace-nowrap">
-      <span>🏭</span>
-      <span>BRP Soluções Metálicas</span>
+    <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-300 rounded-md font-bold text-[10.5px] inline-block shadow-2xs whitespace-nowrap">
+      BRP Soluções Metálicas
     </span>
   );
 };
@@ -209,6 +207,78 @@ export default function Orcamentos() {
     cidade: '',
     estado: 'GO'
   });
+
+  // Modal de Edição de Orçamento
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editOrcamentoData, setEditOrcamentoData] = useState({
+    id: '',
+    codigo: '',
+    empresa: 'BRP Soluções Metálicas',
+    descricao: '',
+    cliente: '',
+    projeto: '',
+    gestor_cliente: '',
+    responsavel: '',
+    cidade: '',
+    estado: 'GO'
+  });
+
+  const handleOpenEditModal = (orc: any, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const localObra = orc.local_obra || '';
+    const parts = localObra.split(' - ');
+    const cidade = parts[0] || '';
+    const estado = parts[1] || 'GO';
+
+    setEditOrcamentoData({
+      id: orc.id,
+      codigo: orc.codigo || '',
+      empresa: orc.empresa || 'BRP Soluções Metálicas',
+      descricao: orc.descricao || '',
+      cliente: orc.cliente || '',
+      projeto: orc.projeto || orc.nome || '',
+      gestor_cliente: orc.gestor_cliente || '',
+      responsavel: orc.responsavel || (usuariosCadastrados[0]?.nome || ''),
+      cidade,
+      estado
+    });
+    setIsEditModalOpen(true);
+  };
+
+  const handleUpdateOrcamento = async (e: React.FormEvent) => {
+    e.preventDefault();
+    try {
+      setLoading(true);
+      const cidadeFormatada = formatCidadeUpperNoAccents(editOrcamentoData.cidade).trim();
+      const localObra = [cidadeFormatada, editOrcamentoData.estado].filter(Boolean).join(' - ');
+
+      const { error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .update({
+          empresa: editOrcamentoData.empresa,
+          nome: editOrcamentoData.projeto,
+          projeto: editOrcamentoData.projeto,
+          descricao: editOrcamentoData.descricao,
+          cliente: editOrcamentoData.cliente,
+          gestor_cliente: editOrcamentoData.gestor_cliente,
+          responsavel: editOrcamentoData.responsavel,
+          local_obra: localObra
+        })
+        .eq('id', editOrcamentoData.id);
+
+      if (error) throw error;
+
+      alert('Orçamento atualizado com sucesso!');
+      setIsEditModalOpen(false);
+      fetchOrcamentos();
+    } catch (err: any) {
+      console.error('Erro ao atualizar orçamento:', err);
+      alert('Erro ao atualizar orçamento: ' + (err.message || err));
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const [usuariosCadastrados, setUsuariosCadastrados] = useState<any[]>([]);
   const [clientesCadastrados, setClientesCadastrados] = useState<ClienteData[]>([]);
@@ -1179,6 +1249,13 @@ export default function Orcamentos() {
                             </td>
                             <td className="py-3.5 px-4 text-center">
                               <div className="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                <button 
+                                  onClick={(e) => handleOpenEditModal(parent, e)}
+                                  title="Editar Dados do Orçamento"
+                                  className="p-1.5 hover:bg-blue-50 text-blue-600 rounded-lg transition-colors cursor-pointer"
+                                >
+                                  <Edit2 className="w-3.5 h-3.5" />
+                                </button>
                                 {parent.status_envio === 'Encerrada' && (
                                   <button 
                                     onClick={(e) => handleCreateRevision(parent, e)}
@@ -1247,6 +1324,13 @@ export default function Orcamentos() {
                                 </td>
                                 <td className="py-1.5 px-4 text-center">
                                   <div className="flex items-center justify-center gap-1 opacity-0 group-hover/child:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+                                    <button 
+                                      onClick={(e) => handleOpenEditModal(child, e)}
+                                      title="Editar Dados do Orçamento"
+                                      className="p-1 hover:bg-blue-50 text-blue-600 rounded transition-colors cursor-pointer"
+                                    >
+                                      <Edit2 className="w-3 h-3" />
+                                    </button>
                                     <button 
                                       onClick={(e) => handleDeleteOrcamento(child.id, child.codigo, e)}
                                       title="Excluir Revisão Anterior"
@@ -1523,6 +1607,171 @@ export default function Orcamentos() {
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition-all cursor-pointer"
                 >
                   Criar Orçamento
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal Editar Orçamento Nativo */}
+      {isEditModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-800">Editar Orçamento</h3>
+              <button onClick={() => setIsEditModalOpen(false)} className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer">
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleUpdateOrcamento} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento</label>
+                <input 
+                  type="text"
+                  disabled
+                  value={editOrcamentoData.codigo}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono font-bold text-slate-500 bg-slate-100 cursor-not-allowed"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Empresa Responsável</label>
+                <select 
+                  value={editOrcamentoData.empresa}
+                  onChange={(e) => setEditOrcamentoData({...editOrcamentoData, empresa: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white cursor-pointer"
+                >
+                  <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
+                  <option value="BRP Engenharia">BRP Engenharia</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Nome do Projeto / Obra</label>
+                <input 
+                  type="text"
+                  required
+                  value={editOrcamentoData.projeto}
+                  onChange={(e) => setEditOrcamentoData({...editOrcamentoData, projeto: e.target.value})}
+                  placeholder="Ex: Construção de Galpão Industrial"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
+                <div className="relative">
+                  <input 
+                    type="text"
+                    list="clientes-registrados-edit-list"
+                    value={editOrcamentoData.cliente}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      const matched = clientesCadastrados.find(c =>
+                        c.razao_social.toLowerCase() === val.toLowerCase() ||
+                        (c.nome_fantasia && c.nome_fantasia.toLowerCase() === val.toLowerCase())
+                      );
+                      if (matched) {
+                        setEditOrcamentoData({
+                          ...editOrcamentoData,
+                          cliente: matched.nome_fantasia || matched.razao_social,
+                          gestor_cliente: matched.responsavel || editOrcamentoData.gestor_cliente,
+                          cidade: matched.cidade || editOrcamentoData.cidade,
+                          estado: matched.uf || editOrcamentoData.estado
+                        });
+                      } else {
+                        setEditOrcamentoData({...editOrcamentoData, cliente: val});
+                      }
+                    }}
+                    placeholder="Selecione ou digite o Cliente..."
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
+                  />
+                  <datalist id="clientes-registrados-edit-list">
+                    {clientesCadastrados.map(c => (
+                      <option key={c.id} value={c.nome_fantasia || c.razao_social}>
+                        {c.razao_social} {c.cnpj ? `(CNPJ: ${c.cnpj})` : ''} - {c.cidade}/{c.uf}
+                      </option>
+                    ))}
+                  </datalist>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
+                <input 
+                  type="text"
+                  value={editOrcamentoData.gestor_cliente}
+                  onChange={(e) => setEditOrcamentoData({...editOrcamentoData, gestor_cliente: e.target.value})}
+                  placeholder="Ex: Eng. Pamella"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Responsável Técnico / Orçamentista</label>
+                <select 
+                  value={editOrcamentoData.responsavel}
+                  onChange={(e) => setEditOrcamentoData({...editOrcamentoData, responsavel: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white cursor-pointer"
+                >
+                  <option value="" className="text-slate-500 font-normal">Selecione o Responsável / Orçamentista...</option>
+                  {usuariosCadastrados.map((u: any) => (
+                    <option key={u.id || u.nome} value={u.nome} className="text-slate-900 bg-white font-semibold">
+                      {u.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
+                  <input 
+                    type="text"
+                    value={editOrcamentoData.cidade}
+                    onChange={(e) => {
+                      const val = formatCidadeUpperNoAccents(e.target.value);
+                      setEditOrcamentoData({...editOrcamentoData, cidade: val});
+                    }}
+                    onBlur={(e) => {
+                      const trimmed = formatCidadeUpperNoAccents(e.target.value).trim();
+                      setEditOrcamentoData({...editOrcamentoData, cidade: trimmed});
+                    }}
+                    placeholder="EX: ANAPOLIS"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white uppercase"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">UF (Estado)</label>
+                  <select
+                    value={editOrcamentoData.estado}
+                    onChange={(e) => setEditOrcamentoData({...editOrcamentoData, estado: e.target.value})}
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-bold outline-none focus:border-blue-500 bg-white cursor-pointer"
+                  >
+                    {ESTADOS_BRASIL_LIST.map(uf => (
+                      <option key={uf} value={uf} className="text-slate-900 bg-white font-bold">{uf}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="pt-4 flex justify-end gap-2 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="px-4 py-2 text-slate-500 font-bold hover:text-slate-700 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit"
+                  disabled={loading}
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl shadow-sm transition-all cursor-pointer"
+                >
+                  Salvar Alterações
                 </button>
               </div>
             </form>
