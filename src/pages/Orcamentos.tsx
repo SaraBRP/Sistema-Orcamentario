@@ -234,6 +234,160 @@ export default function Orcamentos() {
     }
   };
 
+  // Função para calcular os totais reais do orçamento respeitando a hierarquia EAP (evitando triplicar/duplicar somas de seções e filhas)
+  const calculateBudgetTotalsFromItems = (itensList: any[]) => {
+    if (!itensList || itensList.length === 0) {
+      return { mat: 0, mo: 0, total: 0 };
+    }
+
+    const computed = itensList.map(item => ({
+      ...item,
+      item_eap: (item.item_eap || '').trim(),
+      effectiveMultiplier: 1,
+      hasChildren: false,
+      total_mat: parseFloat(item.total_mat || 0),
+      total_mo: parseFloat(item.total_mo || 0),
+      total: parseFloat(item.total || 0),
+      quantidade: parseFloat(item.quantidade || 0),
+      valor_unitario_mat: parseFloat(item.valor_unitario_mat || 0),
+      valor_unitario_mo: parseFloat(item.valor_unitario_mo || 0)
+    }));
+
+    const eapToIdx = new Map<string, number>();
+    computed.forEach((item, idx) => {
+      if (item.item_eap) eapToIdx.set(item.item_eap, idx);
+    });
+
+    for (let i = 0; i < computed.length; i++) {
+      const item = computed[i];
+      if (!item.item_eap) continue;
+
+      const parts = item.item_eap.split('.');
+      let multiplier = 1;
+      for (let len = 1; len < parts.length; len++) {
+        const ancestorEap = parts.slice(0, len).join('.');
+        const aIdx = eapToIdx.get(ancestorEap);
+        if (aIdx !== undefined) {
+          const ancestor = computed[aIdx];
+          if (ancestor.codigo && ancestor.codigo.trim() !== '') {
+            const ancestorQ = ancestor.quantidade === 0 ? 1 : ancestor.quantidade;
+            multiplier *= ancestorQ;
+          }
+          ancestor.hasChildren = true;
+        }
+      }
+      item.effectiveMultiplier = multiplier;
+    }
+
+    for (let i = computed.length - 1; i >= 0; i--) {
+      const item = computed[i];
+      if (!item.item_eap) continue;
+
+      const hasCode = Boolean(item.codigo && item.codigo.trim() !== '');
+      const parts = item.item_eap.split('.').filter(Boolean);
+      const isSectionHeader = parts.length === 1 || (parts.length === 2 && parts[1] === '0') || item.isSecao;
+
+      let directChildren: typeof computed = [];
+
+      if (isSectionHeader) {
+        const rootNum = parts[0];
+        directChildren = computed.filter(other => {
+          if (!other.item_eap || other.item_eap === item.item_eap) return false;
+          const otherParts = other.item_eap.split('.').filter(Boolean);
+          return otherParts[0] === rootNum && (otherParts.length === 2 && otherParts[1] !== '0');
+        });
+
+        if (directChildren.length === 0) {
+          const allDescendants = computed.filter(other => {
+            if (!other.item_eap || other.item_eap === item.item_eap) return false;
+            const otherParts = other.item_eap.split('.').filter(Boolean);
+            return otherParts[0] === rootNum;
+          });
+
+          if (allDescendants.length > 0) {
+            const minDepth = Math.min(...allDescendants.map(d => d.item_eap.split('.').filter(Boolean).length));
+            directChildren = allDescendants.filter(other => other.item_eap.split('.').filter(Boolean).length === minDepth);
+          }
+        }
+      } else {
+        const prefix = item.item_eap + '.';
+        directChildren = computed.filter(other => {
+          if (!other.item_eap.startsWith(prefix)) return false;
+          const rest = other.item_eap.slice(prefix.length);
+          return rest.length > 0 && !rest.includes('.');
+        });
+      }
+
+      if (directChildren.length === 0) {
+        let calcQtd = item.quantidade || 0;
+        if (item.coeficiente && item.coeficiente > 0) {
+          calcQtd = item.coeficiente * item.effectiveMultiplier;
+        } else if (item.effectiveMultiplier > 1) {
+          calcQtd = (item.quantidade || 0) * item.effectiveMultiplier;
+        }
+        item.total_mat = calcQtd * (item.valor_unitario_mat || 0);
+        item.total_mo  = calcQtd * (item.valor_unitario_mo || 0);
+        item.total     = item.total_mat + item.total_mo;
+      } else {
+        const sumMat   = directChildren.reduce((s, d) => s + d.total_mat, 0);
+        const sumMo    = directChildren.reduce((s, d) => s + d.total_mo,  0);
+        const sumTotal = directChildren.reduce((s, d) => s + d.total,     0);
+
+        if (hasCode) {
+          if (sumTotal > 0 || sumMat > 0 || sumMo > 0) {
+            item.total_mat = sumMat;
+            item.total_mo  = sumMo;
+            item.total     = sumTotal;
+          } else {
+            item.total_mat = (item.quantidade || 0) * (item.valor_unitario_mat || 0);
+            item.total_mo  = (item.quantidade || 0) * (item.valor_unitario_mo || 0);
+            item.total     = item.total_mat + item.total_mo;
+          }
+        } else {
+          item.total_mat = sumMat;
+          item.total_mo  = sumMo;
+          item.total     = sumTotal;
+        }
+      }
+    }
+
+    const secaoRows = computed.filter(item => {
+      if (!item.item_eap) return false;
+      const parts = item.item_eap.split('.').filter(Boolean);
+      return parts.length === 1 || (parts.length === 2 && parts[1] === '0') || item.isSecao;
+    });
+
+    if (secaoRows.length > 0) {
+      return secaoRows.reduce((acc, item) => {
+        acc.mat += item.total_mat || 0;
+        acc.mo += item.total_mo || 0;
+        acc.total += item.total || 0;
+        return acc;
+      }, { mat: 0, mo: 0, total: 0 });
+    }
+
+    const eapSet = new Set(computed.map(i => i.item_eap).filter(Boolean));
+    return computed.reduce((acc, item) => {
+      if (!item.item_eap) return acc;
+      const parts = item.item_eap.split('.').filter(Boolean);
+      let isRootLevel1 = false;
+      if (parts.length === 2) {
+        isRootLevel1 = true;
+      } else if (parts.length > 2) {
+        const parentEap = parts.slice(0, parts.length - 1).join('.');
+        if (!eapSet.has(parentEap)) {
+          isRootLevel1 = true;
+        }
+      }
+      if (isRootLevel1) {
+        acc.mat += item.total_mat || 0;
+        acc.mo += item.total_mo || 0;
+        acc.total += item.total || 0;
+      }
+      return acc;
+    }, { mat: 0, mo: 0, total: 0 });
+  };
+
   const fetchOrcamentos = async () => {
     setLoading(true);
     try {
@@ -246,21 +400,24 @@ export default function Orcamentos() {
       if (error) throw error;
       setOrcamentos(data || []);
 
-      // Busca os totais dos itens para cada orçamento
+      // Busca os itens completos de cada orçamento para calcular os totais WBS reais
       const { data: items, error: itemsError } = await supabase
         .schema('engenharia')
         .from('orcamento_itens')
-        .select('orcamento_id, total, total_mat, total_mo');
+        .select('orcamento_id, item_eap, total, total_mat, total_mo, valor_unitario_mat, valor_unitario_mo, quantidade, codigo, composicao_id');
       
       if (!itemsError && items) {
-        const totals: Record<string, any> = {};
+        const itemsByOrcamento: Record<string, any[]> = {};
         items.forEach((item: any) => {
-          if (!totals[item.orcamento_id]) {
-            totals[item.orcamento_id] = { total: 0, mat: 0, mo: 0 };
+          if (!itemsByOrcamento[item.orcamento_id]) {
+            itemsByOrcamento[item.orcamento_id] = [];
           }
-          totals[item.orcamento_id].total += parseFloat(item.total || 0);
-          totals[item.orcamento_id].mat += parseFloat(item.total_mat || 0);
-          totals[item.orcamento_id].mo += parseFloat(item.total_mo || 0);
+          itemsByOrcamento[item.orcamento_id].push(item);
+        });
+
+        const totals: Record<string, any> = {};
+        Object.keys(itemsByOrcamento).forEach(orcId => {
+          totals[orcId] = calculateBudgetTotalsFromItems(itemsByOrcamento[orcId]);
         });
         setOrcamentosTotals(totals);
       }
