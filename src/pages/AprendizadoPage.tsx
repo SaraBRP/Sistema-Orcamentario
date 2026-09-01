@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { 
   GraduationCap, 
   BookOpen, 
@@ -182,10 +183,47 @@ const CATALOGO_ARTIGOS: ArtigoAprendizado[] = [
 ];
 
 export default function AprendizadoPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialCat = useMemo<'todas' | 'sistema' | 'infraestrutura' | 'custos' | 'dicas' | 'mep'>(() => {
+    const catUrl = searchParams.get('cat') as any;
+    if (['todas', 'sistema', 'infraestrutura', 'custos', 'dicas', 'mep'].includes(catUrl)) {
+      return catUrl;
+    }
+    try {
+      const saved = localStorage.getItem('brp_aprendizado_cat') as any;
+      if (['todas', 'sistema', 'infraestrutura', 'custos', 'dicas', 'mep'].includes(saved)) {
+        return saved;
+      }
+    } catch {}
+    return 'todas';
+  }, [searchParams]);
+
   const [searchTerm, setSearchTerm] = useState('');
-  const [categoriaAtiva, setCategoriaAtiva] = useState<'todas' | 'sistema' | 'infraestrutura' | 'custos' | 'dicas' | 'mep'>('todas');
+  const [categoriaAtivaState, setCategoriaAtivaState] = useState<'todas' | 'sistema' | 'infraestrutura' | 'custos' | 'dicas' | 'mep'>(initialCat);
   const [artigoSelecionado, setArtigoSelecionado] = useState<ArtigoAprendizado | null>(null);
   const [tipologiaMepAtiva, setTipologiaMepAtiva] = useState<TipologiaMep>('Hospital');
+
+  useEffect(() => {
+    const catUrl = searchParams.get('cat') as any;
+    if (catUrl && ['todas', 'sistema', 'infraestrutura', 'custos', 'dicas', 'mep'].includes(catUrl)) {
+      setCategoriaAtivaState(catUrl);
+    }
+  }, [searchParams]);
+
+  const categoriaAtiva = categoriaAtivaState;
+
+  const setCategoriaAtiva = (cat: 'todas' | 'sistema' | 'infraestrutura' | 'custos' | 'dicas' | 'mep') => {
+    setCategoriaAtivaState(cat);
+    try {
+      localStorage.setItem('brp_aprendizado_cat', cat);
+    } catch {}
+    setSearchParams((prev: URLSearchParams) => {
+      const p = new URLSearchParams(prev);
+      p.set('cat', cat);
+      return p;
+    }, { replace: true });
+  };
 
   const artigosFiltrados = CATALOGO_ARTIGOS.filter(art => {
     const matchCat = categoriaAtiva === 'todas' || art.categoria === categoriaAtiva;

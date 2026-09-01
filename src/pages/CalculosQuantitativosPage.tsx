@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Rocket, FileText, Sparkles, ArrowLeft, Plus, Sliders, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemorialOficial';
@@ -26,7 +26,44 @@ const formatCidadeUpperNoAccents = (text: string) => {
 
 export default function CalculosQuantitativosPage() {
   const navigate = useNavigate();
-  const [activeMainTab, setActiveMainTab] = useState<'memorial' | 'formulas' | 'parametros'>('memorial');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialMainTab = useMemo<'memorial' | 'formulas' | 'parametros'>(() => {
+    const tabFromUrl = searchParams.get('tab') as any;
+    if (tabFromUrl === 'memorial' || tabFromUrl === 'formulas' || tabFromUrl === 'parametros') {
+      return tabFromUrl;
+    }
+    try {
+      const saved = localStorage.getItem('brp_calculos_tab') as any;
+      if (saved === 'memorial' || saved === 'formulas' || saved === 'parametros') {
+        return saved;
+      }
+    } catch {}
+    return 'memorial';
+  }, [searchParams]);
+
+  const [activeMainTabState, setActiveMainTabState] = useState<'memorial' | 'formulas' | 'parametros'>(initialMainTab);
+
+  useEffect(() => {
+    const tabFromUrl = searchParams.get('tab') as any;
+    if (tabFromUrl && (tabFromUrl === 'memorial' || tabFromUrl === 'formulas' || tabFromUrl === 'parametros')) {
+      setActiveMainTabState(tabFromUrl);
+    }
+  }, [searchParams]);
+
+  const activeMainTab = activeMainTabState;
+
+  const setActiveMainTab = (tab: 'memorial' | 'formulas' | 'parametros') => {
+    setActiveMainTabState(tab);
+    try {
+      localStorage.setItem('brp_calculos_tab', tab);
+    } catch {}
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set('tab', tab);
+      return p;
+    }, { replace: true });
+  };
   
   const [memoriaisList, setMemoriaisList] = useState<MemorialCalculoRecord[]>(() => {
     try {

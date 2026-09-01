@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { getUserSavedPermissions, saveUserPermissionsLocally } from '../lib/permissions';
 import { 
@@ -87,7 +88,44 @@ const normalizeCargo = (cargo?: string | null): 'gestor' | 'orcamentista' => {
 };
 
 export default function Configuracoes() {
-  const [activeTab, setActiveTab] = useState<Tab>('usuarios');
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const initialTab = useMemo<Tab>(() => {
+    const tabFromUrl = searchParams.get('tab') as Tab;
+    if (tabFromUrl === 'usuarios' || tabFromUrl === 'permissoes' || tabFromUrl === 'clientes') {
+      return tabFromUrl;
+    }
+    try {
+      const saved = localStorage.getItem('brp_configuracoes_tab') as Tab;
+      if (saved === 'usuarios' || saved === 'permissoes' || saved === 'clientes') {
+        return saved;
+      }
+    } catch {}
+    return 'usuarios';
+  }, [searchParams]);
+
+  const [activeTabState, setActiveTabState] = useState<Tab>(initialTab);
+
+  useEffect(() => {
+    const tabFromUrl = searchParams.get('tab') as Tab;
+    if (tabFromUrl && (tabFromUrl === 'usuarios' || tabFromUrl === 'permissoes' || tabFromUrl === 'clientes')) {
+      setActiveTabState(tabFromUrl);
+    }
+  }, [searchParams]);
+
+  const activeTab = activeTabState;
+
+  const setActiveTab = (tab: Tab) => {
+    setActiveTabState(tab);
+    try {
+      localStorage.setItem('brp_configuracoes_tab', tab);
+    } catch {}
+    setSearchParams((prev) => {
+      const p = new URLSearchParams(prev);
+      p.set('tab', tab);
+      return p;
+    }, { replace: true });
+  };
   const [subTabUsuarios, setSubTabUsuarios] = useState<SubTabUsuarios>('lista');
   const [profiles, setProfiles] = useState<Profile[]>([]);
   const [cargoDefinidoMap, setCargoDefinidoMap] = useState<Record<string, string>>({});
