@@ -129,6 +129,8 @@ export default function OrcamentoDeParaStudio() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
+  const [selectedRowIndexes, setSelectedRowIndexes] = useState<Set<number>>(new Set());
+  const [lastClickedRowIndex, setLastClickedRowIndex] = useState<number | null>(null);
   const [existingOrcamento, setExistingOrcamento] = useState<any>(null);
 
   // Estado para largura ajustável das colunas
@@ -630,41 +632,184 @@ export default function OrcamentoDeParaStudio() {
     setDraggedRightIndex(null);
   };
 
-  // --- RECUOS DE EAP NA BARRA SUPERIOR ---
+  // --- LÓGICA DE SELEÇÃO POR CLIQUE / TECLADO (CTRL, SHIFT, SETAS) ---
+  const handleRowClick = (index: number, e: React.MouseEvent) => {
+    if (e.ctrlKey || e.metaKey) {
+      setSelectedRowIndexes(prev => {
+        const next = new Set(prev);
+        if (next.has(index)) next.delete(index);
+        else next.add(index);
+        return next;
+      });
+      setSelectedRowIndex(index);
+      setLastClickedRowIndex(index);
+    } else if (e.shiftKey && lastClickedRowIndex !== null) {
+      const start = Math.min(lastClickedRowIndex, index);
+      const end = Math.max(lastClickedRowIndex, index);
+      const range = new Set<number>();
+      for (let i = start; i <= end; i++) range.add(i);
+      setSelectedRowIndexes(range);
+      setSelectedRowIndex(index);
+    } else {
+      setSelectedRowIndexes(new Set([index]));
+      setSelectedRowIndex(index);
+      setLastClickedRowIndex(index);
+    }
+  };
+
+  // --- RECUOS DE EAP NA BARRA SUPERIOR E VIA TECLADO (CTRL+SHIFT+SETA) ---
   const handleIndentSelectedRow = () => {
-    if (selectedRowIndex === null || selectedRowIndex <= 0) return;
+    const targetIndexes = Array.from(selectedRowIndexes);
+    if (targetIndexes.length === 0 && selectedRowIndex !== null) {
+      targetIndexes.push(selectedRowIndex);
+    }
+    if (targetIndexes.length === 0) return;
+
+    targetIndexes.sort((a, b) => a - b);
 
     setItems(prev => {
       const copy = [...prev];
-      const current = { ...copy[selectedRowIndex] };
-      const prevItem = copy[selectedRowIndex - 1];
+      targetIndexes.forEach(idx => {
+        if (idx <= 0) return;
+        const current = { ...copy[idx] };
+        const prevItem = copy[idx - 1];
+        if (!prevItem) return;
 
-      const childrenOfPrev = copy.filter(i => (i.item_eap || '').startsWith(prevItem.item_eap + '.'));
-      current.item_eap = `${prevItem.item_eap}.${childrenOfPrev.length + 1}`;
-      copy[selectedRowIndex] = current;
+        const childrenOfPrev = copy.filter(i => (i.item_eap || '').startsWith(prevItem.item_eap + '.'));
+        current.item_eap = `${prevItem.item_eap}.${childrenOfPrev.length + 1}`;
+        copy[idx] = current;
+      });
       return copy;
     });
   };
 
   const handleOutdentSelectedRow = () => {
-    if (selectedRowIndex === null) return;
+    const targetIndexes = Array.from(selectedRowIndexes);
+    if (targetIndexes.length === 0 && selectedRowIndex !== null) {
+      targetIndexes.push(selectedRowIndex);
+    }
+    if (targetIndexes.length === 0) return;
+
+    targetIndexes.sort((a, b) => a - b);
 
     setItems(prev => {
       const copy = [...prev];
-      const current = { ...copy[selectedRowIndex] };
-      const parts = current.item_eap.split('.');
-      if (parts.length <= 1) return prev;
+      targetIndexes.forEach(idx => {
+        const current = { ...copy[idx] };
+        const parts = (current.item_eap || '').split('.');
+        if (parts.length <= 1) return;
 
-      parts.pop();
-      const lastNum = parseInt(parts[parts.length - 1], 10);
-      if (!isNaN(lastNum)) {
-        parts[parts.length - 1] = String(lastNum + 1);
-      }
-      current.item_eap = parts.join('.');
-      copy[selectedRowIndex] = current;
+        parts.pop();
+        const lastNum = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastNum)) {
+          parts[parts.length - 1] = String(lastNum + 1);
+        }
+        current.item_eap = parts.join('.');
+        copy[idx] = current;
+      });
       return copy;
     });
   };
+
+  // --- ATALHOS DE TECLADO PARA NAVEGAÇÃO E RECUO DE LINHAS ---
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
+
+      if (items.length === 0) return;
+
+      const activeIdx = selectedRowIndex ?? 0;
+
+      // 1. Ctrl + Shift + Setas (Recuar / Promover Nível EAP)
+      if (e.ctrlKey && e.shiftKey) {
+        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          handleIndentSelectedRow();
+          return;
+        }
+        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
+          e.preventDefault();
+          handleOutdentSelectedRow();
+          return;
+        }
+      }
+
+      // 2. Ctrl + A (Selecionar Todos)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        const allIndices = new Set(items.map((_, i) => i));
+        setSelectedRowIndexes(allIndices);
+        return;
+      }
+
+      // 3. Escape (Desmarcar Seleções)
+      if (e.key === 'Escape') {
+        setSelectedRowIndexes(new Set());
+        setSelectedRowIndex(null);
+        return;
+      }
+
+      // 4. Seta Para Baixo
+      if (e.key === 'ArrowDown') {
+        e.preventDefault();
+        const nextIdx = Math.min(items.length - 1, activeIdx + 1);
+        if (e.shiftKey) {
+          const start = lastClickedRowIndex !== null ? lastClickedRowIndex : activeIdx;
+          const rangeStart = Math.min(start, nextIdx);
+          const rangeEnd = Math.max(start, nextIdx);
+          const range = new Set<number>();
+          for (let i = rangeStart; i <= rangeEnd; i++) range.add(i);
+          setSelectedRowIndexes(range);
+        } else {
+          setSelectedRowIndexes(new Set([nextIdx]));
+          setLastClickedRowIndex(nextIdx);
+        }
+        setSelectedRowIndex(nextIdx);
+        return;
+      }
+
+      // 5. Seta Para Cima
+      if (e.key === 'ArrowUp') {
+        e.preventDefault();
+        const prevIdx = Math.max(0, activeIdx - 1);
+        if (e.shiftKey) {
+          const start = lastClickedRowIndex !== null ? lastClickedRowIndex : activeIdx;
+          const rangeStart = Math.min(start, prevIdx);
+          const rangeEnd = Math.max(start, prevIdx);
+          const range = new Set<number>();
+          for (let i = rangeStart; i <= rangeEnd; i++) range.add(i);
+          setSelectedRowIndexes(range);
+        } else {
+          setSelectedRowIndexes(new Set([prevIdx]));
+          setLastClickedRowIndex(prevIdx);
+        }
+        setSelectedRowIndex(prevIdx);
+        return;
+      }
+
+      // 6. Enter: Editar a linha ou vincular
+      if (e.key === 'Enter' && selectedRowIndex !== null) {
+        e.preventDefault();
+        const item = items[selectedRowIndex];
+        if (item) {
+          if (item.tipo_vinculo === 'texto' || item.status_linha === 'inserido_empresa') {
+            setEditingCustomItem(item);
+            setCustomText(item.descricao || '');
+          } else {
+            setSelectedItemForLink(item);
+            setShowLinkDrawer(true);
+          }
+        }
+        return;
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedRowIndex, selectedRowIndexes, lastClickedRowIndex, items]);
 
   // --- INSERIR NOVA LINHA DA EMPRESA ---
   const handleInsertRowBelow = async (targetItem: ImportadoItem) => {
@@ -1530,8 +1675,17 @@ export default function OrcamentoDeParaStudio() {
         <div className="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 rounded-t-2xl z-30">
           {/* Título integrado */}
           <div className="text-left select-none">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700">Studio de De-Para (EAP e Tópicos)</h3>
-            <p className="text-[10px] text-slate-500 font-semibold">Vincule com botão único. Arraste a alça (⋮⋮) para reordenar.</p>
+            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
+              <span>Studio de De-Para (EAP e Tópicos)</span>
+              {selectedRowIndexes.size > 0 && (
+                <span className="px-2 py-0.5 bg-blue-600 text-white font-mono text-[10px] font-bold rounded-full animate-in fade-in">
+                  {selectedRowIndexes.size} {selectedRowIndexes.size === 1 ? 'linha selecionada' : 'linhas selecionadas'}
+                </span>
+              )}
+            </h3>
+            <p className="text-[10px] text-slate-500 font-semibold">
+              Atalhos de Teclado: Setas (Navegar) · Shift+Setas (Seleção em Bloco) · Ctrl+Shift+Setas (Recuar / Promover) · Enter (Editar)
+            </p>
           </div>
             
           {/* Ferramentas Superiores */}
@@ -1539,18 +1693,18 @@ export default function OrcamentoDeParaStudio() {
             <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
               <button
                 onClick={handleOutdentSelectedRow}
-                disabled={selectedRowIndex === null}
+                disabled={selectedRowIndex === null && selectedRowIndexes.size === 0}
                 className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Diminuir Nível EAP da Linha Selecionada"
+                title="Diminuir Nível EAP (Ctrl + Shift + Seta Esquerda)"
               >
                 <ArrowLeft className="w-3.5 h-3.5 text-purple-600" />
                 <span>Promover Nível (⬅)</span>
               </button>
               <button
                 onClick={handleIndentSelectedRow}
-                disabled={selectedRowIndex === null}
+                disabled={selectedRowIndex === null && selectedRowIndexes.size === 0}
                 className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Aumentar Nível EAP da Linha Selecionada"
+                title="Aumentar Nível EAP (Ctrl + Shift + Seta Direita)"
               >
                 <span>Recuar Nível (➔)</span>
                 <ArrowRight className="w-3.5 h-3.5 text-purple-600" />
@@ -1560,21 +1714,23 @@ export default function OrcamentoDeParaStudio() {
 
               <button
                 onClick={() => {
-                  if (selectedRowIndex !== null) {
-                    handleToggleInativar(items[selectedRowIndex]);
-                  }
+                  const targetIdxs = Array.from(selectedRowIndexes);
+                  if (targetIdxs.length === 0 && selectedRowIndex !== null) targetIdxs.push(selectedRowIndex);
+                  targetIdxs.forEach(idx => {
+                    if (items[idx]) handleToggleInativar(items[idx]);
+                  });
                 }}
-                disabled={selectedRowIndex === null}
+                disabled={selectedRowIndex === null && selectedRowIndexes.size === 0}
                 className={clsx(
                   "px-2 py-1 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all",
                   selectedRowIndex !== null && items[selectedRowIndex]?.status_linha === 'inativo'
                     ? "bg-emerald-50 hover:bg-emerald-100 text-emerald-700 border border-emerald-200"
                     : "bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200"
                 )}
-                title="Inativar ou Reativar Linha Selecionada"
+                title="Inativar ou Reativar Linha(s) Selecionada(s)"
               >
                 <Strikethrough className="w-3.5 h-3.5" />
-                <span>{selectedRowIndex !== null && items[selectedRowIndex]?.status_linha === 'inativo' ? 'Reativar Linha' : 'Inativar Linha'}</span>
+                <span>Inativar/Reativar</span>
               </button>
             </div>
 
@@ -1782,14 +1938,14 @@ export default function OrcamentoDeParaStudio() {
                 const isInactive = item.status_linha === 'inativo';
                 const isInsertedByEmpresa = item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente';
                 const isInsertedOrDesdobrado = isInsertedByEmpresa || item.status_linha === 'desdobrado';
-                const isSelected = selectedRowIndex === index;
+                const isSelected = selectedRowIndex === index || selectedRowIndexes.has(index);
 
                 // Estilização EAP conforme papel na árvore
                 let rowStyle = "hover:bg-slate-50/80 transition-colors cursor-pointer";
                 let borderLeft = "";
 
                 if (isSelected) {
-                  rowStyle = "bg-blue-50/90 ring-2 ring-blue-500/50 transition-colors";
+                  rowStyle = "bg-blue-100/90 ring-2 ring-blue-500/80 font-bold transition-colors shadow-2xs";
                 } else if (isInactive) {
                   rowStyle = "bg-slate-100/80 opacity-50 transition-colors";
                 } else if (item.status_linha === 'inserido_empresa_e_cliente') {
@@ -1812,7 +1968,7 @@ export default function OrcamentoDeParaStudio() {
                 return (
                   <tr
                     key={item.id}
-                    onClick={() => setSelectedRowIndex(index)}
+                    onClick={(e) => handleRowClick(index, e)}
                     className={clsx(rowStyle, borderLeft)}
                   >
                     <td className={clsx("p-2 font-mono font-bold text-slate-700 text-[11px]", clientBg)}>{item.item_eap}</td>
