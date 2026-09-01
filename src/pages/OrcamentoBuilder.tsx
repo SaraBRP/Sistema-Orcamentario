@@ -1443,7 +1443,7 @@ export default function OrcamentoBuilder() {
         (!item.composicao_id && !(item as any).parentCompositionId && !(item as any).isChildInsumoOfComposition && (origParts.length <= 1 || originalEap.endsWith('.0')))
       );
 
-      if ((item as any).level !== undefined && (item as any).level > 0) {
+      if ((item as any).level !== undefined && (item as any).level >= 0) {
         level = (item as any).level;
       } else if (isSecaoHeader) {
         level = 0;
@@ -1524,48 +1524,53 @@ export default function OrcamentoBuilder() {
 
     setItens(prev => {
       pushUndoSnapshot(prev);
-      let copy = [...prev];
+      let copy = prev.map(i => ({ ...i }));
       const topSelected = getTopLevelSelectedIndices(new Set(targets), copy);
 
       let altered = false;
       for (const index of topSelected) {
         if (index === 0) continue;
-        const current = { ...copy[index] };
-        const oldEap = (current.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-        if (!oldEap) continue;
+        const current = copy[index];
+        if (!current) continue;
+
+        const currentEap = (current.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+        const eapParts = currentEap.split('.').filter(Boolean);
+
+        const currentLevel = (current as any).level !== undefined 
+          ? (current as any).level 
+          : (eapParts.length > 0 ? (eapParts.length === 2 && eapParts[1] === '0' ? 0 : Math.max(0, eapParts.length - 1)) : 0);
 
         const prevItem = index > 0 ? copy[index - 1] : null;
         const prevEap = prevItem ? (prevItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim() : '';
-        const prevLevel = prevEap ? prevEap.split('.').filter(Boolean).length : 0;
-        const currentParts = oldEap.split('.').filter(Boolean);
-        const currentLevel = currentParts.length;
+        const prevLevel = prevItem ? ((prevItem as any).level !== undefined ? (prevItem as any).level : (prevEap ? Math.max(0, prevEap.split('.').filter(Boolean).length - 1) : 0)) : 0;
 
-        // Proteção: não permite recuar além de prevLevel + 1
-        if (currentLevel >= prevLevel + 1) {
-          continue;
-        }
+        if (currentLevel >= prevLevel + 1) continue;
 
-        // Recua exatamente +1 nível no código EAP
-        const newMotherEap = oldEap + '.1';
-        current.item_eap = newMotherEap;
-        copy[index] = current;
+        const newLevel = currentLevel + 1;
+        const actualDelta = 1;
+        (current as any).level = newLevel;
         altered = true;
 
-        // Atualiza todos os itens filhos reais da composição/seção
-        if (oldEap) {
-          const prefix = oldEap + '.';
-          for (let j = index + 1; j < copy.length; j++) {
-            const childItem = copy[j];
-            const childEap = (childItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-            if (childEap.startsWith(prefix)) {
-              const suffix = childEap.slice(oldEap.length);
-              copy[j] = {
-                ...copy[j],
-                item_eap: newMotherEap + suffix
-              };
-            } else {
-              break;
-            }
+        // Propaga o aumento de recuo (+1) para todas as filhas da sub-árvore
+        const targetLevel = currentLevel;
+        const targetId = current.id;
+        const prefix = currentEap ? currentEap + '.' : '';
+
+        for (let j = index + 1; j < copy.length; j++) {
+          const child = copy[j];
+          if (!child) break;
+          const childEap = (child.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+          const childLevel = (child as any).level !== undefined 
+            ? (child as any).level 
+            : (childEap.split('.').filter(Boolean).length > 0 ? Math.max(0, childEap.split('.').filter(Boolean).length - 1) : 1);
+
+          const isDirectInsumo = (child as any).isChildInsumoOfComposition && (child as any).parentCompositionId === targetId;
+          const isSubTreeChild = (prefix && childEap.startsWith(prefix)) || childLevel > targetLevel;
+
+          if (isDirectInsumo || isSubTreeChild) {
+            (child as any).level = childLevel + actualDelta;
+          } else {
+            break;
           }
         }
       }
@@ -1588,41 +1593,62 @@ export default function OrcamentoBuilder() {
 
     setItens(prev => {
       pushUndoSnapshot(prev);
-      let copy = [...prev];
+      let copy = prev.map(i => ({ ...i }));
       const topSelected = getTopLevelSelectedIndices(new Set(targets), copy);
 
       let altered = false;
       for (const index of topSelected) {
-        const current = { ...copy[index] };
-        const oldEap = (current.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-        if (!oldEap) continue;
+        const current = copy[index];
+        if (!current) continue;
 
-        const parts = oldEap.split('.').filter(Boolean);
-        if (parts.length <= 1 || (parts.length === 2 && parts[1] === '0')) {
-          continue; // Já está no nível de raiz (ex: "1" ou "1.0")
-        }
+        const currentEap = (current.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+        const eapParts = currentEap.split('.').filter(Boolean);
 
-        parts.pop();
-        const newMotherEap = parts.join('.');
-        current.item_eap = newMotherEap;
-        copy[index] = current;
-        altered = true;
+        const currentLevel = (current as any).level !== undefined 
+          ? (current as any).level 
+          : (eapParts.length > 0 ? (eapParts.length === 2 && eapParts[1] === '0' ? 0 : Math.max(0, eapParts.length - 1)) : 0);
 
-        // Atualiza todos os itens filhos da composição/seção em conjunto ao recuar para a esquerda
-        if (oldEap) {
-          const prefix = oldEap + '.';
-          for (let j = index + 1; j < copy.length; j++) {
-            const childItem = copy[j];
-            const childEap = (childItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-            if (childEap.startsWith(prefix)) {
-              const suffix = childEap.slice(oldEap.length);
-              copy[j] = {
-                ...copy[j],
-                item_eap: newMotherEap + suffix
-              };
-            } else {
+        if (currentLevel <= 0) continue; // Já está no nível de raiz (0)
+
+        // Proteção: Insumo filho de composição não pode ser desvinculado de sua composição mãe além do nível da mãe
+        if ((current as any).isChildInsumoOfComposition) {
+          let parentLevel = 0;
+          for (let i = index - 1; i >= 0; i--) {
+            if (copy[i].id === (current as any).parentCompositionId || (!(copy[i] as any).isChildInsumoOfComposition && ((copy[i] as any).level || 0) < currentLevel)) {
+              parentLevel = (copy[i] as any).level || 0;
               break;
             }
+          }
+          if (currentLevel - 1 <= parentLevel) {
+            continue;
+          }
+        }
+
+        const newLevel = currentLevel - 1;
+        const actualDelta = -1;
+        (current as any).level = newLevel;
+        altered = true;
+
+        // Propaga a diminuição de recuo (-1) para todas as filhas da sub-árvore
+        const targetLevel = currentLevel;
+        const targetId = current.id;
+        const prefix = currentEap ? currentEap + '.' : '';
+
+        for (let j = index + 1; j < copy.length; j++) {
+          const child = copy[j];
+          if (!child) break;
+          const childEap = (child.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+          const childLevel = (child as any).level !== undefined 
+            ? (child as any).level 
+            : (childEap.split('.').filter(Boolean).length > 0 ? Math.max(0, childEap.split('.').filter(Boolean).length - 1) : 1);
+
+          const isDirectInsumo = (child as any).isChildInsumoOfComposition && (child as any).parentCompositionId === targetId;
+          const isSubTreeChild = (prefix && childEap.startsWith(prefix)) || childLevel > targetLevel;
+
+          if (isDirectInsumo || isSubTreeChild) {
+            (child as any).level = Math.max(0, childLevel + actualDelta);
+          } else {
+            break;
           }
         }
       }
