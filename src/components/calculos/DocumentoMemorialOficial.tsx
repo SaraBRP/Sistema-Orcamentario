@@ -897,6 +897,10 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
 
       if (liveItem.formulasLista && liveItem.formulasLista.length > 0) {
         liveItem.formulasLista.forEach((f) => {
+          // Ignora abas sem resultado criadas em branco sem cálculos preenchidos
+          if ((f.resultado === 0 || !f.resultado) && (f.observacao === 'Cálculo de Engenharia' || f.observacao === 'Personalizar' || !f.equacaoLiteral || f.equacaoLiteral === 'Cálculo de Engenharia')) {
+            return;
+          }
           list.push({
             id: f.id,
             targetItemId: liveItem.id,
@@ -2880,7 +2884,25 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
         updatedTarget.observacaoMemoria = 'Esquadrias, Alvenarias & Acabamentos';
       }
 
-      if (!modoCalculoModal && savedCustomFormulas.length === 0) {
+      // Valida se houve de fato algum cálculo selecionado, fórmula personalizada criada ou parâmetros preenchidos
+      const hasRealFormula = Boolean(modoCalculoModal === 'formula' && (selectedFormula !== null || savedCustomFormulas.length > 0 || (customTextLiteral && customTextLiteral.trim() !== '')));
+      const hasRealSpecializedTable = Boolean(
+        (modoCalculoModal === 'tabela_vigas' && vigasListModal.length > 0) ||
+        (modoCalculoModal === 'tabela_sapatas' && sapatasListModal.length > 0) ||
+        (modoCalculoModal === 'tabela_estacas' && estacasListModal.length > 0) ||
+        (modoCalculoModal === 'tabela_blocos' && blocosListModal.length > 0) ||
+        (modoCalculoModal === 'tabela_tubuloes' && tubuloesListModal.length > 0) ||
+        (modoCalculoModal === 'tabela_premoldados' && premoldadosListModal.length > 0) ||
+        (modoCalculoModal === 'tabela_piso_concreto') ||
+        (modoCalculoModal === 'tabela_drenagem') ||
+        (modoCalculoModal === 'tabela_pits') ||
+        (modoCalculoModal === 'tabela_superestrutura') ||
+        (modoCalculoModal === 'tabela_esquadrias')
+      );
+      const hasLocalParams = Boolean(updatedTarget.parametrosLocais && updatedTarget.parametrosLocais.length > 0);
+      const isEditingExistingValidStep = Boolean(editingTabId && updatedTarget.formulasLista && updatedTarget.formulasLista.some(s => s.id === editingTabId && (s.resultado || 0) > 0));
+
+      if (!hasRealFormula && !hasRealSpecializedTable && !hasLocalParams && !isEditingExistingValidStep) {
         setEditingItemModal(null);
         return;
       }
