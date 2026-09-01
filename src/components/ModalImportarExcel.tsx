@@ -3,6 +3,7 @@ import * as XLSX from 'xlsx';
 import { X, Upload, FileSpreadsheet, Check, ArrowRight, AlertCircle, Eye, EyeOff, Layers } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { clsx } from 'clsx';
+import { ClienteSelect } from './ClienteSelect';
 
 type ModalImportarExcelProps = {
   isOpen: boolean;
@@ -506,13 +507,13 @@ export function ModalImportarExcel({ isOpen, onClose, onSuccess }: ModalImportar
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Cliente</label>
-                  <input 
-                    type="text" 
-                    value={cliente} 
-                    onChange={e => setCliente(e.target.value)}
-                    className="w-full px-3 py-1.5 bg-white border border-slate-200 rounded-lg text-xs outline-none focus:border-blue-500 font-medium"
-                    placeholder="Ex: Construtora BRP"
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Cliente</label>
+                  <ClienteSelect
+                    value={cliente}
+                    onSelectClient={(c) => {
+                      setCliente(c.nome_fantasia || c.razao_social);
+                    }}
+                    placeholder="Selecione ou busque o Cliente..."
                   />
                 </div>
 
