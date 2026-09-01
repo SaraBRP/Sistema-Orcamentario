@@ -2044,11 +2044,20 @@ export default function OrcamentoDeParaStudio() {
                       onDragStart={e => handleRightDragStart(e, index)}
                       onDragOver={e => handleRightDragOver(e)}
                       onDrop={e => handleRightDrop(e, index)}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation();
+                        if (!linkedRef) {
+                          setEditingCustomItem(item);
+                          setCustomText(item.descricao || '');
+                        }
+                      }}
                       className={clsx(
                         "p-2 border-l border-slate-200 text-[11px] transition-all",
+                        !linkedRef && "cursor-pointer hover:bg-purple-50/50",
                         companyBg ? companyBg : "bg-slate-50/40",
                         draggedRightIndex === index ? "opacity-30 border-2 border-dashed border-blue-500 bg-blue-100" : "hover:bg-blue-50/60"
                       )}
+                      title={!linkedRef ? "Clique duas vezes para escrever/editar o texto da Referência Empresa" : "Item vinculado ao banco de dados (descrição não editável)"}
                     >
                       <div className={clsx("flex items-center gap-1.5", isInactive && "line-through text-slate-400 opacity-60")} style={{ paddingLeft: `${(level - 1) * 18}px` }}>
                         {/* Alça de Arraste Exclusiva do Lado Direito */}
