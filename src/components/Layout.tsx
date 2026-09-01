@@ -119,6 +119,8 @@ export default function Layout() {
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && parsed.email) {
+          const emailLower = parsed.email.toLowerCase();
+          const savedAvatar = localStorage.getItem(`orcabrp_avatar_${emailLower}`) || parsed.avatarUrl || '';
           const isAdmin = isSystemAdminEmail(parsed.email);
           const funcao = isAdmin 
             ? 'Administrador' 
@@ -127,6 +129,7 @@ export default function Layout() {
           return {
             ...parsed,
             funcao,
+            avatarUrl: savedAvatar,
             permitted_screens
           };
         }
@@ -134,6 +137,8 @@ export default function Layout() {
     } catch {}
 
     const currentUserEmail = user?.email || 'sara.alves@brpmetalica.com';
+    const emailLower = currentUserEmail.toLowerCase();
+    const savedAvatar = localStorage.getItem(`orcabrp_avatar_${emailLower}`) || '';
     const isAdmin = isSystemAdminEmail(currentUserEmail);
     const funcao = isAdmin ? 'Administrador' : 'Orçamentista';
     const permitted_screens = getUserSavedPermissions(currentUserEmail, funcao);
@@ -141,7 +146,7 @@ export default function Layout() {
       nome: isAdmin ? 'Sara' : currentUserEmail.split('@')[0],
       email: currentUserEmail,
       funcao,
-      avatarUrl: '',
+      avatarUrl: savedAvatar,
       permitted_screens
     };
   });
@@ -163,6 +168,7 @@ export default function Layout() {
       if (!activeEmail) return;
 
       const emailLower = activeEmail.toLowerCase();
+      const savedAvatar = localStorage.getItem(`orcabrp_avatar_${emailLower}`) || userProfile.avatarUrl || '';
       const isAdminEmail = isSystemAdminEmail(emailLower);
 
       let nome = emailLower.split('@')[0];
@@ -205,14 +211,17 @@ export default function Layout() {
         nome: isAdminEmail ? 'Sara' : nome,
         email: activeEmail,
         funcao: finalFuncao,
-        avatarUrl: userProfile.avatarUrl || '',
+        avatarUrl: savedAvatar,
         permitted_screens
       };
 
-      if (userProfile.email !== activeEmail || userProfile.funcao !== finalFuncao || userProfile.nome !== newProfile.nome || !userProfile.permitted_screens) {
+      if (userProfile.email !== activeEmail || userProfile.funcao !== finalFuncao || userProfile.nome !== newProfile.nome || userProfile.avatarUrl !== savedAvatar || !userProfile.permitted_screens) {
         setUserProfile(newProfile);
         try {
           localStorage.setItem('orcabrp_user_profile', JSON.stringify(newProfile));
+          if (emailLower && savedAvatar) {
+            localStorage.setItem(`orcabrp_avatar_${emailLower}`, savedAvatar);
+          }
         } catch {}
       }
     };
@@ -249,8 +258,16 @@ export default function Layout() {
 
   const handleSaveProfile = (updated: UserProfileData) => {
     setUserProfile(updated);
+    const emailLower = (updated.email || '').toLowerCase();
     try {
       localStorage.setItem('orcabrp_user_profile', JSON.stringify(updated));
+      if (emailLower) {
+        if (updated.avatarUrl) {
+          localStorage.setItem(`orcabrp_avatar_${emailLower}`, updated.avatarUrl);
+        } else {
+          localStorage.removeItem(`orcabrp_avatar_${emailLower}`);
+        }
+      }
     } catch {}
   };
 

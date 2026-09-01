@@ -113,12 +113,14 @@ export default function Login() {
 
       const funcaoFinal = isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
       const permittedScreens = getUserSavedPermissions(emailTrim, funcaoFinal);
+      const emailLower = emailTrim.toLowerCase();
+      const savedAvatar = localStorage.getItem(`orcabrp_avatar_${emailLower}`) || '';
 
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
         nome: isAdmin ? 'Sara' : nome,
         email: emailTrim,
         funcao: funcaoFinal,
-        avatarUrl: '',
+        avatarUrl: savedAvatar,
         permitted_screens: permittedScreens
       }));
 
@@ -134,12 +136,14 @@ export default function Login() {
 
       const funcaoFinal = isAdmin || cargo.toLowerCase() === 'administrador' ? 'Administrador' : (cargo === 'Gestor' || cargo === 'gestor' ? 'Gestor' : 'Orçamentista');
       const permittedScreens = getUserSavedPermissions(emailTrim, funcaoFinal);
+      const emailLower = emailTrim.toLowerCase();
+      const savedAvatar = localStorage.getItem(`orcabrp_avatar_${emailLower}`) || '';
 
       localStorage.setItem('orcabrp_user_profile', JSON.stringify({
         nome: isAdmin ? 'Sara' : nome,
         email: emailTrim,
         funcao: funcaoFinal,
-        avatarUrl: '',
+        avatarUrl: savedAvatar,
         permitted_screens: permittedScreens
       }));
 
