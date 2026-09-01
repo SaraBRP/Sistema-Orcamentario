@@ -1088,13 +1088,22 @@ export default function OrcamentoBuilder() {
     setItens(prev => {
       const copy = [...prev];
       const newRow = createBlankRow(id!, copy.length + 1);
-      if (copy[index] && copy[index].item_eap) {
-        newRow.item_eap = copy[index].item_eap;
-      } else if (index > 0 && copy[index - 1] && copy[index - 1].item_eap) {
-        newRow.item_eap = copy[index - 1].item_eap;
+      const refRow = copy[index] || (index > 0 ? copy[index - 1] : null);
+
+      if (refRow) {
+        newRow.item_eap = refRow.item_eap || '1';
+        if ((refRow as any).level !== undefined) {
+          (newRow as any).level = (refRow as any).level;
+        }
+        if ((refRow as any).isChildInsumoOfComposition || (refRow as any).parentCompositionId) {
+          (newRow as any).isChildInsumoOfComposition = (refRow as any).isChildInsumoOfComposition;
+          (newRow as any).parentCompositionId = (refRow as any).parentCompositionId;
+          (newRow as any).composicao_id = (refRow as any).composicao_id;
+        }
       } else {
         newRow.item_eap = '1';
       }
+
       copy.splice(index, 0, newRow);
       return rebuildEapCodes(copy);
     });

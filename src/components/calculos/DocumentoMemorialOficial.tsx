@@ -1752,7 +1752,22 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   const handleAddSecaoTexto = (overrideIndex?: number) => {
     pushUndoSnapshot(itens);
     const targetIndex = overrideIndex !== undefined ? overrideIndex : (selectedRowIndex !== null ? selectedRowIndex : itens.length);
-    const parentLevel = targetIndex < itens.length ? (itens[targetIndex]?.level !== undefined ? itens[targetIndex].level : 0) : 0;
+    
+    const targetRow = targetIndex < itens.length ? itens[targetIndex] : null;
+    const prevRow = targetIndex > 0 ? itens[targetIndex - 1] : null;
+    const refRow = targetRow || prevRow;
+
+    let parentLevel = 0;
+    let isChild = false;
+    let parentCompId: string | undefined = undefined;
+
+    if (refRow) {
+      parentLevel = refRow.level !== undefined ? refRow.level : 0;
+      if (refRow.isChildInsumoOfComposition || refRow.parentCompositionId) {
+        isChild = true;
+        parentCompId = refRow.parentCompositionId;
+      }
+    }
 
     const novoItem: ItemMemoriaOficial = {
       id: generateUUID(),
@@ -1760,9 +1775,11 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       descricao: '',
       unidade: '',
       quantidade: 0,
-      isSecao: true,
+      isSecao: !isChild,
       level: parentLevel,
       collapsed: false,
+      isChildInsumoOfComposition: isChild,
+      parentCompositionId: parentCompId,
       parametrosLocais: [],
       equacaoLiteral: '',
       substituicaoNumerica: '',
@@ -1783,8 +1800,29 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       ? selectedRowIndex
       : itens.length;
     
-    // Toda nova linha inserida inicia sempre no Primeiro Nível (Level 0)
-    const baseLevel = 0;
+    // Herança inteligente do Nível e Pai da posição de inserção
+    let baseLevel = 0;
+    let isChild = false;
+    let parentCompId: string | undefined = undefined;
+
+    const targetRow = targetIndex < itens.length ? itens[targetIndex] : null;
+    const prevRow = targetIndex > 0 ? itens[targetIndex - 1] : null;
+    const refRow = targetRow || prevRow;
+
+    if (refRow) {
+      if (refRow.level !== undefined && refRow.level > 0) {
+        baseLevel = refRow.level;
+      }
+      if (refRow.isChildInsumoOfComposition || refRow.parentCompositionId) {
+        isChild = true;
+        parentCompId = refRow.parentCompositionId;
+      } else if (!refRow.isSecao && refRow.level === 1 && targetRow === null) {
+        // Se a linha de referência anterior for uma Composição e inserimos ao final dela
+        baseLevel = 2;
+        isChild = true;
+        parentCompId = refRow.id;
+      }
+    }
 
     const itemMae: ItemMemoriaOficial = {
       id: generateUUID(),
@@ -1795,6 +1833,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       isSecao: false,
       level: baseLevel,
       collapsed: false,
+      isChildInsumoOfComposition: isChild,
+      parentCompositionId: parentCompId,
       equacaoLiteral: '',
       substituicaoNumerica: '',
       observacaoMemoria: ''
