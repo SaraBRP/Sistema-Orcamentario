@@ -47,6 +47,7 @@ export default function CalculosQuantitativosPage() {
   const [targetMemorialForOrcamento, setTargetMemorialForOrcamento] = useState<MemorialCalculoRecord | null>(null);
   const [newOrcamentoData, setNewOrcamentoData] = useState({
     codigo: '',
+    empresa: 'BRP Soluções Metálicas',
     projeto: '',
     cliente: '',
     gestor_cliente: '',
@@ -289,6 +290,7 @@ export default function CalculosQuantitativosPage() {
     const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';
     setNewOrcamentoData({
       codigo: nextCode,
+      empresa: 'BRP Soluções Metálicas',
       projeto: '',
       cliente: '',
       gestor_cliente: '',
@@ -315,6 +317,7 @@ export default function CalculosQuantitativosPage() {
     setTargetMemorialForOrcamento(mem);
     setNewOrcamentoData({
       codigo: nextCode,
+      empresa: 'BRP Soluções Metálicas',
       projeto: mem.nomeProjeto || mem.header?.nomeProjeto || '',
       cliente: mem.cliente || mem.header?.cliente || '',
       gestor_cliente: mem.gestorCliente || mem.header?.gestorCliente || '',
@@ -526,26 +529,41 @@ export default function CalculosQuantitativosPage() {
     if (parts.length >= 3) revisao = parts[2].split('-')[0] || '0';
 
     try {
-      const { data: newOrcData } = await supabase
+      const payload: any = {
+        codigo: codigoOrcamentoGerado,
+        nome: nomeOrcamento,
+        descricao: `Gerado a partir do Memorial de Cálculo ${codigoOrcamentoGerado}`,
+        empresa: formData.empresa || 'BRP Soluções Metálicas',
+        cliente: formData.cliente || '',
+        projeto: formData.projeto || '',
+        gestor_cliente: formData.gestor_cliente || '',
+        responsavel: formData.responsavel || '',
+        local_obra: localObra,
+        cidade: cid,
+        estado: est,
+        revisao,
+        status: 'Em Elaboração',
+        dados_complementares: mem.header?.dadosComplementares || []
+      };
+
+      let { data: newOrcData, error: insertErr } = await supabase
         .schema('engenharia')
         .from('orcamentos')
-        .insert({
-          codigo: codigoOrcamentoGerado,
-          nome: nomeOrcamento,
-          descricao: `Gerado a partir do Memorial de Cálculo ${codigoOrcamentoGerado}`,
-          cliente: formData.cliente || '',
-          projeto: formData.projeto || '',
-          gestor_cliente: formData.gestor_cliente || '',
-          responsavel: formData.responsavel || '',
-          local_obra: localObra,
-          cidade: cid,
-          estado: est,
-          revisao,
-          status: 'Em Elaboração',
-          dados_complementares: mem.header?.dadosComplementares || []
-        })
+        .insert(payload)
         .select('id')
         .single();
+
+      if (insertErr && (insertErr.message?.includes('empresa') || (insertErr as any).code === 'PGRST204')) {
+        delete payload.empresa;
+        const retryRes = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .insert(payload)
+          .select('id')
+          .single();
+        newOrcData = retryRes.data;
+      }
+
       if (newOrcData?.id) targetOrcId = newOrcData.id;
     } catch (err) { console.error(err); }
 
@@ -776,12 +794,19 @@ export default function CalculosQuantitativosPage() {
                 <input type="text" required value={newOrcamentoData.codigo} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, codigo: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono font-bold text-blue-600 outline-none focus:border-blue-500 bg-slate-50" />
               </div>
               <div>
+                <label className="block font-bold text-slate-700 mb-1">Empresa Responsável</label>
+                <select value={newOrcamentoData.empresa} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, empresa: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white cursor-pointer">
+                  <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
+                  <option value="BRP Engenharia">BRP Engenharia</option>
+                </select>
+              </div>
+              <div>
                 <label className="block font-bold text-slate-700 mb-1">Nome do Projeto / Obra</label>
                 <input type="text" required value={newOrcamentoData.projeto} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, projeto: e.target.value})} placeholder="Ex: Construção de Galpão Industrial" className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white" />
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Cliente</label>
-                <input type="text" value={newOrcamentoData.cliente} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cliente: e.target.value})} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white" />
+                <input type="text" value={newOrcamentoData.cliente} onChange={(e) => setNewOrcamentoData({...newOrcamentoData, cliente: e.target.value})} placeholder="Selecione ou digite o Cliente..." className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white" />
               </div>
               <div>
                 <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>

@@ -178,6 +178,7 @@ export default function Orcamentos() {
 
   const [newOrcamentoData, setNewOrcamentoData] = useState({
     codigo: '',
+    empresa: 'BRP Soluções Metálicas',
     descricao: '',
     cliente: '',
     projeto: '',
@@ -379,6 +380,7 @@ export default function Orcamentos() {
       const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';
       setNewOrcamentoData({
         codigo: suggestedCode,
+        empresa: 'BRP Soluções Metálicas',
         descricao: '',
         cliente: '',
         projeto: '',
@@ -424,27 +426,44 @@ export default function Orcamentos() {
       const cidadeFormatada = formatCidadeUpperNoAccents(newOrcamentoData.cidade).trim();
       const localObra = [cidadeFormatada, newOrcamentoData.estado].filter(Boolean).join(' - ');
 
-      const { data, error } = await supabase
+      const payload: any = {
+        codigo: newOrcamentoData.codigo,
+        nome: newOrcamentoData.projeto,
+        descricao: newOrcamentoData.descricao,
+        empresa: newOrcamentoData.empresa || 'BRP Soluções Metálicas',
+        cliente: newOrcamentoData.cliente,
+        projeto: newOrcamentoData.projeto,
+        gestor_cliente: newOrcamentoData.gestor_cliente,
+        local_obra: localObra,
+        revisao,
+        status: 'Em Elaboração'
+      };
+
+      let { data, error } = await supabase
         .schema('engenharia')
         .from('orcamentos')
-        .insert({
-          codigo: newOrcamentoData.codigo,
-          nome: newOrcamentoData.projeto,
-          descricao: newOrcamentoData.descricao,
-          cliente: newOrcamentoData.cliente,
-          projeto: newOrcamentoData.projeto,
-          gestor_cliente: newOrcamentoData.gestor_cliente,
-          local_obra: localObra,
-          revisao,
-          status: 'Em Elaboração'
-        })
+        .insert(payload)
         .select('id')
         .single();
+
+      if (error && (error.message?.includes('empresa') || (error as any).code === 'PGRST204')) {
+        delete payload.empresa;
+        const retryRes = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .insert(payload)
+          .select('id')
+          .single();
+        data = retryRes.data;
+        error = retryRes.error;
+      }
 
       if (error) throw error;
 
       setIsCreateModalOpen(false);
-      navigate(`/orcamentos/${data.id}`);
+      if (data?.id) {
+        navigate(`/orcamentos/${data.id}`);
+      }
     } catch (err: any) {
       console.error(err);
       alert('Erro ao criar orçamento: ' + (err.message || err));
@@ -1154,6 +1173,18 @@ export default function Orcamentos() {
               </div>
 
               <div>
+                <label className="block font-bold text-slate-700 mb-1">Empresa Responsável</label>
+                <select 
+                  value={newOrcamentoData.empresa}
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, empresa: e.target.value})}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white cursor-pointer"
+                >
+                  <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
+                  <option value="BRP Engenharia">BRP Engenharia</option>
+                </select>
+              </div>
+
+              <div>
                 <label className="block font-bold text-slate-700 mb-1">Nome do Projeto / Obra</label>
                 <input 
                   type="text"
@@ -1166,7 +1197,7 @@ export default function Orcamentos() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Cliente / Empresa</label>
+                <label className="block font-bold text-slate-700 mb-1">Cliente</label>
                 <div className="relative">
                   <input 
                     type="text"
@@ -1190,7 +1221,7 @@ export default function Orcamentos() {
                         setNewOrcamentoData({...newOrcamentoData, cliente: val});
                       }
                     }}
-                    placeholder="Selecione ou digite a Empresa/Cliente..."
+                    placeholder="Selecione ou digite o Cliente..."
                     className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white placeholder:text-slate-400 bg-white"
                   />
                   <datalist id="clientes-registrados-list">
