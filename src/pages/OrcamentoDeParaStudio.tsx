@@ -1064,14 +1064,31 @@ export default function OrcamentoDeParaStudio() {
       };
 
       // 1. Apaga sub-itens desdobrados antigos desta EAP no banco de dados para evitar duplicações ao revincular
+      const parentIdx = items.findIndex(i => i.id === selectedItemForLink.id);
       const subEapPattern = `${selectedItemForLink.item_eap}.`;
-      await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .delete()
-        .eq('orcamento_importado_id', importId)
-        .eq('status_linha', 'desdobrado')
-        .like('item_eap', `${subEapPattern}%`);
+      const oldChildIdsToDelete = new Set<string>();
+
+      items.forEach(i => {
+        if (i.status_linha === 'desdobrado' && (i.item_eap || '').startsWith(subEapPattern)) {
+          oldChildIdsToDelete.add(i.id);
+        }
+      });
+
+      if (parentIdx !== -1) {
+        let k = parentIdx + 1;
+        while (k < items.length && items[k].status_linha === 'desdobrado') {
+          oldChildIdsToDelete.add(items[k].id);
+          k++;
+        }
+      }
+
+      if (oldChildIdsToDelete.size > 0) {
+        await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .delete()
+          .in('id', Array.from(oldChildIdsToDelete));
+      }
 
       await supabase
         .schema('engenharia')
@@ -1178,16 +1195,16 @@ export default function OrcamentoDeParaStudio() {
 
       setItems(prev => {
         // Primeiro remove os sub-itens desdobrados antigos para evitar duplicidade
-        const cleaned = prev.filter(i => !(i.item_eap.startsWith(subEapPattern) && i.status_linha === 'desdobrado'));
+        const cleaned = prev.filter(i => !oldChildIdsToDelete.has(i.id));
         const copy = [...cleaned];
-        const parentIdx = copy.findIndex(i => i.id === selectedItemForLink.id);
-        if (parentIdx === -1) return prev;
+        const pIdx = copy.findIndex(i => i.id === selectedItemForLink.id);
+        if (pIdx === -1) return prev;
 
-        const oldStatus = copy[parentIdx].status_linha;
+        const oldStatus = copy[pIdx].status_linha;
         const finalStatus = (oldStatus === 'inserido_empresa' || oldStatus === 'inserido_empresa_e_cliente') ? oldStatus : 'ativo';
 
-        copy[parentIdx] = {
-          ...copy[parentIdx],
+        copy[pIdx] = {
+          ...copy[pIdx],
           ...payload,
           status_linha: finalStatus,
           composicao: isComp ? selected : undefined,
@@ -1195,7 +1212,7 @@ export default function OrcamentoDeParaStudio() {
         };
 
         if (childRows.length > 0) {
-          copy.splice(parentIdx + 1, 0, ...childRows);
+          copy.splice(pIdx + 1, 0, ...childRows);
         }
 
         return rebuildStudioEaps(copy);
@@ -1214,7 +1231,25 @@ export default function OrcamentoDeParaStudio() {
   const handleUnlinkItem = async (targetItem: ImportadoItem) => {
     if (!window.confirm("Deseja desvincular este item? Todos os insumos desdobrados serão removidos.")) return;
 
+    const parentIdx = items.findIndex(i => i.id === targetItem.id);
     const subEapPattern = `${targetItem.item_eap}.`;
+    const childIdsToDelete = new Set<string>();
+
+    // 1. Identifica filhos desdobrados pelo padrão de sub-EAP (ex: 2.1.36.1)
+    items.forEach(i => {
+      if (i.status_linha === 'desdobrado' && (i.item_eap || '').startsWith(subEapPattern)) {
+        childIdsToDelete.add(i.id);
+      }
+    });
+
+    // 2. Identifica filhos desdobrados contíguos inseridos logo abaixo do pai (ex: 2.1.37, 2.1.38...)
+    if (parentIdx !== -1) {
+      let k = parentIdx + 1;
+      while (k < items.length && items[k].status_linha === 'desdobrado') {
+        childIdsToDelete.add(items[k].id);
+        k++;
+      }
+    }
 
     try {
       const payload = {
@@ -1232,32 +1267,33 @@ export default function OrcamentoDeParaStudio() {
         .eq('id', targetItem.id);
 
       // Deleta sub-itens desdobrados do banco
-      await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .delete()
-        .eq('orcamento_importado_id', importId)
-        .eq('status_linha', 'desdobrado')
-        .like('item_eap', `${subEapPattern}%`);
+      if (childIdsToDelete.size > 0) {
+        await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .delete()
+          .in('id', Array.from(childIdsToDelete));
+      }
 
       setItems(prev => {
         // Remove sub-itens desdobrados e restaura dados do pai na memória local
-        const cleaned = prev.filter(i => !(i.item_eap.startsWith(subEapPattern) && i.status_linha === 'desdobrado'));
+        const cleaned = prev.filter(i => !childIdsToDelete.has(i.id));
         const copy = [...cleaned];
-        const parentIdx = copy.findIndex(i => i.id === targetItem.id);
-        if (parentIdx !== -1) {
-          copy[parentIdx] = {
-            ...copy[parentIdx],
+        const pIdx = copy.findIndex(i => i.id === targetItem.id);
+        if (pIdx !== -1) {
+          copy[pIdx] = {
+            ...copy[pIdx],
             composicao_id: undefined,
             insumo_id: undefined,
             tipo_vinculo: undefined,
             valor_unitario_empresa: 0,
             total_empresa: 0,
             composicao: undefined,
-            insumo: undefined
+            insumo: undefined,
+            texto_empresa: null
           };
         }
-        return copy;
+        return rebuildStudioEaps(copy);
       });
 
       updateImportStatus();
