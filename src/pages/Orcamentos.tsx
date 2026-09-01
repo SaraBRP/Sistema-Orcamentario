@@ -127,6 +127,27 @@ const ESTADOS_BRASIL_LIST = [
   'RS', 'RO', 'RR', 'SC', 'SP', 'SE', 'TO'
 ];
 
+export const renderEmpresaBadge = (empresaName?: string) => {
+  const emp = (empresaName || 'BRP Soluções Metálicas').trim();
+  const isEngenharia = emp.toLowerCase().includes('engenharia');
+
+  if (isEngenharia) {
+    return (
+      <span className="px-2.5 py-1 bg-blue-50 text-blue-800 border border-blue-200 rounded-md font-bold text-[10.5px] inline-flex items-center gap-1 shadow-2xs whitespace-nowrap">
+        <span>🏗️</span>
+        <span>BRP Engenharia</span>
+      </span>
+    );
+  }
+
+  return (
+    <span className="px-2.5 py-1 bg-amber-50 text-amber-900 border border-amber-300 rounded-md font-bold text-[10.5px] inline-flex items-center gap-1 shadow-2xs whitespace-nowrap">
+      <span>🏭</span>
+      <span>BRP Soluções Metálicas</span>
+    </span>
+  );
+};
+
 export default function Orcamentos() {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -160,6 +181,7 @@ export default function Orcamentos() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedStatus, setSelectedStatus] = useState<string>('todos');
+  const [selectedEmpresa, setSelectedEmpresa] = useState<string>('todas');
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
 
   // Modais
@@ -864,16 +886,27 @@ export default function Orcamentos() {
         o.nome?.toLowerCase().includes(searchTerm.toLowerCase()) || 
         o.codigo?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         o.cliente?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        o.empresa?.toLowerCase().includes(searchTerm.toLowerCase()) ||
         o.projeto?.toLowerCase().includes(searchTerm.toLowerCase());
 
       if (!matchesSearch) return false;
+
+      if (selectedEmpresa !== 'todas') {
+        const emp = (o.empresa || 'BRP Soluções Metálicas').trim().toLowerCase();
+        if (selectedEmpresa === 'BRP Soluções Metálicas' && !emp.includes('metálica') && !emp.includes('soluções') && !emp.includes('metalica')) {
+          return false;
+        }
+        if (selectedEmpresa === 'BRP Engenharia' && !emp.includes('engenharia')) {
+          return false;
+        }
+      }
 
       if (selectedStatus === 'todos') return true;
 
       const effStatus = getOrcamentoEffectiveStatus(o);
       return effStatus === selectedStatus;
     });
-  }, [orcamentos, searchTerm, selectedStatus]);
+  }, [orcamentos, searchTerm, selectedStatus, selectedEmpresa]);
 
   const parseCodeRevisionAndBase = (codigo: string) => {
     if (!codigo) return { base: '', revisao: 0, year: '' };
@@ -1000,27 +1033,45 @@ export default function Orcamentos() {
           {/* Campo de Busca & Filtro de Status */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 w-full sm:w-auto">
             {activeTab === 'empresa' && (
-              <div className="relative shrink-0">
-                <Filter className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="w-full sm:w-auto pl-8 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500 font-semibold text-slate-700 appearance-none cursor-pointer hover:bg-slate-100/70 transition-colors"
-                >
-                  <option value="todos">Todos os Status</option>
-                  <option value="Em andamento">Em andamento</option>
-                  <option value="Ag. Validação">Ag. Validação</option>
-                  <option value="Recusado pelo Gestor">Recusado pelo Gestor</option>
-                  <option value="Com Pendências">Com Pendências</option>
-                  <option value="Aprovado e Ag. Envio">Aprovado e Ag. Envio</option>
-                  <option value="Ag. Retorno">Ag. Retorno</option>
-                  <option value="Consolidada">Consolidada</option>
-                  <option value="Encerrada">Encerrada</option>
-                  <option value="Perdido">Perdido</option>
-                  <option value="Cancelada">Cancelada</option>
-                </select>
-                <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              </div>
+              <>
+                {/* Filtro por Empresa Responsável */}
+                <div className="relative shrink-0">
+                  <Filter className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    value={selectedEmpresa}
+                    onChange={(e) => setSelectedEmpresa(e.target.value)}
+                    className="w-full sm:w-auto pl-8 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500 font-semibold text-slate-700 appearance-none cursor-pointer hover:bg-slate-100/70 transition-colors"
+                  >
+                    <option value="todas">Todas as Empresas</option>
+                    <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
+                    <option value="BRP Engenharia">BRP Engenharia</option>
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+
+                {/* Filtro por Status */}
+                <div className="relative shrink-0">
+                  <Filter className="w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <select
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
+                    className="w-full sm:w-auto pl-8 pr-8 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs outline-none focus:border-blue-500 font-semibold text-slate-700 appearance-none cursor-pointer hover:bg-slate-100/70 transition-colors"
+                  >
+                    <option value="todos">Todos os Status</option>
+                    <option value="Em andamento">Em andamento</option>
+                    <option value="Ag. Validação">Ag. Validação</option>
+                    <option value="Recusado pelo Gestor">Recusado pelo Gestor</option>
+                    <option value="Com Pendências">Com Pendências</option>
+                    <option value="Aprovado e Ag. Envio">Aprovado e Ag. Envio</option>
+                    <option value="Ag. Retorno">Ag. Retorno</option>
+                    <option value="Consolidada">Consolidada</option>
+                    <option value="Encerrada">Encerrada</option>
+                    <option value="Perdido">Perdido</option>
+                    <option value="Cancelada">Cancelada</option>
+                  </select>
+                  <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                </div>
+              </>
             )}
 
             {/* Campo de Busca */}
@@ -1050,6 +1101,7 @@ export default function Orcamentos() {
                   <thead>
                     <tr className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
                       <th className="py-3 px-4 w-36">Código / Rev</th>
+                      <th className="py-3 px-4">Empresa</th>
                       <th className="py-3 px-4">Nome do Orçamento / Projeto</th>
                       <th className="py-3 px-4">Cliente / Gestor</th>
                       <th className="py-3 px-4 w-32">Status</th>
@@ -1097,6 +1149,9 @@ export default function Orcamentos() {
                                   </div>
                                 </div>
                               </div>
+                            </td>
+                            <td className="py-3.5 px-4">
+                              {renderEmpresaBadge(parent.empresa)}
                             </td>
                             <td className="py-3.5 px-4">
                               <div className="font-bold text-slate-800 group-hover:text-blue-600 transition-colors text-sm">
@@ -1162,6 +1217,9 @@ export default function Orcamentos() {
                                   <div className="text-[8.5px] text-slate-400 font-medium mt-0.5 uppercase">
                                     REVISÃO: {String(child.revisao || '0').padStart(2, '0')}
                                   </div>
+                                </td>
+                                <td className="py-1.5 px-4">
+                                  {renderEmpresaBadge(child.empresa)}
                                 </td>
                                 <td className="py-1.5 px-4">
                                   <div className="font-medium text-slate-600 text-xs">
