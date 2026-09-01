@@ -872,10 +872,21 @@ export default function OrcamentoBuilder() {
     }
 
     setActiveCell(prev => {
-      const currentRow = prev ? prev.rowIndex : 0;
-      const currentCol = prev ? prev.colIndex : 0;
+      let currentRow = prev ? prev.rowIndex : 0;
+      let currentCol = prev ? prev.colIndex : 0;
 
       let nextRow = currentRow;
+      let nextCol = currentCol + deltaCol;
+
+      // Suporte para navegação contínua entre linhas nas extremidades das colunas (0 a 9)
+      if (nextCol > 9) {
+        nextCol = 0;
+        deltaRow = 1;
+      } else if (nextCol < 0) {
+        nextCol = 9;
+        deltaRow = -1;
+      }
+
       if (deltaRow !== 0) {
         const step = deltaRow > 0 ? 1 : -1;
         let checkRow = currentRow + step;
@@ -889,7 +900,6 @@ export default function OrcamentoBuilder() {
         }
       }
 
-      const nextCol = Math.max(0, Math.min(9, currentCol + deltaCol));
       setSelectedRowIndex(nextRow);
       setSelectedRowIndices(new Set([nextRow]));
       return { rowIndex: nextRow, colIndex: nextCol };
@@ -954,6 +964,9 @@ export default function OrcamentoBuilder() {
     } else if (e.key === 'ArrowRight') {
       e.preventDefault();
       navigateCell(0, 1);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      navigateCell(0, e.shiftKey ? -1 : 1);
     } else if (e.key === 'Enter') {
       e.preventDefault();
       if (editable) {
@@ -992,6 +1005,10 @@ export default function OrcamentoBuilder() {
       e.preventDefault();
       setIsEditingCell(false);
       navigateCell(1, 0);
+    } else if (e.key === 'Tab') {
+      e.preventDefault();
+      setIsEditingCell(false);
+      navigateCell(0, e.shiftKey ? -1 : 1);
     } else if (e.key === 'ArrowUp') {
       e.preventDefault();
       setIsEditingCell(false);
