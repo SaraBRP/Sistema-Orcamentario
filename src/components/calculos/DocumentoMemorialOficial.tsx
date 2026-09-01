@@ -3762,8 +3762,9 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       </div>
 
       {/* TABELA LEVE E ELEGANTE DE MEMÓRIA DE CÁLCULO COM EAP HIERÁRQUICA */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs overflow-hidden">
-        <div className="p-4 bg-slate-50 border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-xs">
+        {/* BARRA DE TÍTULO E BOTÕES CONGELADA NO TOPO (STICKY) */}
+        <div className="p-3 sm:p-4 bg-slate-50/95 backdrop-blur-md border-b border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 sticky top-0 z-30 shadow-2xs rounded-t-2xl">
           <div>
             <h3 className="font-bold text-sm text-slate-800 flex items-center gap-2">
               Detalhamento da Memória de Cálculo & Serviços
@@ -3863,15 +3864,15 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
 
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse font-sans text-xs">
-            <thead>
-              <tr className="bg-slate-100/70 border-b border-slate-200 font-semibold text-slate-600 uppercase text-[10px] tracking-wider">
-                {!readonly && <th className="py-2.5 px-1 w-8 text-center border-r border-slate-200" title="Arrastar para reordenar"></th>}
-                <th className="py-2.5 px-2 min-w-[95px] w-24 text-center border-r border-slate-200">ITEM</th>
-                <th className="py-2.5 px-4 min-w-[280px] border-r border-slate-200">DESCRIÇÃO DOS SERVIÇOS</th>
-                <th className="py-2.5 px-3 w-16 text-center border-r border-slate-200">UN</th>
-                <th className="py-2.5 px-4 w-28 text-right border-r border-slate-200">QUANT.</th>
-                <th className="py-2.5 px-5 min-w-[340px] border-r border-slate-200">MEMÓRIA DE CÁLCULO / FÓRMULA DETALHADA</th>
-                {!readonly && <th className="py-2.5 px-2 w-20 text-center">AÇÕES</th>}
+            <thead className="sticky top-[58px] z-20">
+              <tr className="bg-slate-100/95 backdrop-blur-md border-b border-slate-200 font-semibold text-slate-600 uppercase text-[10px] tracking-wider">
+                {!readonly && <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-1 w-8 text-center border-r border-slate-200 shadow-2xs" title="Arrastar para reordenar"></th>}
+                <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-2 min-w-[95px] w-24 text-center border-r border-slate-200 shadow-2xs">ITEM</th>
+                <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-4 min-w-[280px] border-r border-slate-200 shadow-2xs">DESCRIÇÃO DOS SERVIÇOS</th>
+                <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-3 w-16 text-center border-r border-slate-200 shadow-2xs">UN</th>
+                <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-4 w-28 text-right border-r border-slate-200 shadow-2xs">QUANT.</th>
+                <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-5 min-w-[340px] border-r border-slate-200 shadow-2xs">MEMÓRIA DE CÁLCULO / FÓRMULA DETALHADA</th>
+                {!readonly && <th className="sticky top-[58px] z-20 bg-slate-100/95 backdrop-blur-md py-2.5 px-2 w-20 text-center shadow-2xs">AÇÕES</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
