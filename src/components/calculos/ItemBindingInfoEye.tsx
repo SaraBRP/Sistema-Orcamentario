@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react';
-import { Eye, Link2 } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { Eye, Link2, X } from 'lucide-react';
 import type { TargetInsumoItem } from './TabelaSapatas';
 
 interface Props {
@@ -9,7 +10,8 @@ interface Props {
 
 export function ItemBindingInfoEye({ item, className = '' }: Props) {
   const [isOpen, setIsOpen] = useState(false);
-  const containerRef = useRef<HTMLDivElement>(null);
+  const [coords, setCoords] = useState<{ top: number; left: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
 
   if (!item) return null;
 
@@ -17,40 +19,81 @@ export function ItemBindingInfoEye({ item, className = '' }: Props) {
 
   if (!hasBinding) return null;
 
+  const handleOpen = () => {
+    if (buttonRef.current) {
+      const rect = buttonRef.current.getBoundingClientRect();
+      const cardHeight = 240;
+      const cardWidth = 320;
+
+      // Se houver espaço acima do botão na tela, exibe acima, senão exibe abaixo
+      let top = rect.top - cardHeight - 8;
+      if (rect.top < cardHeight + 20) {
+        top = rect.bottom + 8;
+      }
+
+      // Garante alinhamento dentro da janela visível
+      let left = rect.left + rect.width / 2 - cardWidth / 2;
+      left = Math.max(16, Math.min(left, window.innerWidth - cardWidth - 16));
+
+      setCoords({ top, left });
+      setIsOpen(true);
+    }
+  };
+
+  const handleClose = () => {
+    setIsOpen(false);
+  };
+
   return (
-    <div className={`relative inline-block text-left shrink-0 ${className}`} ref={containerRef}>
+    <div className={`relative inline-block text-left shrink-0 ${className}`}>
       <button
+        ref={buttonRef}
         type="button"
         onClick={(e) => {
           e.stopPropagation();
-          setIsOpen(!isOpen);
+          if (isOpen) {
+            handleClose();
+          } else {
+            handleOpen();
+          }
         }}
-        onMouseEnter={() => setIsOpen(true)}
-        onMouseLeave={() => setIsOpen(false)}
-        className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-800 rounded-md transition-all cursor-pointer flex items-center gap-1 shadow-2xs border border-emerald-300 font-medium text-[11px]"
-        title="Ver detalhes da fórmula vinculada a este item"
+        onMouseEnter={handleOpen}
+        onMouseLeave={handleClose}
+        className="px-2 py-0.5 bg-emerald-100 hover:bg-emerald-200 text-emerald-900 rounded-md transition-all cursor-pointer flex items-center gap-1 shadow-2xs border border-emerald-300 font-medium text-[11px]"
+        title="Clique para ver os detalhes do vínculo / fórmula"
       >
         <Eye className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
         <span className="font-bold text-[10.5px] text-emerald-900">Vinculado</span>
       </button>
 
-      {isOpen && (
+      {isOpen && coords && createPortal(
         <div
-          className="absolute z-50 bottom-full left-1/2 -translate-x-1/2 mb-2 w-80 p-3 bg-slate-900 text-white rounded-xl shadow-2xl border border-slate-700 text-xs animate-in fade-in zoom-in-95 duration-100 pointer-events-auto"
+          style={{ top: `${coords.top}px`, left: `${coords.left}px` }}
+          className="fixed z-[99999] w-80 p-3 bg-slate-900 text-white rounded-xl shadow-2xl border border-slate-700 text-xs animate-in fade-in zoom-in-95 duration-100 pointer-events-auto"
           onMouseEnter={() => setIsOpen(true)}
-          onMouseLeave={() => setIsOpen(false)}
+          onMouseLeave={handleClose}
+          onClick={(e) => e.stopPropagation()}
         >
           {/* Cabeçalho do Cartão Flutuante */}
           <div className="flex items-center justify-between pb-2 mb-2 border-b border-slate-800">
             <span className="font-bold text-emerald-400 flex items-center gap-1.5 text-xs">
               <Link2 className="w-3.5 h-3.5" />
-              <span>Fórmula Vinculada a este Item</span>
+              <span>Vínculo / Fórmula Ativa</span>
             </span>
-            {item.item_eap && (
-              <span className="text-[10px] text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded font-mono font-bold">
-                EAP: {item.item_eap}
-              </span>
-            )}
+            <div className="flex items-center gap-1">
+              {item.item_eap && (
+                <span className="text-[10px] text-slate-300 bg-slate-800 px-1.5 py-0.5 rounded font-mono font-bold">
+                  EAP: {item.item_eap}
+                </span>
+              )}
+              <button 
+                type="button"
+                onClick={handleClose}
+                className="p-0.5 hover:bg-slate-800 rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
 
           <div className="space-y-2">
@@ -64,8 +107,8 @@ export function ItemBindingInfoEye({ item, className = '' }: Props) {
 
             {/* Origem / Tela */}
             <div>
-              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Origem / Tela de Cálculo:</span>
-              <span className="font-bold text-blue-300 text-xs block">{item.observacaoMemoria || 'Fórmula Personalizada'}</span>
+              <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider block">Origem do Vínculo:</span>
+              <span className="font-bold text-blue-300 text-xs block">{item.observacaoMemoria || 'Fórmula do Memorial'}</span>
             </div>
 
             {/* Equação Literal */}
@@ -97,10 +140,11 @@ export function ItemBindingInfoEye({ item, className = '' }: Props) {
             </div>
 
             <div className="text-[10px] text-slate-400 italic pt-1 text-center border-t border-slate-800/60">
-              Caso queira alterar, escolha uma nova fórmula e clique em Vincular.
+              Caso queira alterar, selecione uma nova fórmula/parâmetro e vincule.
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
