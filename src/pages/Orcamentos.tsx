@@ -1458,13 +1458,13 @@ export default function Orcamentos() {
 
             <form onSubmit={handleCreateOrcamento} className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento</label>
+                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento (Auto)</label>
                 <input 
                   type="text"
-                  required
+                  readOnly
+                  disabled
                   value={newOrcamentoData.codigo}
-                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, codigo: e.target.value})}
-                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono font-bold text-blue-600 outline-none focus:border-blue-500 bg-slate-50"
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono font-bold text-slate-600 bg-slate-100/80 cursor-not-allowed select-none"
                 />
               </div>
 
