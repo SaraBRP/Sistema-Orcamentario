@@ -367,12 +367,16 @@ export default function OrcamentoDeParaStudio() {
     const trimmed = newText.trim();
 
     try {
+      const oldStatus = targetItem.status_linha;
+      const finalStatus = (oldStatus === 'inserido_empresa' || oldStatus === 'inserido_empresa_e_cliente') ? oldStatus : 'ativo';
+
       const payload: any = {
         tipo_vinculo: trimmed ? 'texto' : null,
         composicao_id: null,
         insumo_id: null,
         valor_unitario_empresa: 0,
-        total_empresa: 0
+        total_empresa: 0,
+        status_linha: finalStatus
       };
 
       const { error } = await supabase
@@ -469,12 +473,23 @@ export default function OrcamentoDeParaStudio() {
         if (insumos) insumos.forEach((i: any) => { insumosMap[i.id] = i; });
       }
 
-      const finalItems = itemsList.map((item: any) => ({
-        ...item,
-        status_linha: item.status_linha || 'ativo',
-        composicao: item.composicao_id ? compsMap[item.composicao_id] : undefined,
-        insumo: item.insumo_id ? insumosMap[item.insumo_id] : undefined
-      }));
+      const finalItems = itemsList.map((item: any) => {
+        const origParts = (item.item_eap || '').split('.').filter(Boolean);
+        let status = item.status_linha || 'ativo';
+
+        // Se uma linha principal do cliente (ex: 1.1, 1.2) estiver com status 'desdobrado' por erro antigo, corrige para 'ativo'
+        if (status === 'desdobrado' && origParts.length <= 2) {
+          status = 'ativo';
+          supabase.schema('engenharia').from('orcamento_importado_itens').update({ status_linha: 'ativo' }).eq('id', item.id).then(() => {});
+        }
+
+        return {
+          ...item,
+          status_linha: status,
+          composicao: item.composicao_id ? compsMap[item.composicao_id] : undefined,
+          insumo: item.insumo_id ? insumosMap[item.insumo_id] : undefined
+        };
+      });
 
       // Ordenação EAP Natural
       const sortedItems = finalItems.sort((a: any, b: any) => sortEap(a.item_eap, b.item_eap));
