@@ -42,7 +42,7 @@ type OrcamentoItem = {
   hasChildren?: boolean;
 };
 
-const STATUS_ENVIO_OPTIONS = ['Ag. Retorno', 'Cancelada', 'Encerrada', 'Consolidada', 'Perdido'];
+const STATUS_ENVIO_OPTIONS = ['Ag. Retorno', 'Cancelado', 'Encerrado', 'Consolidado'];
 
 // Função para calcular os totais hierárquicos (WBS/EAP) de forma dinâmica
 // effectiveMultiplier = produto das quantidades de todas as composições ancestrais
@@ -2136,10 +2136,9 @@ export default function OrcamentoBuilder() {
 
   const STATUS_ENVIO_OPTIONS = [
     'Ag. Retorno',
-    'Consolidada',
-    'Encerrada',
-    'Cancelada',
-    'Perdido',
+    'Cancelado',
+    'Encerrado',
+    'Consolidado',
   ];
 
   // Função para criar nova revisão automaticamente clonando dados e itens do orçamento atual
@@ -3133,18 +3132,17 @@ export default function OrcamentoBuilder() {
                     cls = 'bg-violet-50 text-violet-700 border-violet-200';
                     dot = 'bg-violet-500';
                     break;
+                  case 'Consolidado':
                   case 'Consolidada':
                     cls = 'bg-teal-50 text-teal-800 border-teal-300';
                     dot = 'bg-teal-500';
                     break;
+                  case 'Encerrado':
                   case 'Encerrada':
                     cls = 'bg-slate-100 text-slate-700 border-slate-300';
                     dot = 'bg-slate-500';
                     break;
-                  case 'Perdido':
-                    cls = 'bg-gray-100 text-gray-700 border-gray-300';
-                    dot = 'bg-gray-500';
-                    break;
+                  case 'Cancelado':
                   case 'Cancelada':
                     cls = 'bg-rose-50 text-rose-700 border-rose-200';
                     dot = 'bg-rose-500';
@@ -3477,8 +3475,8 @@ export default function OrcamentoBuilder() {
                               <button
                                 key={opt}
                                 onClick={() => {
-                                  if (opt === 'Cancelada') {
-                                    handleUpdateStatus('Cancelada', 'Cancelada');
+                                  if (opt === 'Cancelado' || opt === 'Cancelada') {
+                                    handleUpdateStatus('Cancelado', 'Cancelado');
                                   } else {
                                     handleUpdateStatus('Enviada', opt);
                                   }

@@ -25,10 +25,12 @@ const statusBadgeClasses = (status: string) => {
 const statusEnvioBadgeClasses = (s: string) => {
   switch (s) {
     case 'Ag. Retorno':  return 'bg-violet-50 text-violet-700 border-violet-200';
+    case 'Consolidado':
     case 'Consolidada': return 'bg-teal-50 text-teal-700 border-teal-200';
+    case 'Encerrado':
     case 'Encerrada':   return 'bg-slate-100 text-slate-600 border-slate-200';
+    case 'Cancelado':
     case 'Cancelada':   return 'bg-rose-50 text-rose-700 border-rose-200';
-    case 'Perdido':     return 'bg-gray-100 text-gray-600 border-gray-200';
     default:            return 'bg-slate-100 text-slate-600 border-slate-200';
   }
 };
@@ -37,13 +39,13 @@ export const getOrcamentoEffectiveStatus = (orc: any): string => {
   if (!orc) return 'Em andamento';
   const st = (orc.status || 'Em andamento').trim();
   const isEnviada = st.toLowerCase() === 'enviada';
-  const isEncerrada = st.toLowerCase() === 'encerrada' || orc.status_envio === 'Encerrada';
-  const isCancelada = st.toLowerCase() === 'cancelada';
+  const isEncerrada = st.toLowerCase() === 'encerrada' || st.toLowerCase() === 'encerrado' || orc.status_envio === 'Encerrada' || orc.status_envio === 'Encerrado';
+  const isCancelada = st.toLowerCase() === 'cancelada' || st.toLowerCase() === 'cancelado';
   const isAgValidacao = st.toLowerCase().includes('valida');
   const isAprov = orc.aprovado === true;
 
   if (isEncerrada) {
-    return 'Encerrada';
+    return 'Encerrado';
   }
 
   if (isEnviada && orc.status_envio) {
@@ -51,7 +53,7 @@ export const getOrcamentoEffectiveStatus = (orc: any): string => {
   }
 
   if (isCancelada) {
-    return 'Cancelada';
+    return 'Cancelado';
   }
 
   const decisao = orc.decisao_gestor || (orc.id ? localStorage.getItem(`orcamento_decisao_${orc.id}`) : null);
@@ -77,7 +79,7 @@ export const getOrcamentoEffectiveStatus = (orc: any): string => {
 
 export const renderStatusBadge = (orc: any) => {
   const statusLabel = getOrcamentoEffectiveStatus(orc);
-  const isEnvio = ['Ag. Retorno', 'Consolidada', 'Encerrada', 'Perdido'].includes(statusLabel);
+  const isEnvio = ['Ag. Retorno', 'Consolidado', 'Consolidada', 'Encerrado', 'Encerrada', 'Cancelado', 'Cancelada'].includes(statusLabel);
   const badgeCls = isEnvio ? statusEnvioBadgeClasses(statusLabel) : statusBadgeClasses(statusLabel);
 
   return (
@@ -1131,10 +1133,9 @@ export default function Orcamentos() {
                     <option value="Com Pendências">Com Pendências</option>
                     <option value="Aprovado e Ag. Envio">Aprovado e Ag. Envio</option>
                     <option value="Ag. Retorno">Ag. Retorno</option>
-                    <option value="Consolidada">Consolidada</option>
-                    <option value="Encerrada">Encerrada</option>
-                    <option value="Perdido">Perdido</option>
-                    <option value="Cancelada">Cancelada</option>
+                    <option value="Consolidado">Consolidado</option>
+                    <option value="Encerrado">Encerrado</option>
+                    <option value="Cancelado">Cancelado</option>
                   </select>
                   <ChevronDown className="w-3.5 h-3.5 absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
                 </div>

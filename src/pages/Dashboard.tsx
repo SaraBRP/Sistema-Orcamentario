@@ -14,10 +14,12 @@ const STATUS_COLORS: Record<string, string> = {
   'Com Pendências': '#f97316', // Laranja Escuro
   'Aprovado e Ag. Envio': '#10b981', // Verde
   'Ag. Retorno': '#06b6d4', // Ciano
-  'Consolidada': '#8b5cf6', // Roxo
-  'Encerrada': '#64748b', // Cinza
-  'Perdido': '#94a3b8', // Cinza Claro
-  'Cancelada': '#dc2626', // Vermelho Escuro
+  'Consolidado': '#8b5cf6', // Roxo
+  'Consolidada': '#8b5cf6',
+  'Encerrado': '#64748b', // Cinza
+  'Encerrada': '#64748b',
+  'Cancelado': '#dc2626', // Vermelho Escuro
+  'Cancelada': '#dc2626',
 };
 
 const DEFAULT_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
@@ -127,10 +129,10 @@ export default function Dashboard() {
   // Mock de dados ilustrativos se o banco ainda não tiver dados suficientes
   const statusChartData = statusData.length > 0 ? statusData : [
     { name: 'Em andamento', value: 5, color: '#3b82f6' },
-    { name: 'Ag. Validação', value: 3, color: '#f59e0b' },
-    { name: 'Aprovado e Ag. Envio', value: 6, color: '#10b981' },
-    { name: 'Consolidada', value: 2, color: '#8b5cf6' },
-    { name: 'Cancelada', value: 1, color: '#ef4444' },
+    { name: 'Ag. Retorno', value: 4, color: '#06b6d4' },
+    { name: 'Consolidado', value: 3, color: '#8b5cf6' },
+    { name: 'Encerrado', value: 2, color: '#64748b' },
+    { name: 'Cancelado', value: 1, color: '#dc2626' },
   ];
 
   // 2. Dados para o Gráfico de Barras Horizontais: Quantidade de Orçamentos por Cliente
