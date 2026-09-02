@@ -7,22 +7,47 @@ import {
 import { supabase } from '../lib/supabase';
 
 // Cores dos gráficos
-const STATUS_COLORS: Record<string, string> = {
-  'Em andamento': '#3b82f6', // Azul
-  'Ag. Validação': '#f59e0b', // Amarelo/Laranja
-  'Recusado pelo Gestor': '#ef4444', // Vermelho
-  'Com Pendências': '#f97316', // Laranja Escuro
-  'Aprovado e Ag. Envio': '#10b981', // Verde
-  'Ag. Retorno': '#06b6d4', // Ciano
-  'Consolidado': '#8b5cf6', // Roxo
-  'Consolidada': '#8b5cf6',
-  'Encerrado': '#64748b', // Cinza
-  'Encerrada': '#64748b',
-  'Cancelado': '#dc2626', // Vermelho Escuro
-  'Cancelada': '#dc2626',
+// Mapeamento e cores das 4 categorias personalizadas do Dashboard
+const DASHBOARD_STATUS_CONFIG: Record<string, { label: string; color: string }> = {
+  'Em andamento': { label: 'Em andamento', color: '#3b82f6' },  // Azul
+  'Ag. Validação': { label: 'Ag. Validação', color: '#f59e0b' }, // Amarelo
+  'Ag. Envio': { label: 'Ag. Envio', color: '#10b981' },     // Verde
+  'Enviado': { label: 'Enviado', color: '#8b5cf6' },         // Roxo
 };
 
-const DEFAULT_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4', '#ec4899', '#f97316'];
+// Função para categorizar cada orçamento conforme as regras de negócio solicitadas
+const getDashboardStatusCategory = (orc: any): 'Em andamento' | 'Ag. Validação' | 'Ag. Envio' | 'Enviado' | null => {
+  if (!orc) return null;
+  const st = (orc.status || 'Em andamento').trim().toLowerCase();
+  const statusEnvio = (orc.status_envio || '').trim();
+
+  // 1. Orçamentos cancelados (antes ou depois do envio) NÃO aparecem no gráfico
+  const isCancelado = st === 'cancelada' || st === 'cancelado' || statusEnvio === 'Cancelado' || statusEnvio === 'Cancelada';
+  if (isCancelado) {
+    return null;
+  }
+
+  // 2. Enviado: todos os orçamentos que foram enviados ao cliente (independente do status de envio específico)
+  if (st === 'enviada' || statusEnvio !== '') {
+    return 'Enviado';
+  }
+
+  // 3. Ag. Validação: aguardando validação do gestor
+  const isAgValidacao = st.includes('valida') || st === 'ag. validação';
+  const isAprovado = orc.aprovado === true || orc.decisao_gestor === 'aprovar';
+
+  if (isAgValidacao && !isAprovado) {
+    return 'Ag. Validação';
+  }
+
+  // 4. Ag. Envio: aprovado pelo gestor mas ainda não enviado ao cliente
+  if (isAprovado) {
+    return 'Ag. Envio';
+  }
+
+  // 5. Em andamento: em andamento normal, recusado pelo gestor ou aprovado com pendências
+  return 'Em andamento';
+};
 
 export default function Dashboard() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
@@ -51,11 +76,11 @@ export default function Dashboard() {
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
-        // 1. Busca orçamentos da empresa (incluindo o ID do memorial importado vinculado)
+        // 1. Busca orçamentos da empresa (incluindo status e decisão do gestor)
         const { data: orcData, error: orcErr } = await supabase
           .schema('engenharia')
           .from('orcamentos')
-          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id');
+          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id, aprovado, decisao_gestor, status_envio');
 
         if (!orcErr && orcData) {
           setOrcamentos(orcData);
@@ -130,26 +155,36 @@ export default function Dashboard() {
     },
   ];
 
-  // 1. Dados para o Gráfico de Rosca: Distribuição dos Orçamentos por STATUS
-  const statusCountsMap: Record<string, number> = {};
+  // 1. Dados para o Gráfico de Rosca: Distribuição dos Orçamentos por STATUS (4 Categorias solicitadas)
+  const statusCountsMap: Record<string, number> = {
+    'Em andamento': 0,
+    'Ag. Validação': 0,
+    'Ag. Envio': 0,
+    'Enviado': 0,
+  };
+
   orcamentos.forEach(o => {
-    const status = o.status || 'Em andamento';
-    statusCountsMap[status] = (statusCountsMap[status] || 0) + 1;
+    const category = getDashboardStatusCategory(o);
+    if (category && statusCountsMap[category] !== undefined) {
+      statusCountsMap[category] += 1;
+    }
   });
 
-  const statusData = Object.entries(statusCountsMap).map(([name, value]) => ({
-    name,
-    value,
-    color: STATUS_COLORS[name] || DEFAULT_COLORS[Math.abs(name.length) % DEFAULT_COLORS.length]
-  }));
+  const realStatusData = Object.entries(statusCountsMap)
+    .filter(([_, count]) => count > 0)
+    .map(([name, value]) => ({
+      name,
+      value,
+      color: DASHBOARD_STATUS_CONFIG[name]?.color || '#3b82f6'
+    }));
 
-  // Mock de dados ilustrativos se o banco ainda não tiver dados suficientes
-  const statusChartData = statusData.length > 0 ? statusData : [
+  const hasRealStatusData = realStatusData.length > 0;
+
+  const statusChartData = hasRealStatusData ? realStatusData : [
     { name: 'Em andamento', value: 5, color: '#3b82f6' },
-    { name: 'Ag. Retorno', value: 4, color: '#06b6d4' },
-    { name: 'Consolidado', value: 3, color: '#8b5cf6' },
-    { name: 'Encerrado', value: 2, color: '#64748b' },
-    { name: 'Cancelado', value: 1, color: '#dc2626' },
+    { name: 'Ag. Validação', value: 3, color: '#f59e0b' },
+    { name: 'Ag. Envio', value: 4, color: '#10b981' },
+    { name: 'Enviado', value: 6, color: '#8b5cf6' },
   ];
 
   // 2. Dados para o Gráfico de Barras Horizontais: Quantidade de Orçamentos por Cliente (Ignorando revisões repetidas)
@@ -229,7 +264,7 @@ export default function Dashboard() {
               <span>Distribuição dos Orçamentos por STATUS</span>
             </h3>
             <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
-              {orcamentos.length > 0 ? `${orcamentos.length} Orçamentos` : 'Exemplo'}
+              {hasRealStatusData ? `${orcamentos.filter(o => getDashboardStatusCategory(o) !== null).length} Orçamentos` : 'Exemplo'}
             </span>
           </div>
 
