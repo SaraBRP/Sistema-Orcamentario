@@ -49,6 +49,51 @@ const getDashboardStatusCategory = (orc: any): 'Em andamento' | 'Ag. Validação
   return 'Em andamento';
 };
 
+// Helper para identificar a chave base do orçamento (sem o sufixo de revisão)
+const getBudgetBaseKey = (o: any): string => {
+  if (o.orcamento_importado_id) {
+    return `imp_${o.orcamento_importado_id}`;
+  }
+  if (o.codigo) {
+    const parts = o.codigo.split('.');
+    if (parts.length >= 2) {
+      const yearPart = o.codigo.includes('-') ? '-' + o.codigo.split('-')[1] : '';
+      return `${parts[0]}.${parts[1]}${yearPart}`;
+    }
+    return o.codigo;
+  }
+  return o.parent_id || o.id;
+};
+
+// Função para filtrar e manter APENAS a última revisão de cada orçamento único
+const filterLatestRevisions = (orcList: any[]): any[] => {
+  const groups = new Map<string, any>();
+
+  orcList.forEach(o => {
+    const key = getBudgetBaseKey(o);
+    const revNum = parseInt(o.revisao || '0', 10);
+
+    if (!groups.has(key)) {
+      groups.set(key, o);
+    } else {
+      const existing = groups.get(key);
+      const existingRev = parseInt(existing.revisao || '0', 10);
+
+      if (revNum > existingRev) {
+        groups.set(key, o);
+      } else if (revNum === existingRev) {
+        const timeCurrent = new Date(o.created_at || 0).getTime();
+        const timeExisting = new Date(existing.created_at || 0).getTime();
+        if (timeCurrent > timeExisting) {
+          groups.set(key, o);
+        }
+      }
+    }
+  });
+
+  return Array.from(groups.values());
+};
+
 export default function Dashboard() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
   const [totalClientes, setTotalClientes] = useState(0);
@@ -76,11 +121,11 @@ export default function Dashboard() {
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
-        // 1. Busca orçamentos da empresa (incluindo status e decisão do gestor)
+        // 1. Busca orçamentos da empresa (incluindo número de revisão)
         const { data: orcData, error: orcErr } = await supabase
           .schema('engenharia')
           .from('orcamentos')
-          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id, aprovado, decisao_gestor, status_envio');
+          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id, aprovado, decisao_gestor, status_envio, revisao, parent_id');
 
         if (!orcErr && orcData) {
           setOrcamentos(orcData);
@@ -120,9 +165,12 @@ export default function Dashboard() {
     loadDashboardData();
   }, []);
 
-  // Cálculos dos KPIs principais
-  const totalOrcamentosCount = orcamentos.length;
-  const valorTotalOrcado = orcamentos.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
+  // Filtra APENAS a última revisão de cada orçamento para os indicadores e gráficos
+  const ultimasRevisoesOrcamentos = filterLatestRevisions(orcamentos);
+
+  // Cálculos dos KPIs principais considerando a última revisão
+  const totalOrcamentosCount = ultimasRevisoesOrcamentos.length;
+  const valorTotalOrcado = ultimasRevisoesOrcamentos.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
 
   const stats = [
     {
@@ -155,7 +203,7 @@ export default function Dashboard() {
     },
   ];
 
-  // 1. Dados para o Gráfico de Rosca: Distribuição dos Orçamentos por STATUS (4 Categorias solicitadas)
+  // 1. Dados para o Gráfico de Rosca: Distribuição dos Orçamentos por STATUS (Considera APENAS a ÚLTIMA revisão de cada orçamento)
   const statusCountsMap: Record<string, number> = {
     'Em andamento': 0,
     'Ag. Validação': 0,
@@ -163,7 +211,7 @@ export default function Dashboard() {
     'Enviado': 0,
   };
 
-  orcamentos.forEach(o => {
+  ultimasRevisoesOrcamentos.forEach(o => {
     const category = getDashboardStatusCategory(o);
     if (category && statusCountsMap[category] !== undefined) {
       statusCountsMap[category] += 1;
