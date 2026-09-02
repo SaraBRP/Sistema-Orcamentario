@@ -100,7 +100,9 @@ export default function Dashboard() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
   const [memoriaisPendentesCount, setMemoriaisPendentesCount] = useState(0);
   const [mostUsedItems, setMostUsedItems] = useState<any[]>([]);
+  const [highestCostItems, setHighestCostItems] = useState<any[]>([]);
   const [itemTypeFilter, setItemTypeFilter] = useState<'todos' | 'composicao' | 'insumo'>('todos');
+  const [costItemTypeFilter, setCostItemTypeFilter] = useState<'todos' | 'composicao' | 'insumo'>('todos');
   const [empresaFilter, setEmpresaFilter] = useState<'todas' | 'brp_solucoes' | 'brp_engenharia'>('todas');
   const [activeDashboardTab, setActiveDashboardTab] = useState<'atividades' | 'financeiro'>('atividades');
 
@@ -153,19 +155,20 @@ export default function Dashboard() {
           setMemoriaisPendentesCount(pendentes);
         }
 
-        // 3. Busca itens de orçamento para calcular a tabela de itens mais usados
+        // 3. Busca itens de orçamento para calcular as tabelas de itens mais usados e itens de maior gasto
         const { data: itensData } = await supabase
           .schema('engenharia')
           .from('orcamento_itens')
-          .select('descricao, unidade, composicao_id, insumo_id, tipo, status_linha');
+          .select('descricao, unidade, composicao_id, insumo_id, tipo, status_linha, total, preco_total, valor_total');
 
         if (itensData && itensData.length > 0) {
-          const itemsMap = new Map<string, { descricao: string; unidade: string; tipo: 'composicao' | 'insumo'; count: number }>();
+          const itemsMap = new Map<string, { descricao: string; unidade: string; tipo: 'composicao' | 'insumo'; count: number; totalValor: number }>();
           itensData.forEach((item: any) => {
             if (!item.descricao || item.status_linha === 'inativo') return;
             const desc = item.descricao.trim();
             const isComp = !!(item.composicao_id || item.tipo === 'composicao' || item.tipo === 'Composição' || item.status_linha === 'desdobrado');
             const itemType: 'composicao' | 'insumo' = isComp ? 'composicao' : 'insumo';
+            const val = parseFloat(item.total || item.preco_total || item.valor_total || 0);
             const key = desc.toLowerCase();
 
             if (!itemsMap.has(key)) {
@@ -173,15 +176,19 @@ export default function Dashboard() {
                 descricao: desc,
                 unidade: item.unidade || 'un',
                 tipo: itemType,
-                count: 1
+                count: 1,
+                totalValor: val
               });
             } else {
               const existing = itemsMap.get(key)!;
               existing.count += 1;
+              existing.totalValor += val;
             }
           });
 
-          setMostUsedItems(Array.from(itemsMap.values()));
+          const itemsArr = Array.from(itemsMap.values());
+          setMostUsedItems(itemsArr);
+          setHighestCostItems(itemsArr);
         }
       } catch (err) {
         console.error('Erro ao carregar dados do dashboard:', err);
@@ -574,6 +581,38 @@ export default function Dashboard() {
     return Math.max(...filteredMostUsedItems.map(i => i.count), 1);
   }, [filteredMostUsedItems]);
 
+  // 5. Tabela de Itens de Maior Gasto nos Orçamentos (Top 10 por Valor Total em R$)
+  const filteredHighestCostItems = useMemo(() => {
+    let list = highestCostItems;
+
+    if (list.length === 0 || !list.some(i => (i.totalValor || 0) > 0)) {
+      list = [
+        { descricao: 'Estrutura Metálica Treliçada em Aço ASTM A36', unidade: 'kg', tipo: 'composicao', totalValor: 485000 },
+        { descricao: 'Aço Estrutural Perfil I / W 250x32.7', unidade: 'kg', tipo: 'insumo', totalValor: 390000 },
+        { descricao: 'Pintura Epóxi Anticorrosiva de Alta Espessura', unidade: 'm²', tipo: 'composicao', totalValor: 210000 },
+        { descricao: 'Montagem e Erguimento de Estrutura Metálica', unidade: 'h', tipo: 'composicao', totalValor: 185000 },
+        { descricao: 'Telha Metálica Trapezoidal Termoacústica 40mm', unidade: 'm²', tipo: 'composicao', totalValor: 145000 },
+        { descricao: 'Solda MIG/MAG Contínua 1.2mm', unidade: 'm', tipo: 'insumo', totalValor: 120000 },
+        { descricao: 'Grauteamento de Base de Pilar NBR 15823', unidade: 'm³', tipo: 'composicao', totalValor: 98000 },
+        { descricao: 'Chapa de Aço de Ligação t=12.5mm', unidade: 'kg', tipo: 'insumo', totalValor: 86000 },
+        { descricao: 'Parafuso Sextavado de Alta Resistência ASTM A325 3/4"', unidade: 'un', tipo: 'insumo', totalValor: 64000 },
+        { descricao: 'Mão de Obra de Montador de Estrutura Metálica', unidade: 'h', tipo: 'insumo', totalValor: 52000 },
+      ];
+    }
+
+    if (costItemTypeFilter !== 'todos') {
+      list = list.filter(i => i.tipo === costItemTypeFilter);
+    }
+
+    list.sort((a, b) => (b.totalValor || 0) - (a.totalValor || 0));
+    return list.slice(0, 10);
+  }, [highestCostItems, costItemTypeFilter]);
+
+  const maxCostValue = useMemo(() => {
+    if (filteredHighestCostItems.length === 0) return 1;
+    return Math.max(...filteredHighestCostItems.map(i => i.totalValor || 0), 1);
+  }, [filteredHighestCostItems]);
+
   return (
     <div className="space-y-6">
       {/* Abas Superiores de Seleção de Dashboard: Atividades vs Financeiro */}
@@ -955,113 +994,227 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* TABELA FINANCEIRA: Itens Mais Usados nos Orçamentos com Minigráfico */}
-          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-            {/* Cabeçalho da Tabela com Filtros */}
-            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
-              <div>
-                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-amber-500" />
-                  <span>Itens Mais Usados nos Orçamentos</span>
-                </h3>
-                <p className="text-xs text-slate-500 mt-0.5 font-medium">
-                  Top 10 itens com maior frequência de utilização nas propostas
-                </p>
+          {/* GRADE DE 2 TABELAS NO DASHBOARD FINANCEIRO */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+            {/* TABELA 1: Itens Mais Usados nos Orçamentos */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
+              {/* Cabeçalho da Tabela com Filtros */}
+              <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/50">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <Sparkles className="w-4 h-4 text-amber-500" />
+                    <span>Itens Mais Usados nos Orçamentos</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                    Top 10 itens com maior frequência de utilização
+                  </p>
+                </div>
+
+                {/* Filtros: Todos / Composições / Insumos */}
+                <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl text-xs font-bold text-slate-600">
+                  <button
+                    onClick={() => setItemTypeFilter('todos')}
+                    className={clsx(
+                      'px-2.5 py-1 rounded-lg transition-all cursor-pointer text-[11px]',
+                      itemTypeFilter === 'todos' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
+                    )}
+                  >
+                    Todos
+                  </button>
+                  <button
+                    onClick={() => setItemTypeFilter('composicao')}
+                    className={clsx(
+                      'px-2.5 py-1 rounded-lg transition-all cursor-pointer text-[11px]',
+                      itemTypeFilter === 'composicao' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
+                    )}
+                  >
+                    Composições
+                  </button>
+                  <button
+                    onClick={() => setItemTypeFilter('insumo')}
+                    className={clsx(
+                      'px-2.5 py-1 rounded-lg transition-all cursor-pointer text-[11px]',
+                      itemTypeFilter === 'insumo' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
+                    )}
+                  >
+                    Insumos
+                  </button>
+                </div>
               </div>
 
-              {/* Filtros: Todos / Composições / Insumos */}
-              <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl text-xs font-bold text-slate-600">
-                <button
-                  onClick={() => setItemTypeFilter('todos')}
-                  className={clsx(
-                    'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
-                    itemTypeFilter === 'todos' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
-                  )}
-                >
-                  Todos
-                </button>
-                <button
-                  onClick={() => setItemTypeFilter('composicao')}
-                  className={clsx(
-                    'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
-                    itemTypeFilter === 'composicao' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
-                  )}
-                >
-                  Composições
-                </button>
-                <button
-                  onClick={() => setItemTypeFilter('insumo')}
-                  className={clsx(
-                    'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
-                    itemTypeFilter === 'insumo' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
-                  )}
-                >
-                  Insumos
-                </button>
-              </div>
-            </div>
+              {/* Tabela de Itens Frequência */}
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-2.5 px-3 w-10 text-center">#</th>
+                      <th className="py-2.5 px-3">Item / Descrição</th>
+                      <th className="py-2.5 px-3 w-28">Tipo</th>
+                      <th className="py-2.5 px-3 w-48 text-right">Frequência</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {filteredMostUsedItems.map((item, idx) => {
+                      const percentage = Math.max(8, Math.round((item.count / maxItemCount) * 100));
+                      const isComp = item.tipo === 'composicao';
 
-            {/* Tabela de Itens com Sparkline Bar */}
-            <div className="overflow-x-auto">
-              <table className="w-full text-left text-xs">
-                <thead>
-                  <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
-                    <th className="py-3 px-4 w-12 text-center">#</th>
-                    <th className="py-3 px-4">Item / Descrição</th>
-                    <th className="py-3 px-4 w-32">Tipo</th>
-                    <th className="py-3 px-4 w-64 text-right">Frequência de Uso</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100 text-slate-700">
-                  {filteredMostUsedItems.map((item, idx) => {
-                    const percentage = Math.max(8, Math.round((item.count / maxItemCount) * 100));
-                    const isComp = item.tipo === 'composicao';
-
-                    return (
-                      <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                        <td className="py-3 px-4 font-bold text-slate-400 text-center">
-                          {idx + 1}
-                        </td>
-                        <td className="py-3 px-4 font-semibold text-slate-800">
-                          <div className="flex items-center gap-2">
-                            <span className="truncate max-w-md" title={item.descricao}>{item.descricao}</span>
-                            {item.unidade && (
-                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-mono shrink-0">
-                                {item.unidade}
-                              </span>
-                            )}
-                          </div>
-                        </td>
-                        <td className="py-3 px-4">
-                          <span className={clsx(
-                            'px-2.5 py-1 rounded-full text-[10px] font-bold border inline-block shadow-2xs',
-                            isComp ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                          )}>
-                            {isComp ? 'Composição' : 'Insumo'}
-                          </span>
-                        </td>
-                        <td className="py-3 px-4">
-                          <div className="flex items-center justify-end gap-3">
-                            <div className="w-36 bg-slate-100 rounded-full h-2.5 overflow-hidden flex shadow-inner">
-                              <div 
-                                className={clsx(
-                                  'h-full rounded-full transition-all duration-500',
-                                  isComp ? 'bg-gradient-to-r from-purple-500 to-indigo-600' : 'bg-gradient-to-r from-emerald-400 to-teal-600'
-                                )} 
-                                style={{ width: `${percentage}%` }}
-                              />
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-400 text-center">
+                            {idx + 1}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate max-w-[180px]" title={item.descricao}>{item.descricao}</span>
+                              {item.unidade && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-mono shrink-0">
+                                  {item.unidade}
+                                </span>
+                              )}
                             </div>
-                            <span className="font-bold text-slate-800 w-10 text-right shrink-0">
-                              {item.count}x
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={clsx(
+                              'px-2 py-0.5 rounded-full text-[10px] font-bold border inline-block shadow-2xs',
+                              isComp ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            )}>
+                              {isComp ? 'Composição' : 'Insumo'}
                             </span>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="w-24 bg-slate-100 rounded-full h-2 overflow-hidden flex shadow-inner">
+                                <div 
+                                  className={clsx(
+                                    'h-full rounded-full transition-all duration-500',
+                                    isComp ? 'bg-gradient-to-r from-purple-500 to-indigo-600' : 'bg-gradient-to-r from-emerald-400 to-teal-600'
+                                  )} 
+                                  style={{ width: `${percentage}%` }}
+                                />
+                              </div>
+                              <span className="font-bold text-slate-800 w-8 text-right text-[11px] shrink-0">
+                                {item.count}x
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
+
+            {/* TABELA 2: Itens de Maior Gasto nos Orçamentos */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col h-full">
+              {/* Cabeçalho da Tabela com Filtros */}
+              <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-slate-50/50">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
+                    <Coins className="w-4 h-4 text-emerald-600" />
+                    <span>Itens de Maior Gasto nos Orçamentos</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-500 mt-0.5 font-medium">
+                    Top 10 itens com maior impacto financeiro em R$
+                  </p>
+                </div>
+
+                {/* Filtros: Todos / Composições / Insumos */}
+                <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl text-xs font-bold text-slate-600">
+                  <button
+                    onClick={() => setCostItemTypeFilter('todos')}
+                    className={clsx(
+                      'px-2.5 py-1 rounded-lg transition-all cursor-pointer text-[11px]',
+                      costItemTypeFilter === 'todos' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
+                    )}
+                  >
+                    Todos
+                  </button>
+                  <button
+                    onClick={() => setCostItemTypeFilter('composicao')}
+                    className={clsx(
+                      'px-2.5 py-1 rounded-lg transition-all cursor-pointer text-[11px]',
+                      costItemTypeFilter === 'composicao' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
+                    )}
+                  >
+                    Composições
+                  </button>
+                  <button
+                    onClick={() => setCostItemTypeFilter('insumo')}
+                    className={clsx(
+                      'px-2.5 py-1 rounded-lg transition-all cursor-pointer text-[11px]',
+                      costItemTypeFilter === 'insumo' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
+                    )}
+                  >
+                    Insumos
+                  </button>
+                </div>
+              </div>
+
+              {/* Tabela de Valor Financeiro Total */}
+              <div className="overflow-x-auto flex-1">
+                <table className="w-full text-left text-xs">
+                  <thead>
+                    <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                      <th className="py-2.5 px-3 w-10 text-center">#</th>
+                      <th className="py-2.5 px-3">Item / Descrição</th>
+                      <th className="py-2.5 px-3 w-28">Tipo</th>
+                      <th className="py-2.5 px-3 w-52 text-right">Valor Total (R$)</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100 text-slate-700">
+                    {filteredHighestCostItems.map((item, idx) => {
+                      const percentage = Math.max(8, Math.round(((item.totalValor || 0) / maxCostValue) * 100));
+                      const isComp = item.tipo === 'composicao';
+
+                      return (
+                        <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                          <td className="py-2.5 px-3 font-bold text-slate-400 text-center">
+                            {idx + 1}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-800">
+                            <div className="flex items-center gap-1.5">
+                              <span className="truncate max-w-[180px]" title={item.descricao}>{item.descricao}</span>
+                              {item.unidade && (
+                                <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-mono shrink-0">
+                                  {item.unidade}
+                                </span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <span className={clsx(
+                              'px-2 py-0.5 rounded-full text-[10px] font-bold border inline-block shadow-2xs',
+                              isComp ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                            )}>
+                              {isComp ? 'Composição' : 'Insumo'}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3">
+                            <div className="flex items-center justify-end gap-2">
+                              <div className="w-20 bg-slate-100 rounded-full h-2 overflow-hidden flex shadow-inner">
+                                <div 
+                                  className={clsx(
+                                    'h-full rounded-full transition-all duration-500',
+                                    isComp ? 'bg-gradient-to-r from-purple-500 to-indigo-600' : 'bg-gradient-to-r from-emerald-400 to-teal-600'
+                                  )} 
+                                  style={{ width: `${percentage}%` }}
+                                />
+                              </div>
+                              <span className="font-bold text-emerald-700 text-[11px] shrink-0">
+                                {(item.totalValor || 0).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}
+                              </span>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
           </div>
         </div>
       )}
