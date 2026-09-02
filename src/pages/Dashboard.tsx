@@ -827,115 +827,6 @@ export default function Dashboard() {
         <MapaOrcamentosBrasil orcamentos={orcamentos} />
 
       </div>
-
-      {/* TABELA: Itens Mais Usados nos Orçamentos com Minigráfico */}
-      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
-        {/* Cabeçalho da Tabela com Filtros */}
-        <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
-          <div>
-            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
-              <Sparkles className="w-5 h-5 text-amber-500" />
-              <span>Itens Mais Usados nos Orçamentos</span>
-            </h3>
-            <p className="text-xs text-slate-500 mt-0.5 font-medium">
-              Top 10 itens com maior frequência de utilização nas propostas
-            </p>
-          </div>
-
-          {/* Filtros: Todos / Composições / Insumos */}
-          <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl text-xs font-bold text-slate-600">
-            <button
-              onClick={() => setItemTypeFilter('todos')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
-                itemTypeFilter === 'todos' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
-              )}
-            >
-              Todos
-            </button>
-            <button
-              onClick={() => setItemTypeFilter('composicao')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
-                itemTypeFilter === 'composicao' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
-              )}
-            >
-              Composições
-            </button>
-            <button
-              onClick={() => setItemTypeFilter('insumo')}
-              className={clsx(
-                'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
-                itemTypeFilter === 'insumo' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
-              )}
-            >
-              Insumos
-            </button>
-          </div>
-        </div>
-
-        {/* Tabela de Itens com Sparkline Bar */}
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs">
-            <thead>
-              <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
-                <th className="py-3 px-4 w-12 text-center">#</th>
-                <th className="py-3 px-4">Item / Descrição</th>
-                <th className="py-3 px-4 w-32">Tipo</th>
-                <th className="py-3 px-4 w-64 text-right">Frequência de Uso</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100 text-slate-700">
-              {filteredMostUsedItems.map((item, idx) => {
-                const percentage = Math.max(8, Math.round((item.count / maxItemCount) * 100));
-                const isComp = item.tipo === 'composicao';
-
-                return (
-                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
-                    <td className="py-3 px-4 font-bold text-slate-400 text-center">
-                      {idx + 1}
-                    </td>
-                    <td className="py-3 px-4 font-semibold text-slate-800">
-                      <div className="flex items-center gap-2">
-                        <span className="truncate max-w-md" title={item.descricao}>{item.descricao}</span>
-                        {item.unidade && (
-                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-mono shrink-0">
-                            {item.unidade}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-3 px-4">
-                      <span className={clsx(
-                        'px-2.5 py-1 rounded-full text-[10px] font-bold border inline-block shadow-2xs',
-                        isComp ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-                      )}>
-                        {isComp ? 'Composição' : 'Insumo'}
-                      </span>
-                    </td>
-                    <td className="py-3 px-4">
-                      <div className="flex items-center justify-end gap-3">
-                        <div className="w-36 bg-slate-100 rounded-full h-2.5 overflow-hidden flex shadow-inner">
-                          <div 
-                            className={clsx(
-                              'h-full rounded-full transition-all duration-500',
-                              isComp ? 'bg-gradient-to-r from-purple-500 to-indigo-600' : 'bg-gradient-to-r from-emerald-400 to-teal-600'
-                            )} 
-                            style={{ width: `${percentage}%` }}
-                          />
-                        </div>
-                        <span className="font-bold text-slate-800 w-10 text-right shrink-0">
-                          {item.count}x
-                        </span>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-      </div>
         </>
       ) : (
         /* DASHBOARD FINANCEIRO */
@@ -1061,6 +952,115 @@ export default function Dashboard() {
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
+            </div>
+          </div>
+
+          {/* TABELA FINANCEIRA: Itens Mais Usados nos Orçamentos com Minigráfico */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+            {/* Cabeçalho da Tabela com Filtros */}
+            <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
+              <div>
+                <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-amber-500" />
+                  <span>Itens Mais Usados nos Orçamentos</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5 font-medium">
+                  Top 10 itens com maior frequência de utilização nas propostas
+                </p>
+              </div>
+
+              {/* Filtros: Todos / Composições / Insumos */}
+              <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl text-xs font-bold text-slate-600">
+                <button
+                  onClick={() => setItemTypeFilter('todos')}
+                  className={clsx(
+                    'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
+                    itemTypeFilter === 'todos' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
+                  )}
+                >
+                  Todos
+                </button>
+                <button
+                  onClick={() => setItemTypeFilter('composicao')}
+                  className={clsx(
+                    'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
+                    itemTypeFilter === 'composicao' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
+                  )}
+                >
+                  Composições
+                </button>
+                <button
+                  onClick={() => setItemTypeFilter('insumo')}
+                  className={clsx(
+                    'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
+                    itemTypeFilter === 'insumo' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
+                  )}
+                >
+                  Insumos
+                </button>
+              </div>
+            </div>
+
+            {/* Tabela de Itens com Sparkline Bar */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-left text-xs">
+                <thead>
+                  <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                    <th className="py-3 px-4 w-12 text-center">#</th>
+                    <th className="py-3 px-4">Item / Descrição</th>
+                    <th className="py-3 px-4 w-32">Tipo</th>
+                    <th className="py-3 px-4 w-64 text-right">Frequência de Uso</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100 text-slate-700">
+                  {filteredMostUsedItems.map((item, idx) => {
+                    const percentage = Math.max(8, Math.round((item.count / maxItemCount) * 100));
+                    const isComp = item.tipo === 'composicao';
+
+                    return (
+                      <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                        <td className="py-3 px-4 font-bold text-slate-400 text-center">
+                          {idx + 1}
+                        </td>
+                        <td className="py-3 px-4 font-semibold text-slate-800">
+                          <div className="flex items-center gap-2">
+                            <span className="truncate max-w-md" title={item.descricao}>{item.descricao}</span>
+                            {item.unidade && (
+                              <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-mono shrink-0">
+                                {item.unidade}
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="py-3 px-4">
+                          <span className={clsx(
+                            'px-2.5 py-1 rounded-full text-[10px] font-bold border inline-block shadow-2xs',
+                            isComp ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                          )}>
+                            {isComp ? 'Composição' : 'Insumo'}
+                          </span>
+                        </td>
+                        <td className="py-3 px-4">
+                          <div className="flex items-center justify-end gap-3">
+                            <div className="w-36 bg-slate-100 rounded-full h-2.5 overflow-hidden flex shadow-inner">
+                              <div 
+                                className={clsx(
+                                  'h-full rounded-full transition-all duration-500',
+                                  isComp ? 'bg-gradient-to-r from-purple-500 to-indigo-600' : 'bg-gradient-to-r from-emerald-400 to-teal-600'
+                                )} 
+                                style={{ width: `${percentage}%` }}
+                              />
+                            </div>
+                            <span className="font-bold text-slate-800 w-10 text-right shrink-0">
+                              {item.count}x
+                            </span>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
