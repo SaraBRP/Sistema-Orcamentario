@@ -1,8 +1,8 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles } from 'lucide-react';
+import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
-  BarChart, Bar, XAxis, YAxis, CartesianGrid
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
 } from 'recharts';
 import clsx from 'clsx';
 import { supabase } from '../lib/supabase';
@@ -294,7 +294,42 @@ export default function Dashboard() {
     { name: 'CSN MINERAÇÃO', quantidade: 1 },
   ];
 
-  // 3. Filtragem e ordenação dos 10 Itens Mais Usados nos Orçamentos
+  // 3. Dados para o Gráfico de Barras Clusterizadas: Desempenho por Orçamentista (Orçamentos em Andamento vs Memórias de Cálculo)
+  const orcamentistasMap = new Map<string, { name: string; orcamentosEmAndamento: number; memoriasCalculo: number }>();
+
+  // Contagem de Orçamentos em Andamento por Orçamentista (apenas a última revisão)
+  ultimasRevisoesOrcamentos.forEach(o => {
+    const respName = (o.responsavel || 'Não Atribuído').trim();
+    if (!orcamentistasMap.has(respName)) {
+      orcamentistasMap.set(respName, { name: respName, orcamentosEmAndamento: 0, memoriasCalculo: 0 });
+    }
+    if (getDashboardStatusCategory(o) === 'Em andamento') {
+      orcamentistasMap.get(respName)!.orcamentosEmAndamento += 1;
+    }
+  });
+
+  // Contagem de Memórias de Cálculo por Orçamentista (vinculadas aos orçamentos)
+  orcamentos.forEach(o => {
+    if (o.orcamento_importado_id) {
+      const respName = (o.responsavel || 'Não Atribuído').trim();
+      if (!orcamentistasMap.has(respName)) {
+        orcamentistasMap.set(respName, { name: respName, orcamentosEmAndamento: 0, memoriasCalculo: 0 });
+      }
+      orcamentistasMap.get(respName)!.memoriasCalculo += 1;
+    }
+  });
+
+  const realOrcamentistaData = Array.from(orcamentistasMap.values())
+    .filter(item => item.orcamentosEmAndamento > 0 || item.memoriasCalculo > 0);
+
+  const orcamentistaChartData = realOrcamentistaData.length > 0 ? realOrcamentistaData : [
+    { name: 'Sara', orcamentosEmAndamento: 5, memoriasCalculo: 7 },
+    { name: 'Carlos Santos', orcamentosEmAndamento: 3, memoriasCalculo: 4 },
+    { name: 'Eng. Gabriel', orcamentosEmAndamento: 2, memoriasCalculo: 5 },
+    { name: 'Mariana Lima', orcamentosEmAndamento: 1, memoriasCalculo: 3 },
+  ];
+
+  // 4. Filtragem e ordenação dos 10 Itens Mais Usados nos Orçamentos
   const filteredMostUsedItems = useMemo(() => {
     let list = mostUsedItems;
 
@@ -402,10 +437,50 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* GRAFICO 2: Quantidade de Orçamentos por Cliente / Empresa com mais Orçamentos */}
+        {/* GRAFICO 2: Desempenho por Orçamentista (Barras Agrupadas Clusterizadas) */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
-          {/* Cabeçalho Roxo (Estilo Referência) */}
+          {/* Cabeçalho Roxo */}
           <div className="bg-gradient-to-r from-purple-600 to-indigo-600 text-white px-5 py-3.5 flex justify-between items-center shadow-xs">
+            <h3 className="text-sm font-bold flex items-center gap-2">
+              <Users className="w-4 h-4 text-white/90" />
+              <span>Desempenho por Orçamentista</span>
+            </h3>
+            <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
+              {orcamentistaChartData.length} Orçamentistas
+            </span>
+          </div>
+
+          <div className="p-6 flex-1 flex flex-col justify-between">
+            <h4 className="text-center text-xs font-bold text-slate-700 uppercase tracking-wider mb-2">
+              Orçamentos em Andamento x Memórias de Cálculo
+            </h4>
+
+            {/* Gráfico de Barras Agrupadas Clusterizadas Recharts */}
+            <div className="w-full h-72">
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart
+                  data={orcamentistaChartData}
+                  margin={{ top: 15, right: 30, left: 10, bottom: 5 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
+                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#334155', fontWeight: 600 }} />
+                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <RechartsTooltip
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: '12px', fontWeight: 'bold' }}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '11px', fontWeight: 600 }} />
+                  <Bar dataKey="orcamentosEmAndamento" name="Orçamentos em Andamento" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={22} />
+                  <Bar dataKey="memoriasCalculo" name="Memórias de Cálculo" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={22} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+
+        {/* GRAFICO 3 (MOVIDO): Empresa com mais Orçamentos */}
+        <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
+          {/* Cabeçalho Azul */}
+          <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-5 py-3.5 flex justify-between items-center shadow-xs">
             <h3 className="text-sm font-bold flex items-center gap-2">
               <BarChart3 className="w-4 h-4 text-white/90" />
               <span>Empresa com mais Orçamentos</span>
