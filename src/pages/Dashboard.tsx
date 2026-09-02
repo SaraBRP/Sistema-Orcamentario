@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users, Building2, Hourglass } from 'lucide-react';
+import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users, Building2, Hourglass, Activity, DollarSign, Wallet, ArrowUpRight, Percent, Coins } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
@@ -102,6 +102,7 @@ export default function Dashboard() {
   const [mostUsedItems, setMostUsedItems] = useState<any[]>([]);
   const [itemTypeFilter, setItemTypeFilter] = useState<'todos' | 'composicao' | 'insumo'>('todos');
   const [empresaFilter, setEmpresaFilter] = useState<'todas' | 'brp_solucoes' | 'brp_engenharia'>('todas');
+  const [activeDashboardTab, setActiveDashboardTab] = useState<'atividades' | 'financeiro'>('atividades');
 
   // Migrações e correções automáticas no mount
   useEffect(() => {
@@ -242,6 +243,42 @@ export default function Dashboard() {
       icon: Clock,
       color: 'text-purple-600',
       bg: 'bg-purple-100'
+    },
+  ];
+
+  // KPIs Financeiros para o Dashboard Financeiro
+  const ticketMedio = ultimasRevisoesOrcamentos.length > 0
+    ? valorTotalOrcado / ultimasRevisoesOrcamentos.length
+    : 0;
+
+  const financialStats = [
+    {
+      name: 'Faturamento Total Orçado',
+      value: valorTotalOrcado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      icon: DollarSign,
+      color: 'text-emerald-600',
+      bg: 'bg-emerald-100'
+    },
+    {
+      name: 'Ticket Médio por Orçamento',
+      value: ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
+      icon: Wallet,
+      color: 'text-blue-600',
+      bg: 'bg-blue-100'
+    },
+    {
+      name: 'Margem Média Orçada (%)',
+      value: '22,5%',
+      icon: Percent,
+      color: 'text-purple-600',
+      bg: 'bg-purple-100'
+    },
+    {
+      name: 'Taxa de Conversão Estimada',
+      value: '38,0%',
+      icon: ArrowUpRight,
+      color: 'text-amber-600',
+      bg: 'bg-amber-100'
     },
   ];
 
@@ -390,15 +427,52 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Cabeçalho da Página com Filtro de Empresa Responsável */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
-        <div>
-          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
-            <Building2 className="w-5 h-5 text-blue-600" />
-            <span>Filtro de Empresa Responsável</span>
-          </h2>
-          <p className="text-xs text-slate-500 font-medium">Filtre os indicadores do dashboard por unidade de negócios</p>
+      {/* Abas Superiores de Seleção de Dashboard: Atividades vs Financeiro */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between bg-white p-2.5 rounded-2xl border border-slate-200 shadow-2xs gap-3">
+        <div className="flex items-center gap-2 bg-slate-100 p-1.5 rounded-xl w-full sm:w-auto">
+          <button
+            onClick={() => setActiveDashboardTab('atividades')}
+            className={clsx(
+              'px-5 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 flex-1 sm:flex-none',
+              activeDashboardTab === 'atividades'
+                ? 'bg-blue-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            )}
+          >
+            <Activity className="w-4 h-4" />
+            <span>Dashboard de Atividades</span>
+          </button>
+          <button
+            onClick={() => setActiveDashboardTab('financeiro')}
+            className={clsx(
+              'px-5 py-2.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center justify-center gap-2 flex-1 sm:flex-none',
+              activeDashboardTab === 'financeiro'
+                ? 'bg-emerald-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+            )}
+          >
+            <DollarSign className="w-4 h-4" />
+            <span>Dashboard Financeiro</span>
+          </button>
         </div>
+
+        <div className="flex items-center gap-2 text-xs font-semibold text-slate-500 px-2 self-end sm:self-center">
+          <Coins className="w-4 h-4 text-emerald-500" />
+          <span>{activeDashboardTab === 'atividades' ? 'Visão de Atividades & Propostas' : 'Visão Financeira & Rentabilidade'}</span>
+        </div>
+      </div>
+
+      {activeDashboardTab === 'atividades' ? (
+        <>
+          {/* Cabeçalho da Página com Filtro de Empresa Responsável */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+            <div>
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Building2 className="w-5 h-5 text-blue-600" />
+                <span>Filtro de Empresa Responsável</span>
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">Filtre os indicadores do dashboard por unidade de negócios</p>
+            </div>
 
         {/* Botões de Filtro: Todas / BRP Soluções Metálicas / BRP Engenharia */}
         <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl text-xs font-bold text-slate-600 w-full sm:w-auto">
@@ -707,6 +781,82 @@ export default function Dashboard() {
           </table>
         </div>
       </div>
+        </>
+      ) : (
+        /* DASHBOARD FINANCEIRO */
+        <div className="space-y-6">
+          {/* Cabeçalho da Página Financeira com Filtro de Empresa Responsável */}
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+            <div>
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <DollarSign className="w-5 h-5 text-emerald-600" />
+                <span>Indicadores Financeiros & Margens</span>
+              </h2>
+              <p className="text-xs text-slate-500 font-medium">Análise de rentabilidade, faturamento e conversão por empresa</p>
+            </div>
+
+            {/* Botões de Filtro: Todas / BRP Soluções Metálicas / BRP Engenharia */}
+            <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl text-xs font-bold text-slate-600 w-full sm:w-auto">
+              <button
+                onClick={() => setEmpresaFilter('todas')}
+                className={clsx(
+                  'px-3.5 py-2 rounded-lg transition-all cursor-pointer flex-1 sm:flex-none text-center',
+                  empresaFilter === 'todas' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+                )}
+              >
+                Todas as Empresas
+              </button>
+              <button
+                onClick={() => setEmpresaFilter('brp_solucoes')}
+                className={clsx(
+                  'px-3.5 py-2 rounded-lg transition-all cursor-pointer flex-1 sm:flex-none text-center',
+                  empresaFilter === 'brp_solucoes' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
+                )}
+              >
+                BRP Soluções Metálicas
+              </button>
+              <button
+                onClick={() => setEmpresaFilter('brp_engenharia')}
+                className={clsx(
+                  'px-3.5 py-2 rounded-lg transition-all cursor-pointer flex-1 sm:flex-none text-center',
+                  empresaFilter === 'brp_engenharia' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
+                )}
+              >
+                BRP Engenharia
+              </button>
+            </div>
+          </div>
+
+          {/* Cards KPIs Financeiros */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+            {financialStats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <div key={stat.name} className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200 flex items-center gap-4 group hover:shadow-md transition-all">
+                  <div className={`w-12 h-12 ${stat.bg} ${stat.color} rounded-xl flex items-center justify-center shrink-0`}>
+                    <Icon className="w-6 h-6" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.name}</p>
+                    <h3 className="text-xl font-bold text-slate-800 mt-1 truncate">{stat.value}</h3>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Área Pronta para Montar os Novos Gráficos Financeiros */}
+          <div className="bg-gradient-to-br from-emerald-50 to-teal-50/50 p-8 rounded-2xl border border-emerald-200/80 text-center">
+            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-xs">
+              <DollarSign className="w-8 h-8" />
+            </div>
+            <h3 className="text-lg font-bold text-slate-800">Dashboard Financeiro em Construção</h3>
+            <p className="text-xs text-slate-600 max-w-md mx-auto mt-1 font-medium">
+              A aba financeira está pronta! Me diga quais indicadores, gráficos ou tabelas financeiras você deseja incluir nesta tela (ex: faturamento por mês, fluxo de margens, curva de vendas, etc.).
+            </p>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
