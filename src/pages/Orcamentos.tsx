@@ -556,6 +556,27 @@ export default function Orcamentos() {
     }
   };
 
+  const generateFastOrcamentoCode = () => {
+    const today = new Date();
+    const dd = String(today.getDate()).padStart(2, '0');
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const ddmm = `${dd}${mm}`;
+    const year = today.getFullYear();
+
+    const seqs = (orcamentos || []).map((o: any) => {
+      if (!o || !o.codigo) return 0;
+      const parts = String(o.codigo).split('.');
+      if (parts.length >= 2) {
+        const num = parseInt(parts[1], 10);
+        return isNaN(num) ? 0 : num;
+      }
+      return 0;
+    });
+    const maxSeq = Math.max(0, ...seqs);
+    const seqStr = String(maxSeq + 1).padStart(3, '0');
+    return `${ddmm}.${seqStr}.0-${year}`;
+  };
+
   const generateNextOrcamentoCode = async (): Promise<string> => {
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, '0');
@@ -588,17 +609,16 @@ export default function Orcamentos() {
       return `${ddmm}.${seqStr}.0-${year}`;
     } catch (err) {
       console.error('Erro ao gerar código do orçamento:', err);
-      const seqStr = String((orcamentos.length || 0) + 1).padStart(3, '0');
-      return `${ddmm}.${seqStr}.0-${year}`;
+      return generateFastOrcamentoCode();
     }
   };
 
-  const handleOpenCreateModal = async () => {
+  const handleOpenCreateModal = () => {
     const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';
-    const suggestedCode = await generateNextOrcamentoCode();
+    const initialCode = generateFastOrcamentoCode();
 
     setNewOrcamentoData({
-      codigo: suggestedCode,
+      codigo: initialCode,
       empresa: 'BRP Soluções Metálicas',
       descricao: '',
       cliente: '',
@@ -608,7 +628,16 @@ export default function Orcamentos() {
       cidade: '',
       estado: 'GO'
     });
+    
+    // Abre a modal imediatamente
     setIsCreateModalOpen(true);
+
+    // Atualiza com o código definitivo do banco
+    generateNextOrcamentoCode().then(finalCode => {
+      setNewOrcamentoData(prev => ({ ...prev, codigo: finalCode }));
+    }).catch(err => {
+      console.error('Erro ao atualizar código:', err);
+    });
   };
 
   const handleCreateOrcamento = async (e: React.FormEvent) => {
