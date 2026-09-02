@@ -830,7 +830,7 @@ export default function CalculosQuantitativosPage() {
                 />
               </div>
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente (Auto)</label>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
                 <input type="text" disabled value={newOrcamentoData.gestor_cliente || ''} placeholder="Preenchido automaticamente ao selecionar o cliente..." className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed" />
               </div>
               <div>
@@ -842,11 +842,11 @@ export default function CalculosQuantitativosPage() {
               </div>
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra (Auto)</label>
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
                   <input type="text" disabled value={newOrcamentoData.cidade || ''} placeholder="Preenchido automaticamente..." className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed uppercase" />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF (Auto)</label>
+                  <label className="block font-bold text-slate-700 mb-1">UF</label>
                   <input type="text" disabled value={newOrcamentoData.estado || ''} className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-bold bg-slate-100 cursor-not-allowed uppercase text-center" />
                 </div>
               </div>

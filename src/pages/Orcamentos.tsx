@@ -1458,7 +1458,7 @@ export default function Orcamentos() {
 
             <form onSubmit={handleCreateOrcamento} className="space-y-4 text-xs">
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento (Auto)</label>
+                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento</label>
                 <input 
                   type="text"
                   readOnly
@@ -1509,7 +1509,7 @@ export default function Orcamentos() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente (Auto)</label>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
                 <input 
                   type="text"
                   disabled
@@ -1537,7 +1537,7 @@ export default function Orcamentos() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra (Auto)</label>
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
                   <input 
                     type="text"
                     disabled
@@ -1548,7 +1548,7 @@ export default function Orcamentos() {
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF (Auto)</label>
+                  <label className="block font-bold text-slate-700 mb-1">UF</label>
                   <input 
                     type="text"
                     disabled
@@ -1642,7 +1642,7 @@ export default function Orcamentos() {
               </div>
 
               <div>
-                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente (Auto)</label>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
                 <input 
                   type="text"
                   disabled
@@ -1670,7 +1670,7 @@ export default function Orcamentos() {
 
               <div className="grid grid-cols-3 gap-3">
                 <div className="col-span-2">
-                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra (Auto)</label>
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
                   <input 
                     type="text"
                     disabled
@@ -1681,7 +1681,7 @@ export default function Orcamentos() {
                 </div>
 
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">UF (Auto)</label>
+                  <label className="block font-bold text-slate-700 mb-1">UF</label>
                   <input 
                     type="text"
                     disabled
