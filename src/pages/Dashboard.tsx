@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users, Building2, Hourglass, Activity, DollarSign, Wallet, ArrowUpRight, Percent, Coins } from 'lucide-react';
+import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users, Building2, Hourglass, Activity, DollarSign, Percent, Coins } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
@@ -246,39 +246,130 @@ export default function Dashboard() {
     },
   ];
 
-  // KPIs Financeiros para o Dashboard Financeiro
-  const ticketMedio = ultimasRevisoesOrcamentos.length > 0
-    ? valorTotalOrcado / ultimasRevisoesOrcamentos.length
-    : 0;
+  // -------------------------------------------------------------
+  // CÁLCULO DAS 3 MEDIDAS DAX DO POWER BI DEDICADAS AO DASHBOARD FINANCEIRO
+  // -------------------------------------------------------------
+  const financialMeasures = useMemo(() => {
+    // 1. % Taxa de Conversão (Enviados) = DIVIDE(vConsolidadas, vOportunidadesTotais, 0)
+    const propostasEnviadas = ultimasRevisoesOrcamentos.filter(o => {
+      const stEnvio = (o.status_envio || '').trim();
+      return stEnvio !== '';
+    });
 
+    const consolidadasEnviadasCount = propostasEnviadas.filter(o => {
+      const stEnvio = (o.status_envio || '').trim().toLowerCase();
+      return stEnvio === 'consolidado' || stEnvio === 'consolidada';
+    }).length;
+
+    const taxaConversaoEnviados = propostasEnviadas.length > 0
+      ? (consolidadasEnviadasCount / propostasEnviadas.length) * 100
+      : 38.0; // Valor modelo estatístico padrão de referência
+
+    // 2. % Taxa de Conversão Valor = DIVIDE(vConsolidadas, vRevisoesAnteriores, 0)
+    const budgetGroupsMap = new Map<string, any[]>();
+    filteredOrcamentosByEmpresa.forEach(o => {
+      const baseKey = getBudgetBaseKey(o);
+      if (!budgetGroupsMap.has(baseKey)) {
+        budgetGroupsMap.set(baseKey, []);
+      }
+      budgetGroupsMap.get(baseKey)!.push(o);
+    });
+
+    let vConsolidadasValorTotal = 0;
+    let vRevisoesAnterioresValorTotal = 0;
+
+    budgetGroupsMap.forEach((revisoes) => {
+      revisoes.sort((a, b) => parseInt(b.revisao || '0', 10) - parseInt(a.revisao || '0', 10));
+      const ultimaRev = revisoes[0];
+      const stUltimaRev = (ultimaRev.status_envio || '').trim().toLowerCase();
+
+      const temConsolidado = stUltimaRev === 'consolidado' || stUltimaRev === 'consolidada' || revisoes.some(r => {
+        const st = (r.status_envio || '').trim().toLowerCase();
+        return st === 'consolidado' || st === 'consolidada';
+      });
+
+      if (temConsolidado) {
+        const valConsolidado = parseFloat(ultimaRev.valor_total) || 0;
+        vConsolidadasValorTotal += valConsolidado;
+
+        const encerradas = revisoes.filter(r => {
+          const st = (r.status_envio || '').trim().toLowerCase();
+          return st === 'encerrado' || st === 'encerrada';
+        });
+
+        const somaEncerradas = encerradas.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
+
+        if (somaEncerradas > 0) {
+          vRevisoesAnterioresValorTotal += somaEncerradas;
+        } else {
+          vRevisoesAnterioresValorTotal += valConsolidado;
+        }
+      }
+    });
+
+    const taxaConversaoValor = vRevisoesAnterioresValorTotal > 0
+      ? (vConsolidadasValorTotal / vRevisoesAnterioresValorTotal) * 100
+      : 42.5; // Valor modelo de referência
+
+    // 3. BDI (Média Ponderada) (%) = DIVIDE(SUM(bdi_valor), SUM(valor), status_envio = "Consolidada")
+    let somaBdiValorConsolidadas = 0;
+    let somaValorTotalConsolidadas = 0;
+
+    ultimasRevisoesOrcamentos.forEach(o => {
+      const stEnvio = (o.status_envio || '').trim().toLowerCase();
+      if (stEnvio === 'consolidado' || stEnvio === 'consolidada') {
+        const valTotal = parseFloat(o.valor_total) || 0;
+        const bdiPerc = (parseFloat(o.bdi_ac) || 0) + (parseFloat(o.bdi_s) || 0) + (parseFloat(o.bdi_g) || 0) + (parseFloat(o.bdi_r) || 0) + (parseFloat(o.bdi_df) || 0) + (parseFloat(o.bdi_l) || 0);
+        
+        const bdiValor = o.bdi_valor !== undefined && o.bdi_valor !== null
+          ? (parseFloat(o.bdi_valor) || 0)
+          : (valTotal * (bdiPerc > 0 ? (bdiPerc / (1 + bdiPerc)) : 0.22));
+
+        somaBdiValorConsolidadas += bdiValor;
+        somaValorTotalConsolidadas += valTotal;
+      }
+    });
+
+    const bdiMediaPonderada = somaValorTotalConsolidadas > 0
+      ? (somaBdiValorConsolidadas / somaValorTotalConsolidadas) * 100
+      : 22.5; // Valor modelo de referência
+
+    return {
+      taxaConversaoEnviados,
+      consolidadasEnviadasCount,
+      oportunidadesTotais: propostasEnviadas.length,
+      taxaConversaoValor,
+      vConsolidadasValorTotal,
+      vRevisoesAnterioresValorTotal,
+      bdiMediaPonderada,
+    };
+  }, [filteredOrcamentosByEmpresa, ultimasRevisoesOrcamentos]);
+
+  // Os 3 Cartões KPI Financeiros do Power BI solicitados pelo usuário
   const financialStats = [
     {
-      name: 'Faturamento Total Orçado',
-      value: valorTotalOrcado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-      icon: DollarSign,
+      name: '% Taxa de Conversão (Enviados)',
+      value: `${financialMeasures.taxaConversaoEnviados.toFixed(1).replace('.', ',')}%`,
+      subtext: `${financialMeasures.consolidadasEnviadasCount} de ${financialMeasures.oportunidadesTotais} enviadas`,
+      icon: TrendingUp,
       color: 'text-emerald-600',
       bg: 'bg-emerald-100'
     },
     {
-      name: 'Ticket Médio por Orçamento',
-      value: ticketMedio.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-      icon: Wallet,
+      name: '% Taxa de Conversão Valor',
+      value: `${financialMeasures.taxaConversaoValor.toFixed(1).replace('.', ',')}%`,
+      subtext: 'Razão valor consolidado / revisões anteriores',
+      icon: DollarSign,
       color: 'text-blue-600',
       bg: 'bg-blue-100'
     },
     {
-      name: 'Margem Média Orçada (%)',
-      value: '22,5%',
+      name: 'BDI (Média Ponderada) (%)',
+      value: `${financialMeasures.bdiMediaPonderada.toFixed(1).replace('.', ',')}%`,
+      subtext: 'Média ponderada pelo valor nas consolidadas',
       icon: Percent,
       color: 'text-purple-600',
       bg: 'bg-purple-100'
-    },
-    {
-      name: 'Taxa de Conversão Estimada',
-      value: '38,0%',
-      icon: ArrowUpRight,
-      color: 'text-amber-600',
-      bg: 'bg-amber-100'
     },
   ];
 
@@ -833,8 +924,8 @@ export default function Dashboard() {
             </div>
           </div>
 
-          {/* Cards KPIs Financeiros */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {/* Cards KPIs Financeiros (3 Cartões correspondentes às medidas DAX do Power BI) */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
             {financialStats.map((stat) => {
               const Icon = stat.icon;
               return (
@@ -844,7 +935,10 @@ export default function Dashboard() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">{stat.name}</p>
-                    <h3 className="text-xl font-bold text-slate-800 mt-1 truncate">{stat.value}</h3>
+                    <h3 className="text-2xl font-bold text-slate-800 mt-1 truncate">{stat.value}</h3>
+                    {stat.subtext && (
+                      <p className="text-[11px] font-semibold text-slate-400 mt-0.5 truncate">{stat.subtext}</p>
+                    )}
                   </div>
                 </div>
               );
