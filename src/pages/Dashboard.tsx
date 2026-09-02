@@ -597,22 +597,28 @@ export default function Dashboard() {
               Orçamentos em Andamento x Memórias de Cálculo
             </h4>
 
-            {/* Gráfico de Barras Agrupadas Clusterizadas Recharts */}
+            {/* Gráfico de Barras Horizontais Clusterizadas Recharts */}
             <div className="w-full h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart
+                  layout="vertical"
                   data={orcamentistaChartData}
-                  margin={{ top: 15, right: 30, left: 10, bottom: 5 }}
+                  margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
                 >
-                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 11, fill: '#334155', fontWeight: 600 }} />
-                  <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <CartesianGrid strokeDasharray="3 3" horizontal={false} stroke="#f1f5f9" />
+                  <XAxis type="number" allowDecimals={false} tick={{ fontSize: 11, fill: '#64748b' }} />
+                  <YAxis 
+                    type="category" 
+                    dataKey="name" 
+                    width={110} 
+                    tick={{ fontSize: 10, fill: '#334155', fontWeight: 600 }}
+                  />
                   <RechartsTooltip
                     contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 4px 12px rgba(0,0,0,0.15)', fontSize: '12px', fontWeight: 'bold' }}
                   />
                   <Legend wrapperStyle={{ paddingTop: '10px', fontSize: '11px', fontWeight: 600 }} />
-                  <Bar dataKey="orcamentosEmAndamento" name="Orçamentos em Andamento" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={22} />
-                  <Bar dataKey="memoriasCalculo" name="Memórias de Cálculo" fill="#8b5cf6" radius={[4, 4, 0, 0]} barSize={22} />
+                  <Bar dataKey="orcamentosEmAndamento" name="Orçamentos em Andamento" fill="#3b82f6" radius={[0, 4, 4, 0]} barSize={14} />
+                  <Bar dataKey="memoriasCalculo" name="Memórias de Cálculo" fill="#8b5cf6" radius={[0, 4, 4, 0]} barSize={14} />
                 </BarChart>
               </ResponsiveContainer>
             </div>
