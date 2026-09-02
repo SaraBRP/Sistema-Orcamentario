@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Calculator, Building2, TrendingUp, BarChart3, PieChart as PieIcon, Clock } from 'lucide-react';
+import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
@@ -96,7 +96,6 @@ const filterLatestRevisions = (orcList: any[]): any[] => {
 
 export default function Dashboard() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
-  const [totalClientes, setTotalClientes] = useState(0);
   const [memoriaisPendentesCount, setMemoriaisPendentesCount] = useState(0);
 
   // Migrações e correções automáticas no mount
@@ -147,16 +146,6 @@ export default function Dashboard() {
           const pendentes = impData.filter(imp => !linkedImpIds.has(imp.id)).length;
           setMemoriaisPendentesCount(pendentes);
         }
-
-        // 3. Busca total de clientes cadastrados
-        const { count: clientCount } = await supabase
-          .schema('engenharia')
-          .from('clientes')
-          .select('*', { count: 'exact', head: true });
-
-        if (clientCount !== null) {
-          setTotalClientes(clientCount);
-        }
       } catch (err) {
         console.error('Erro ao carregar dados do dashboard:', err);
       }
@@ -169,8 +158,8 @@ export default function Dashboard() {
   const ultimasRevisoesOrcamentos = filterLatestRevisions(orcamentos);
 
   // Cálculos dos KPIs principais considerando a última revisão
-  const totalOrcamentosCount = ultimasRevisoesOrcamentos.length;
   const valorTotalOrcado = ultimasRevisoesOrcamentos.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
+  const emAndamentoCount = ultimasRevisoesOrcamentos.filter(o => getDashboardStatusCategory(o) === 'Em andamento').length;
 
   const stats = [
     {
@@ -181,8 +170,8 @@ export default function Dashboard() {
       bg: 'bg-blue-100'
     },
     {
-      name: 'Total de Orçamentos',
-      value: totalOrcamentosCount.toString(),
+      name: 'Orçamentos em Andamento',
+      value: emAndamentoCount.toString(),
       icon: TrendingUp,
       color: 'text-emerald-600',
       bg: 'bg-emerald-100'
@@ -193,13 +182,6 @@ export default function Dashboard() {
       icon: Clock,
       color: 'text-amber-600',
       bg: 'bg-amber-100'
-    },
-    {
-      name: 'Clientes Cadastrados',
-      value: totalClientes > 0 ? totalClientes.toString() : (new Set(orcamentos.map(o => o.cliente).filter(Boolean)).size).toString(),
-      icon: Building2,
-      color: 'text-purple-600',
-      bg: 'bg-purple-100'
     },
   ];
 
@@ -283,7 +265,7 @@ export default function Dashboard() {
   return (
     <div className="space-y-6">
       {/* Cards de Indicadores KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
