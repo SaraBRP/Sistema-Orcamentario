@@ -6,6 +6,7 @@ import {
 } from 'recharts';
 import clsx from 'clsx';
 import { supabase } from '../lib/supabase';
+import MapaOrcamentosBrasil from '../components/MapaOrcamentosBrasil';
 
 // Cores dos gráficos
 // Mapeamento e cores das 4 categorias personalizadas do Dashboard
@@ -477,7 +478,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* GRAFICO 3 (MOVIDO): Empresa com mais Orçamentos */}
+        {/* GRAFICO 3: Empresa com mais Orçamentos */}
         <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden flex flex-col">
           {/* Cabeçalho Azul */}
           <div className="bg-gradient-to-r from-blue-600 to-cyan-600 text-white px-5 py-3.5 flex justify-between items-center shadow-xs">
@@ -525,6 +526,9 @@ export default function Dashboard() {
             </div>
           </div>
         </div>
+
+        {/* GRAFICO 4: Distribuição Geográfica dos Orçamentos (Mapa do Brasil com Marcadores de Círculo) */}
+        <MapaOrcamentosBrasil orcamentos={orcamentos} />
 
       </div>
 
