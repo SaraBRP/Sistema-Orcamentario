@@ -27,6 +27,7 @@ const DEFAULT_COLORS = ['#3b82f6', '#f59e0b', '#10b981', '#8b5cf6', '#06b6d4', '
 export default function Dashboard() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
   const [totalClientes, setTotalClientes] = useState(0);
+  const [memoriaisPendentesCount, setMemoriaisPendentesCount] = useState(0);
 
   // Migrações e correções automáticas no mount
   useEffect(() => {
@@ -50,17 +51,34 @@ export default function Dashboard() {
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
-        // 1. Busca orçamentos da empresa
+        // 1. Busca orçamentos da empresa (incluindo o ID do memorial importado vinculado)
         const { data: orcData, error: orcErr } = await supabase
           .schema('engenharia')
           .from('orcamentos')
-          .select('id, codigo, cliente, projeto, status, valor_total, created_at');
+          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id');
 
         if (!orcErr && orcData) {
           setOrcamentos(orcData);
         }
 
-        // 2. Busca total de clientes cadastrados
+        // 2. Busca memoriais de cálculo importados para contar os que AINDA NÃO tiveram orçamento gerado
+        const { data: impData } = await supabase
+          .schema('engenharia')
+          .from('orcamentos_importados')
+          .select('id');
+
+        if (impData) {
+          const linkedImpIds = new Set(
+            (orcData || [])
+              .map(o => o.orcamento_importado_id)
+              .filter(Boolean)
+          );
+          // Memoriais criados que ainda NÃO possuem orçamento gerado
+          const pendentes = impData.filter(imp => !linkedImpIds.has(imp.id)).length;
+          setMemoriaisPendentesCount(pendentes);
+        }
+
+        // 3. Busca total de clientes cadastrados
         const { count: clientCount } = await supabase
           .schema('engenharia')
           .from('clientes')
@@ -80,7 +98,6 @@ export default function Dashboard() {
   // Cálculos dos KPIs principais
   const totalOrcamentosCount = orcamentos.length;
   const valorTotalOrcado = orcamentos.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
-  const pendentesCount = orcamentos.filter(o => o.status === 'Ag. Validação' || o.status === 'Com Pendências' || o.status === 'Em andamento').length;
 
   const stats = [
     {
@@ -99,7 +116,7 @@ export default function Dashboard() {
     },
     {
       name: 'Orçamentos Pendentes',
-      value: pendentesCount.toString(),
+      value: memoriaisPendentesCount.toString(),
       icon: Clock,
       color: 'text-amber-600',
       bg: 'bg-amber-100'
