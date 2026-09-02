@@ -89,7 +89,7 @@ const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
 
     const origParts = (item.item_eap || '').split('.').filter(Boolean);
     const isDesdobrado = item.status_linha === 'desdobrado';
-    const isExplicitSection = item.tipo_vinculo === 'texto' || (origParts.length === 1 && (item.quantidade === 0 || !item.quantidade));
+    const isExplicitSection = (origParts.length === 1 && (item.quantidade === 0 || !item.quantidade) && item.status_linha !== 'desdobrado' && item.status_linha !== 'inserido_empresa');
 
     let level = 1;
     if (isExplicitSection) {
@@ -383,18 +383,29 @@ export default function OrcamentoDeParaStudio() {
 
       if (error) throw error;
 
-      setItems(prev => prev.map(item => {
-        if (item.id === targetItem.id) {
-          return {
-            ...item,
-            ...payload,
-            texto_empresa: trimmed ? trimmed : null,
-            composicao: undefined,
-            insumo: undefined
-          };
-        }
-        return item;
-      }));
+      setItems(prev => {
+        const copy = prev.map(item => {
+          if (item.id === targetItem.id) {
+            return {
+              ...item,
+              ...payload,
+              texto_empresa: trimmed ? trimmed : null,
+              composicao: undefined,
+              insumo: undefined
+            };
+          }
+          return item;
+        });
+
+        const rebuilt = rebuildStudioEaps(copy);
+        rebuilt.forEach(it => {
+          if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+            supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+          }
+        });
+
+        return rebuilt;
+      });
 
       updateImportStatus();
     } catch (err: any) {
@@ -2022,7 +2033,7 @@ export default function OrcamentoDeParaStudio() {
                 const isCollapsed = collapsedEaps.has(item.item_eap);
 
                 const role = getItemEapRole(item);
-                const isSecaoTexto = role === 'secao_texto' || hasChildrenBool;
+                const isSecaoTexto = role === 'secao_texto' || (hasChildrenBool && (!item.quantidade || item.quantidade === 0) && item.status_linha !== 'desdobrado' && item.status_linha !== 'inserido_empresa');
 
                 const linked = isItemLinked(item);
                 const linkedRef = item.composicao || item.insumo;
