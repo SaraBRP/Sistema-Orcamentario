@@ -217,18 +217,17 @@ export default function Dashboard() {
   // Filtra APENAS a última revisão de cada orçamento para os indicadores e gráficos
   const ultimasRevisoesOrcamentos = filterLatestRevisions(filteredOrcamentosByEmpresa);
 
-  // Cálculos dos 4 KPIs principais considerando a última revisão e o filtro de empresa
-  const valorTotalOrcado = ultimasRevisoesOrcamentos.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
+  // Cálculos dos KPIs principais considerando a última revisão e o filtro de empresa
   const emAndamentoCount = ultimasRevisoesOrcamentos.filter(o => getDashboardStatusCategory(o) === 'Em andamento').length;
   const agValidacaoCount = ultimasRevisoesOrcamentos.filter(o => getDashboardStatusCategory(o) === 'Ag. Validação').length;
 
   const stats = [
     {
-      name: 'Valor Total Orçado',
-      value: valorTotalOrcado.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }),
-      icon: Calculator,
-      color: 'text-blue-600',
-      bg: 'bg-blue-100'
+      name: 'Orçamentos Pendentes',
+      value: memoriaisPendentesCount.toString(),
+      icon: Clock,
+      color: 'text-purple-600',
+      bg: 'bg-purple-100'
     },
     {
       name: 'Orçamentos em Andamento',
@@ -243,13 +242,6 @@ export default function Dashboard() {
       icon: Hourglass,
       color: 'text-amber-600',
       bg: 'bg-amber-100'
-    },
-    {
-      name: 'Orçamentos Pendentes',
-      value: memoriaisPendentesCount.toString(),
-      icon: Clock,
-      color: 'text-purple-600',
-      bg: 'bg-purple-100'
     },
   ];
 
@@ -763,8 +755,8 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Cards de Indicadores KPIs (4 Cartões em Grade) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      {/* Cards de Indicadores KPIs (3 Cartões em Grade) */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
