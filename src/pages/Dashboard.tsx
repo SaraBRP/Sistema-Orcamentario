@@ -152,15 +152,36 @@ export default function Dashboard() {
     { name: 'Cancelado', value: 1, color: '#dc2626' },
   ];
 
-  // 2. Dados para o Gráfico de Barras Horizontais: Quantidade de Orçamentos por Cliente
-  const clientCountsMap: Record<string, number> = {};
+  // 2. Dados para o Gráfico de Barras Horizontais: Quantidade de Orçamentos por Cliente (Ignorando revisões repetidas)
+  const clientBudgetsMap: Record<string, Set<string>> = {};
   orcamentos.forEach(o => {
     const clienteName = o.cliente || 'Não Informado';
-    clientCountsMap[clienteName] = (clientCountsMap[clienteName] || 0) + 1;
+    if (!clientBudgetsMap[clienteName]) {
+      clientBudgetsMap[clienteName] = new Set<string>();
+    }
+
+    // Extrai o identificador base do orçamento (ignorando revisões como .0, .1, .2)
+    let budgetBaseKey = o.id;
+    if (o.orcamento_importado_id) {
+      budgetBaseKey = `imp_${o.orcamento_importado_id}`;
+    } else if (o.codigo) {
+      const parts = o.codigo.split('.');
+      if (parts.length >= 2) {
+        const yearPart = o.codigo.includes('-') ? '-' + o.codigo.split('-')[1] : '';
+        budgetBaseKey = `${parts[0]}.${parts[1]}${yearPart}`;
+      } else {
+        budgetBaseKey = o.codigo;
+      }
+    }
+
+    clientBudgetsMap[clienteName].add(budgetBaseKey);
   });
 
-  const clientData = Object.entries(clientCountsMap)
-    .map(([name, quantidade]) => ({ name, quantidade }))
+  const clientData = Object.entries(clientBudgetsMap)
+    .map(([name, baseKeysSet]) => ({ 
+      name, 
+      quantidade: baseKeysSet.size // Conta apenas orçamentos únicos (base)
+    }))
     .sort((a, b) => b.quantidade - a.quantidade)
     .slice(0, 8); // Top 8 clientes
 
