@@ -556,56 +556,59 @@ export default function Orcamentos() {
     }
   };
 
-  const generateNextOrcamentoCode = async () => {
+  const generateNextOrcamentoCode = async (): Promise<string> => {
     const today = new Date();
     const dd = String(today.getDate()).padStart(2, '0');
     const mm = String(today.getMonth() + 1).padStart(2, '0');
     const ddmm = `${dd}${mm}`;
     const year = today.getFullYear();
 
-    const { data } = await supabase
-      .schema('engenharia')
-      .from('orcamentos')
-      .select('codigo')
-      .like('codigo', `${ddmm}.%`);
+    try {
+      const { data, error } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .select('codigo');
 
-    let nextSeq = 1;
-    if (data && data.length > 0) {
-      const seqs = data.map((o: any) => {
-        const parts = o.codigo.split('.');
-        if (parts.length >= 2) {
-          const num = parseInt(parts[1], 10);
-          return isNaN(num) ? 0 : num;
-        }
-        return 0;
-      });
-      const maxSeq = Math.max(...seqs);
-      nextSeq = maxSeq + 1;
+      let nextSeq = 1;
+      if (!error && data && data.length > 0) {
+        const seqs = data.map((o: any) => {
+          if (!o || !o.codigo) return 0;
+          const parts = String(o.codigo).split('.');
+          if (parts.length >= 2) {
+            const num = parseInt(parts[1], 10);
+            return isNaN(num) ? 0 : num;
+          }
+          return 0;
+        });
+        const maxSeq = Math.max(0, ...seqs);
+        nextSeq = maxSeq + 1;
+      }
+
+      const seqStr = String(nextSeq).padStart(3, '0');
+      return `${ddmm}.${seqStr}.0-${year}`;
+    } catch (err) {
+      console.error('Erro ao gerar código do orçamento:', err);
+      const seqStr = String((orcamentos.length || 0) + 1).padStart(3, '0');
+      return `${ddmm}.${seqStr}.0-${year}`;
     }
-
-    const seqStr = String(nextSeq).padStart(3, '0');
-    return `${ddmm}.${seqStr}.0-${year}`;
   };
 
   const handleOpenCreateModal = async () => {
+    const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';
+    const suggestedCode = await generateNextOrcamentoCode();
+
+    setNewOrcamentoData({
+      codigo: suggestedCode,
+      empresa: 'BRP Soluções Metálicas',
+      descricao: '',
+      cliente: '',
+      projeto: '',
+      gestor_cliente: '',
+      responsavel: defaultResp,
+      cidade: '',
+      estado: 'GO'
+    });
     setIsCreateModalOpen(true);
-    try {
-      const suggestedCode = await generateNextOrcamentoCode();
-      const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';
-      setNewOrcamentoData({
-        codigo: suggestedCode,
-        empresa: 'BRP Soluções Metálicas',
-        descricao: '',
-        cliente: '',
-        projeto: '',
-        gestor_cliente: '',
-        responsavel: defaultResp,
-        cidade: '',
-        estado: 'GO'
-      });
-    } catch (err) {
-      console.error('Erro ao gerar código:', err);
-    }
   };
 
   const handleCreateOrcamento = async (e: React.FormEvent) => {
