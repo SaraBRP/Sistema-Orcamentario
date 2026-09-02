@@ -81,39 +81,42 @@ const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
   let childSeq = 0;
 
   let currentSectionEap = '1';
-  let currentCompEap = '1.1';
+  let currentParentEap = '1.1';
 
   for (let i = 0; i < copy.length; i++) {
     const item = copy[i];
     if (item.status_linha === 'inativo') continue;
 
-    const origParts = (item.item_eap || '').split('.').filter(Boolean);
     const isDesdobrado = item.status_linha === 'desdobrado';
-    const isExplicitSection = (origParts.length === 1 && (item.quantidade === 0 || !item.quantidade) && item.status_linha !== 'desdobrado' && item.status_linha !== 'inserido_empresa');
 
-    let level = 1;
-    if (isExplicitSection) {
-      level = 0;
-    } else if (isDesdobrado || (item as any).isSubitem || origParts.length >= 3) {
-      level = 2;
-    } else {
-      level = 1;
+    // Se for um sub-item desdobrado constituinte de uma composição, ele é filho direto da linha principal acima dele (ex: 2.1.3.1, 2.1.3.2)
+    if (isDesdobrado) {
+      childSeq++;
+      item.item_eap = `${currentParentEap}.${childSeq}`;
+      continue;
     }
 
-    if (level === 0) {
+    // Caso contrário, é uma linha principal do cliente (título ou item operacional)
+    const origParts = (item.item_eap || '').split('.').filter(Boolean);
+    const isExplicitSection = (origParts.length === 1 && (item.quantidade === 0 || !item.quantidade) && item.status_linha !== 'inserido_empresa');
+
+    if (isExplicitSection) {
       sectionSeq++;
       compSeq = 0;
       childSeq = 0;
       item.item_eap = String(sectionSeq);
       currentSectionEap = item.item_eap;
-    } else if (level === 1) {
-      compSeq++;
+      currentParentEap = item.item_eap;
+    } else {
+      // Item operacional principal do cliente/empresa
+      if (origParts.length > 1) {
+        item.item_eap = origParts.join('.');
+      } else {
+        compSeq++;
+        item.item_eap = `${currentSectionEap}.${compSeq}`;
+      }
+      currentParentEap = item.item_eap;
       childSeq = 0;
-      item.item_eap = `${currentSectionEap}.${compSeq}`;
-      currentCompEap = item.item_eap;
-    } else if (level === 2) {
-      childSeq++;
-      item.item_eap = `${currentCompEap}.${childSeq}`;
     }
   }
 
