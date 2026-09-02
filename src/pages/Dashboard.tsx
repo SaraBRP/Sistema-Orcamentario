@@ -1,9 +1,10 @@
-import { useEffect, useState } from 'react';
-import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock } from 'lucide-react';
+import { useEffect, useState, useMemo } from 'react';
+import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid
 } from 'recharts';
+import clsx from 'clsx';
 import { supabase } from '../lib/supabase';
 
 // Cores dos gráficos
@@ -97,6 +98,8 @@ const filterLatestRevisions = (orcList: any[]): any[] => {
 export default function Dashboard() {
   const [orcamentos, setOrcamentos] = useState<any[]>([]);
   const [memoriaisPendentesCount, setMemoriaisPendentesCount] = useState(0);
+  const [mostUsedItems, setMostUsedItems] = useState<any[]>([]);
+  const [itemTypeFilter, setItemTypeFilter] = useState<'todos' | 'composicao' | 'insumo'>('todos');
 
   // Migrações e correções automáticas no mount
   useEffect(() => {
@@ -136,7 +139,7 @@ export default function Dashboard() {
           .from('orcamentos_importados')
           .select('id');
 
-        if (impData) {
+        if (impData && orcData) {
           const linkedImpIds = new Set(
             (orcData || [])
               .map(o => o.orcamento_importado_id)
@@ -145,6 +148,37 @@ export default function Dashboard() {
           // Memoriais criados que ainda NÃO possuem orçamento gerado
           const pendentes = impData.filter(imp => !linkedImpIds.has(imp.id)).length;
           setMemoriaisPendentesCount(pendentes);
+        }
+
+        // 3. Busca itens de orçamento para calcular a tabela de itens mais usados
+        const { data: itensData } = await supabase
+          .schema('engenharia')
+          .from('orcamento_itens')
+          .select('descricao, unidade, composicao_id, insumo_id, tipo, status_linha');
+
+        if (itensData && itensData.length > 0) {
+          const itemsMap = new Map<string, { descricao: string; unidade: string; tipo: 'composicao' | 'insumo'; count: number }>();
+          itensData.forEach((item: any) => {
+            if (!item.descricao || item.status_linha === 'inativo') return;
+            const desc = item.descricao.trim();
+            const isComp = !!(item.composicao_id || item.tipo === 'composicao' || item.tipo === 'Composição' || item.status_linha === 'desdobrado');
+            const itemType: 'composicao' | 'insumo' = isComp ? 'composicao' : 'insumo';
+            const key = desc.toLowerCase();
+
+            if (!itemsMap.has(key)) {
+              itemsMap.set(key, {
+                descricao: desc,
+                unidade: item.unidade || 'un',
+                tipo: itemType,
+                count: 1
+              });
+            } else {
+              const existing = itemsMap.get(key)!;
+              existing.count += 1;
+            }
+          });
+
+          setMostUsedItems(Array.from(itemsMap.values()));
         }
       } catch (err) {
         console.error('Erro ao carregar dados do dashboard:', err);
@@ -225,7 +259,6 @@ export default function Dashboard() {
       clientBudgetsMap[clienteName] = new Set<string>();
     }
 
-    // Extrai o identificador base do orçamento (ignorando revisões como .0, .1, .2)
     let budgetBaseKey = o.id;
     if (o.orcamento_importado_id) {
       budgetBaseKey = `imp_${o.orcamento_importado_id}`;
@@ -245,12 +278,11 @@ export default function Dashboard() {
   const clientData = Object.entries(clientBudgetsMap)
     .map(([name, baseKeysSet]) => ({ 
       name, 
-      quantidade: baseKeysSet.size // Conta apenas orçamentos únicos (base)
+      quantidade: baseKeysSet.size
     }))
     .sort((a, b) => b.quantidade - a.quantidade)
-    .slice(0, 8); // Top 8 clientes
+    .slice(0, 8); 
 
-  // Mock de dados ilustrativos se o banco estiver limpo
   const clientChartData = clientData.length > 0 ? clientData : [
     { name: 'Concessionária Fiat', quantidade: 5 },
     { name: 'Correios', quantidade: 3 },
@@ -261,6 +293,39 @@ export default function Dashboard() {
     { name: 'Exatta Orçamento', quantidade: 1 },
     { name: 'CSN MINERAÇÃO', quantidade: 1 },
   ];
+
+  // 3. Filtragem e ordenação dos 10 Itens Mais Usados nos Orçamentos
+  const filteredMostUsedItems = useMemo(() => {
+    let list = mostUsedItems;
+
+    // Se o banco ainda não tiver dados em orcamento_itens, exibe uma lista modelo realista
+    if (list.length === 0) {
+      list = [
+        { descricao: 'Estrutura Metálica Treliçada em Aço ASTM A36', unidade: 'kg', tipo: 'composicao', count: 18 },
+        { descricao: 'Solda MIG/MAG Contínua 1.2mm', unidade: 'm', tipo: 'insumo', count: 15 },
+        { descricao: 'Pintura Epóxi Anticorrosiva de Alta Espessura', unidade: 'm²', tipo: 'composicao', count: 14 },
+        { descricao: 'Aço Estrutural Perfil I / W 250x32.7', unidade: 'kg', tipo: 'insumo', count: 12 },
+        { descricao: 'Montagem e Erguimento de Estrutura Metálica', unidade: 'h', tipo: 'composicao', count: 11 },
+        { descricao: 'Chapa de Aço de Ligação t=12.5mm', unidade: 'kg', tipo: 'insumo', count: 10 },
+        { descricao: 'Parafuso Sextavado de Alta Resistência ASTM A325 3/4"', unidade: 'un', tipo: 'insumo', count: 9 },
+        { descricao: 'Telha Metálica Trapezoidal Termoacústica 40mm', unidade: 'm²', tipo: 'composicao', count: 8 },
+        { descricao: 'Grauteamento de Base de Pilar NBR 15823', unidade: 'm³', tipo: 'composicao', count: 7 },
+        { descricao: 'Mão de Obra de Montador de Estrutura Metálica', unidade: 'h', tipo: 'insumo', count: 6 },
+      ];
+    }
+
+    if (itemTypeFilter !== 'todos') {
+      list = list.filter(i => i.tipo === itemTypeFilter);
+    }
+
+    list.sort((a, b) => b.count - a.count);
+    return list.slice(0, 10);
+  }, [mostUsedItems, itemTypeFilter]);
+
+  const maxItemCount = useMemo(() => {
+    if (filteredMostUsedItems.length === 0) return 1;
+    return Math.max(...filteredMostUsedItems.map(i => i.count), 1);
+  }, [filteredMostUsedItems]);
 
   return (
     <div className="space-y-6">
@@ -294,7 +359,7 @@ export default function Dashboard() {
               <span>Distribuição dos Orçamentos por STATUS</span>
             </h3>
             <span className="text-[10px] bg-white/20 px-2 py-0.5 rounded-full font-semibold uppercase tracking-wider">
-              {hasRealStatusData ? `${orcamentos.filter(o => getDashboardStatusCategory(o) !== null).length} Orçamentos` : 'Exemplo'}
+              {hasRealStatusData ? `${ultimasRevisoesOrcamentos.filter(o => getDashboardStatusCategory(o) !== null).length} Orçamentos` : 'Exemplo'}
             </span>
           </div>
 
@@ -387,7 +452,115 @@ export default function Dashboard() {
         </div>
 
       </div>
+
+      {/* TABELA: Itens Mais Usados nos Orçamentos com Minigráfico */}
+      <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
+        {/* Cabeçalho da Tabela com Filtros */}
+        <div className="p-5 border-b border-slate-100 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-50/50">
+          <div>
+            <h3 className="text-base font-bold text-slate-800 flex items-center gap-2">
+              <Sparkles className="w-5 h-5 text-amber-500" />
+              <span>Itens Mais Usados nos Orçamentos</span>
+            </h3>
+            <p className="text-xs text-slate-500 mt-0.5 font-medium">
+              Top 10 itens com maior frequência de utilização nas propostas
+            </p>
+          </div>
+
+          {/* Filtros: Todos / Composições / Insumos */}
+          <div className="flex items-center gap-1 bg-slate-200/60 p-1 rounded-xl text-xs font-bold text-slate-600">
+            <button
+              onClick={() => setItemTypeFilter('todos')}
+              className={clsx(
+                'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
+                itemTypeFilter === 'todos' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
+              )}
+            >
+              Todos
+            </button>
+            <button
+              onClick={() => setItemTypeFilter('composicao')}
+              className={clsx(
+                'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
+                itemTypeFilter === 'composicao' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
+              )}
+            >
+              Composições
+            </button>
+            <button
+              onClick={() => setItemTypeFilter('insumo')}
+              className={clsx(
+                'px-3 py-1.5 rounded-lg transition-all cursor-pointer',
+                itemTypeFilter === 'insumo' ? 'bg-white text-emerald-600 shadow-xs' : 'hover:text-slate-900'
+              )}
+            >
+              Insumos
+            </button>
+          </div>
+        </div>
+
+        {/* Tabela de Itens com Sparkline Bar */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs">
+            <thead>
+              <tr className="bg-slate-100/70 border-b border-slate-200 text-slate-600 font-bold uppercase tracking-wider text-[10px]">
+                <th className="py-3 px-4 w-12 text-center">#</th>
+                <th className="py-3 px-4">Item / Descrição</th>
+                <th className="py-3 px-4 w-32">Tipo</th>
+                <th className="py-3 px-4 w-64 text-right">Frequência de Uso</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100 text-slate-700">
+              {filteredMostUsedItems.map((item, idx) => {
+                const percentage = Math.max(8, Math.round((item.count / maxItemCount) * 100));
+                const isComp = item.tipo === 'composicao';
+
+                return (
+                  <tr key={idx} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-4 font-bold text-slate-400 text-center">
+                      {idx + 1}
+                    </td>
+                    <td className="py-3 px-4 font-semibold text-slate-800">
+                      <div className="flex items-center gap-2">
+                        <span className="truncate max-w-md" title={item.descricao}>{item.descricao}</span>
+                        {item.unidade && (
+                          <span className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 text-[10px] font-mono shrink-0">
+                            {item.unidade}
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-3 px-4">
+                      <span className={clsx(
+                        'px-2.5 py-1 rounded-full text-[10px] font-bold border inline-block shadow-2xs',
+                        isComp ? 'bg-purple-50 text-purple-700 border-purple-200' : 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      )}>
+                        {isComp ? 'Composição' : 'Insumo'}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4">
+                      <div className="flex items-center justify-end gap-3">
+                        <div className="w-36 bg-slate-100 rounded-full h-2.5 overflow-hidden flex shadow-inner">
+                          <div 
+                            className={clsx(
+                              'h-full rounded-full transition-all duration-500',
+                              isComp ? 'bg-gradient-to-r from-purple-500 to-indigo-600' : 'bg-gradient-to-r from-emerald-400 to-teal-600'
+                            )} 
+                            style={{ width: `${percentage}%` }}
+                          />
+                        </div>
+                        <span className="font-bold text-slate-800 w-10 text-right shrink-0">
+                          {item.count}x
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 }
-
