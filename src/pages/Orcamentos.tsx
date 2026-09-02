@@ -1543,7 +1543,7 @@ export default function Orcamentos() {
                     disabled
                     value={newOrcamentoData.cidade || ''}
                     placeholder="Preenchido automaticamente..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed uppercase"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed"
                   />
                 </div>
 
@@ -1676,7 +1676,7 @@ export default function Orcamentos() {
                     disabled
                     value={editOrcamentoData.cidade || ''}
                     placeholder="Preenchido automaticamente..."
-                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed uppercase"
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed"
                   />
                 </div>
 
