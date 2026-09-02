@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo } from 'react';
-import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users } from 'lucide-react';
+import { Calculator, TrendingUp, BarChart3, PieChart as PieIcon, Clock, Sparkles, Users, Building2, Hourglass } from 'lucide-react';
 import { 
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Legend
@@ -101,6 +101,7 @@ export default function Dashboard() {
   const [memoriaisPendentesCount, setMemoriaisPendentesCount] = useState(0);
   const [mostUsedItems, setMostUsedItems] = useState<any[]>([]);
   const [itemTypeFilter, setItemTypeFilter] = useState<'todos' | 'composicao' | 'insumo'>('todos');
+  const [empresaFilter, setEmpresaFilter] = useState<'todas' | 'brp_solucoes' | 'brp_engenharia'>('todas');
 
   // Migrações e correções automáticas no mount
   useEffect(() => {
@@ -124,11 +125,11 @@ export default function Dashboard() {
   useEffect(() => {
     const loadDashboardData = async () => {
       try {
-        // 1. Busca orçamentos da empresa (incluindo número de revisão)
+        // 1. Busca orçamentos da empresa (incluindo número de revisão e empresa responsável)
         const { data: orcData, error: orcErr } = await supabase
           .schema('engenharia')
           .from('orcamentos')
-          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id, aprovado, decisao_gestor, status_envio, revisao, parent_id');
+          .select('id, codigo, cliente, projeto, status, valor_total, created_at, orcamento_importado_id, aprovado, decisao_gestor, status_envio, revisao, parent_id, responsavel, cidade, estado, local_obra, empresa, empresa_responsavel');
 
         if (!orcErr && orcData) {
           setOrcamentos(orcData);
@@ -189,12 +190,29 @@ export default function Dashboard() {
     loadDashboardData();
   }, []);
 
-  // Filtra APENAS a última revisão de cada orçamento para os indicadores e gráficos
-  const ultimasRevisoesOrcamentos = filterLatestRevisions(orcamentos);
+  // Filtragem de orçamentos conforme a Empresa Responsável selecionada
+  const filteredOrcamentosByEmpresa = useMemo(() => {
+    if (empresaFilter === 'todas') return orcamentos;
 
-  // Cálculos dos KPIs principais considerando a última revisão
+    return orcamentos.filter(o => {
+      const emp = (o.empresa || o.empresa_responsavel || '').trim().toLowerCase();
+      if (empresaFilter === 'brp_solucoes') {
+        return emp.includes('soluç') || emp.includes('soluco') || emp.includes('metálica') || emp.includes('metalica') || emp === '';
+      }
+      if (empresaFilter === 'brp_engenharia') {
+        return emp.includes('eng') || emp.includes('engenharia');
+      }
+      return true;
+    });
+  }, [orcamentos, empresaFilter]);
+
+  // Filtra APENAS a última revisão de cada orçamento para os indicadores e gráficos
+  const ultimasRevisoesOrcamentos = filterLatestRevisions(filteredOrcamentosByEmpresa);
+
+  // Cálculos dos 4 KPIs principais considerando a última revisão e o filtro de empresa
   const valorTotalOrcado = ultimasRevisoesOrcamentos.reduce((acc, curr) => acc + (parseFloat(curr.valor_total) || 0), 0);
   const emAndamentoCount = ultimasRevisoesOrcamentos.filter(o => getDashboardStatusCategory(o) === 'Em andamento').length;
+  const agValidacaoCount = ultimasRevisoesOrcamentos.filter(o => getDashboardStatusCategory(o) === 'Ag. Validação').length;
 
   const stats = [
     {
@@ -212,11 +230,18 @@ export default function Dashboard() {
       bg: 'bg-emerald-100'
     },
     {
+      name: 'Orçamentos Ag. Validação',
+      value: agValidacaoCount.toString(),
+      icon: Hourglass,
+      color: 'text-amber-600',
+      bg: 'bg-amber-100'
+    },
+    {
       name: 'Orçamentos Pendentes',
       value: memoriaisPendentesCount.toString(),
       icon: Clock,
-      color: 'text-amber-600',
-      bg: 'bg-amber-100'
+      color: 'text-purple-600',
+      bg: 'bg-purple-100'
     },
   ];
 
@@ -365,8 +390,50 @@ export default function Dashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Cards de Indicadores KPIs */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+      {/* Cabeçalho da Página com Filtro de Empresa Responsável */}
+      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-4 rounded-2xl border border-slate-200 shadow-2xs">
+        <div>
+          <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+            <Building2 className="w-5 h-5 text-blue-600" />
+            <span>Filtro de Empresa Responsável</span>
+          </h2>
+          <p className="text-xs text-slate-500 font-medium">Filtre os indicadores do dashboard por unidade de negócios</p>
+        </div>
+
+        {/* Botões de Filtro: Todas / BRP Soluções Metálicas / BRP Engenharia */}
+        <div className="flex items-center gap-1.5 bg-slate-100 p-1.5 rounded-xl text-xs font-bold text-slate-600 w-full sm:w-auto">
+          <button
+            onClick={() => setEmpresaFilter('todas')}
+            className={clsx(
+              'px-3.5 py-2 rounded-lg transition-all cursor-pointer flex-1 sm:flex-none text-center',
+              empresaFilter === 'todas' ? 'bg-white text-slate-900 shadow-xs' : 'hover:text-slate-900'
+            )}
+          >
+            Todas as Empresas
+          </button>
+          <button
+            onClick={() => setEmpresaFilter('brp_solucoes')}
+            className={clsx(
+              'px-3.5 py-2 rounded-lg transition-all cursor-pointer flex-1 sm:flex-none text-center',
+              empresaFilter === 'brp_solucoes' ? 'bg-white text-blue-600 shadow-xs' : 'hover:text-slate-900'
+            )}
+          >
+            BRP Soluções Metálicas
+          </button>
+          <button
+            onClick={() => setEmpresaFilter('brp_engenharia')}
+            className={clsx(
+              'px-3.5 py-2 rounded-lg transition-all cursor-pointer flex-1 sm:flex-none text-center',
+              empresaFilter === 'brp_engenharia' ? 'bg-white text-purple-600 shadow-xs' : 'hover:text-slate-900'
+            )}
+          >
+            BRP Engenharia
+          </button>
+        </div>
+      </div>
+
+      {/* Cards de Indicadores KPIs (4 Cartões em Grade) */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         {stats.map((stat) => {
           const Icon = stat.icon;
           return (
