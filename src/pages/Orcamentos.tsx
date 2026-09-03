@@ -489,14 +489,35 @@ export default function Orcamentos() {
 
   const fetchImportados = async () => {
     try {
-      const { data, error } = await supabase
-        .schema('engenharia')
-        .from('orcamentos_importados')
-        .select('*')
-        .order('created_at', { ascending: false });
+      let list: any[] = [];
+      try {
+        const { data, error } = await supabase
+          .schema('engenharia')
+          .from('orcamentos_importados')
+          .select('*')
+          .order('created_at', { ascending: false });
 
-      if (error) throw error;
-      setImportados(data || []);
+        if (!error && data) {
+          list = data;
+        }
+      } catch {}
+
+      // Fallback/Mescla com LocalStorage se houver imports salvas offline
+      try {
+        const savedLocalStr = localStorage.getItem('brp_orcamentos_importados_locais');
+        if (savedLocalStr) {
+          const localList = JSON.parse(savedLocalStr);
+          const existingIds = new Set(list.map(i => i.id));
+          localList.forEach((localItem: any) => {
+            if (!existingIds.has(localItem.id)) {
+              list.push(localItem);
+            }
+          });
+        }
+      } catch {}
+
+      list.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
+      setImportados(list);
 
       // Busca contagem e progresso de itens por importação
       const { data: rows, error: rowsError } = await supabase

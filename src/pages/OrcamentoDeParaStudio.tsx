@@ -429,26 +429,66 @@ export default function OrcamentoDeParaStudio() {
   const loadImportedBudget = async () => {
     setLoading(true);
     try {
-      // 1. Carrega o cabeçalho do orçamento importado
-      const { data: headerData, error: headerError } = await supabase
-        .schema('engenharia')
-        .from('orcamentos_importados')
-        .select('*')
-        .eq('id', importId)
-        .single();
+      let headerData: any = null;
+      let rowsData: any[] = [];
 
-      if (headerError) throw headerError;
-      setImportHeader(headerData);
+      // 1. Carrega cabeçalho do orçamento importado
+      try {
+        const { data: hData } = await supabase
+          .schema('engenharia')
+          .from('orcamentos_importados')
+          .select('*')
+          .eq('id', importId)
+          .single();
 
-      // 2. Carrega as linhas importadas
-      const { data: rowsData, error: rowsError } = await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .select('*')
-        .eq('orcamento_importado_id', importId)
-        .order('created_at', { ascending: true });
+        if (hData) {
+          headerData = hData;
+          const { data: rData } = await supabase
+            .schema('engenharia')
+            .from('orcamento_importado_itens')
+            .select('*')
+            .eq('orcamento_importado_id', importId)
+            .order('created_at', { ascending: true });
+          rowsData = rData || [];
+        }
+      } catch (e) {
+        console.warn('Erro ao consultar Supabase engenharia:', e);
+      }
 
-      if (rowsError) throw rowsError;
+      // Fallback schema public
+      if (!headerData) {
+        try {
+          const { data: pubHData } = await supabase
+            .from('orcamentos_importados')
+            .select('*')
+            .eq('id', importId)
+            .single();
+
+          if (pubHData) {
+            headerData = pubHData;
+            const { data: pubRData } = await supabase
+              .from('orcamento_importado_itens')
+              .select('*')
+              .eq('orcamento_importado_id', importId)
+              .order('created_at', { ascending: true });
+            rowsData = pubRData || [];
+          }
+        } catch {}
+      }
+
+      // Fallback LocalStorage se o orçamento foi salvo localmente
+      if (!headerData) {
+        const savedImportsStr = localStorage.getItem('brp_orcamentos_importados_locais') || '[]';
+        const savedImports = JSON.parse(savedImportsStr);
+        headerData = savedImports.find((i: any) => i.id === importId);
+
+        const savedRowsStr = localStorage.getItem(`brp_orcamento_importado_itens_${importId}`) || '[]';
+        rowsData = JSON.parse(savedRowsStr);
+      }
+
+      if (headerData) {
+        setImportHeader(headerData);
+      }
 
       // Busca dados de composições e insumos vinculados
       const itemsList = rowsData || [];
