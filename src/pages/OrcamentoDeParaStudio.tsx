@@ -377,9 +377,12 @@ export default function OrcamentoDeParaStudio() {
       const oldStatus = targetItem.status_linha;
       const finalStatus = (oldStatus === 'inserido_empresa' || oldStatus === 'inserido_empresa_e_cliente') ? oldStatus : 'ativo';
 
+      const shouldUpdateDesc = (!targetItem.descricao || targetItem.descricao === 'Nova Linha Inserida');
+
       const payload: any = {
         tipo_vinculo: trimmed ? 'texto' : null,
         texto_empresa: trimmed ? trimmed : null,
+        descricao: (trimmed && shouldUpdateDesc) ? trimmed : targetItem.descricao,
         composicao_id: null,
         insumo_id: null,
         valor_unitario_empresa: 0,
@@ -1271,11 +1274,16 @@ export default function OrcamentoDeParaStudio() {
       const oldStatus = selectedItemForLink.status_linha;
       const finalStatus = (oldStatus === 'inserido_empresa' || oldStatus === 'inserido_empresa_e_cliente') ? oldStatus : 'ativo';
 
+      const refDesc = selected.descricao || selectedItemForLink.descricao;
+      const shouldUpdateDesc = (!selectedItemForLink.descricao || selectedItemForLink.descricao === 'Nova Linha Inserida' || selectedItemForLink.status_linha === 'inserido_empresa' || selectedItemForLink.status_linha === 'inserido_empresa_e_cliente');
+      const finalDesc = shouldUpdateDesc ? refDesc : selectedItemForLink.descricao;
+
       const payload: any = {
         composicao_id: isComp ? selected.id : null,
         insumo_id: !isComp ? selected.id : null,
         tipo_vinculo: isComp ? 'composicao' : 'insumo',
         texto_empresa: null,
+        descricao: finalDesc,
         valor_unitario_empresa: unitPrice,
         total_empresa: totalPrice,
         status_linha: finalStatus
@@ -1586,7 +1594,10 @@ export default function OrcamentoDeParaStudio() {
       : 'inserido_empresa_e_cliente';
 
     const refObj = targetItem.composicao || targetItem.insumo;
-    const desc = targetItem.descricao || refObj?.descricao || 'Item Inserido';
+    const autoDesc = targetItem.texto_empresa || refObj?.descricao;
+    const desc = (targetItem.descricao === 'Nova Linha Inserida' && autoDesc)
+      ? autoDesc
+      : (targetItem.descricao && targetItem.descricao !== 'Nova Linha Inserida' ? targetItem.descricao : (autoDesc || 'Item Inserido'));
     const unit = targetItem.unidade || refObj?.unidade || 'un';
 
     try {
