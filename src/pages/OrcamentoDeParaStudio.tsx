@@ -25,8 +25,8 @@ type ImportadoItem = {
   total_orig: number;
   total_mat_orig?: number;
   total_mo_orig?: number;
-  composicao_id?: string;
-  insumo_id?: string;
+  composicao_id?: string | null;
+  insumo_id?: string | null;
   tipo_vinculo?: 'composicao' | 'insumo' | 'texto' | 'secao' | null;
   valor_unitario_empresa: number;
   total_empresa: number;
@@ -733,45 +733,165 @@ export default function OrcamentoDeParaStudio() {
     e.preventDefault();
   };
 
-  const handleRightDrop = (e: React.DragEvent, targetIndex: number) => {
+  const handleRightDrop = async (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
     if (draggedRightIndex === null || draggedRightIndex === targetIndex) return;
 
+    const sourceItem = items[draggedRightIndex];
+    const targetItem = items[targetIndex];
+    if (!sourceItem || !targetItem) return;
+
+    if (sourceItem.status_linha === 'desdobrado' || targetItem.status_linha === 'desdobrado') return;
+
+    // Coleta os sub-itens desdobrados do source e do target
+    const getDesdobradosOf = (parentItem: ImportadoItem) => {
+      const idx = items.findIndex(i => i.id === parentItem.id);
+      if (idx === -1) return [];
+      const desdobrados: ImportadoItem[] = [];
+      let k = idx + 1;
+      while (k < items.length && items[k].status_linha === 'desdobrado') {
+        desdobrados.push(items[k]);
+        k++;
+      }
+      return desdobrados;
+    };
+
+    const sourceDesdobrados = getDesdobradosOf(sourceItem);
+    const targetDesdobrados = getDesdobradosOf(targetItem);
+
+    const sourceRightData = {
+      composicao_id: sourceItem.composicao_id || null,
+      insumo_id: sourceItem.insumo_id || null,
+      tipo_vinculo: sourceItem.tipo_vinculo || null,
+      texto_empresa: sourceItem.tipo_vinculo === 'texto' ? sourceItem.texto_empresa : null,
+      valor_unitario_empresa: sourceItem.valor_unitario_empresa || 0,
+      total_empresa: sourceItem.total_empresa || 0,
+      composicao: sourceItem.composicao,
+      insumo: sourceItem.insumo
+    };
+
+    const targetRightData = {
+      composicao_id: targetItem.composicao_id || null,
+      insumo_id: targetItem.insumo_id || null,
+      tipo_vinculo: targetItem.tipo_vinculo || null,
+      texto_empresa: targetItem.tipo_vinculo === 'texto' ? targetItem.texto_empresa : null,
+      valor_unitario_empresa: targetItem.valor_unitario_empresa || 0,
+      total_empresa: targetItem.total_empresa || 0,
+      composicao: targetItem.composicao,
+      insumo: targetItem.insumo
+    };
+
+    const newTargetTotal = (sourceRightData.composicao_id || sourceRightData.insumo_id)
+      ? (targetItem.quantidade || 1) * sourceRightData.valor_unitario_empresa
+      : (sourceRightData.tipo_vinculo === 'texto' ? 0 : 0);
+
+    const newSourceTotal = (targetRightData.composicao_id || targetRightData.insumo_id)
+      ? (sourceItem.quantidade || 1) * targetRightData.valor_unitario_empresa
+      : (targetRightData.tipo_vinculo === 'texto' ? 0 : 0);
+
+    const newTargetFields = {
+      composicao_id: sourceRightData.composicao_id,
+      insumo_id: sourceRightData.insumo_id,
+      tipo_vinculo: sourceRightData.tipo_vinculo,
+      texto_empresa: sourceRightData.tipo_vinculo === 'texto' ? sourceRightData.texto_empresa : null,
+      valor_unitario_empresa: sourceRightData.valor_unitario_empresa,
+      total_empresa: newTargetTotal,
+      composicao: sourceRightData.composicao,
+      insumo: sourceRightData.insumo
+    };
+
+    const newSourceFields = {
+      composicao_id: targetRightData.composicao_id,
+      insumo_id: targetRightData.insumo_id,
+      tipo_vinculo: targetRightData.tipo_vinculo,
+      texto_empresa: targetRightData.tipo_vinculo === 'texto' ? targetRightData.texto_empresa : null,
+      valor_unitario_empresa: targetRightData.valor_unitario_empresa,
+      total_empresa: newSourceTotal,
+      composicao: targetRightData.composicao,
+      insumo: targetRightData.insumo
+    };
+
+    const sourceDesdobradoIds = new Set(sourceDesdobrados.map(d => d.id));
+    const targetDesdobradoIds = new Set(targetDesdobrados.map(d => d.id));
+    const idsToDelete = [...Array.from(sourceDesdobradoIds), ...Array.from(targetDesdobradoIds)];
+
+    if (idsToDelete.length > 0) {
+      try {
+        await supabase.schema('engenharia').from('orcamento_importado_itens').delete().in('id', idsToDelete);
+      } catch {}
+    }
+
+    try {
+      await supabase.schema('engenharia').from('orcamento_importado_itens').update({
+        composicao_id: newSourceFields.composicao_id,
+        insumo_id: newSourceFields.insumo_id,
+        tipo_vinculo: newSourceFields.tipo_vinculo,
+        texto_empresa: newSourceFields.texto_empresa,
+        valor_unitario_empresa: newSourceFields.valor_unitario_empresa,
+        total_empresa: newSourceFields.total_empresa
+      }).eq('id', sourceItem.id);
+
+      await supabase.schema('engenharia').from('orcamento_importado_itens').update({
+        composicao_id: newTargetFields.composicao_id,
+        insumo_id: newTargetFields.insumo_id,
+        tipo_vinculo: newTargetFields.tipo_vinculo,
+        texto_empresa: newTargetFields.texto_empresa,
+        valor_unitario_empresa: newTargetFields.valor_unitario_empresa,
+        total_empresa: newTargetFields.total_empresa
+      }).eq('id', targetItem.id);
+    } catch {}
+
     setItems(prev => {
-      const copy = [...prev];
-      const sourceItem = copy[draggedRightIndex];
-      const targetItem = copy[targetIndex];
+      const listWithoutDesdobrados = prev.filter(i => !sourceDesdobradoIds.has(i.id) && !targetDesdobradoIds.has(i.id));
 
-      // Troca APENAS os dados da Referência Empresa (lado direito)
-      const sourceRightFields = {
-        composicao_id: sourceItem.composicao_id,
-        insumo_id: sourceItem.insumo_id,
-        tipo_vinculo: sourceItem.tipo_vinculo,
-        valor_unitario_empresa: sourceItem.valor_unitario_empresa,
-        total_empresa: sourceItem.total_empresa,
-        status_linha: sourceItem.status_linha,
-        composicao: sourceItem.composicao,
-        insumo: sourceItem.insumo
-      };
+      const updatedList = listWithoutDesdobrados.map(i => {
+        if (i.id === sourceItem.id) {
+          return { ...i, ...newSourceFields };
+        }
+        if (i.id === targetItem.id) {
+          return { ...i, ...newTargetFields };
+        }
+        return i;
+      });
 
-      const targetRightFields = {
-        composicao_id: targetItem.composicao_id,
-        insumo_id: targetItem.insumo_id,
-        tipo_vinculo: targetItem.tipo_vinculo,
-        valor_unitario_empresa: targetItem.valor_unitario_empresa,
-        total_empresa: targetItem.total_empresa,
-        status_linha: targetItem.status_linha,
-        composicao: targetItem.composicao,
-        insumo: targetItem.insumo
-      };
+      const finalList: ImportadoItem[] = [];
+      for (let idx = 0; idx < updatedList.length; idx++) {
+        const current = updatedList[idx];
+        finalList.push(current);
 
-      copy[draggedRightIndex] = { ...sourceItem, ...targetRightFields };
-      copy[targetIndex] = { ...targetItem, ...sourceRightFields };
+        if (current.id === targetItem.id && sourceDesdobrados.length > 0) {
+          sourceDesdobrados.forEach(sd => {
+            const q = (sd.quantidade / (sourceItem.quantidade || 1)) * (targetItem.quantidade || 1);
+            finalList.push({
+              ...sd,
+              quantidade: q,
+              total_empresa: q * (sd.valor_unitario_empresa || 0)
+            });
+          });
+        } else if (current.id === sourceItem.id && targetDesdobrados.length > 0) {
+          targetDesdobrados.forEach(td => {
+            const q = (td.quantidade / (targetItem.quantidade || 1)) * (sourceItem.quantidade || 1);
+            finalList.push({
+              ...td,
+              quantidade: q,
+              total_empresa: q * (td.valor_unitario_empresa || 0)
+            });
+          });
+        }
+      }
 
-      return copy;
+      const rebuilt = rebuildStudioEaps(finalList);
+      rebuilt.forEach(it => {
+        if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+          supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+        }
+      });
+
+      return rebuilt;
     });
 
     setDraggedRightIndex(null);
+    updateImportStatus();
   };
 
   // --- LÓGICA DE SELEÇÃO POR CLIQUE / TECLADO (CTRL, SHIFT, SETAS) ---
@@ -1155,6 +1275,7 @@ export default function OrcamentoDeParaStudio() {
         composicao_id: isComp ? selected.id : null,
         insumo_id: !isComp ? selected.id : null,
         tipo_vinculo: isComp ? 'composicao' : 'insumo',
+        texto_empresa: null,
         valor_unitario_empresa: unitPrice,
         total_empresa: totalPrice,
         status_linha: finalStatus
@@ -1303,6 +1424,7 @@ export default function OrcamentoDeParaStudio() {
         copy[pIdx] = {
           ...copy[pIdx],
           ...payload,
+          texto_empresa: null,
           status_linha: finalStatus,
           composicao: isComp ? selected : undefined,
           insumo: !isComp ? selected : undefined
@@ -1353,6 +1475,7 @@ export default function OrcamentoDeParaStudio() {
         composicao_id: null,
         insumo_id: null,
         tipo_vinculo: null,
+        texto_empresa: null,
         valor_unitario_empresa: 0,
         total_empresa: 0
       };
