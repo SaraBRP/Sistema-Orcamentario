@@ -1528,13 +1528,12 @@ export default function OrcamentoDeParaStudio() {
     }
   };
 
-  const isOperationalItem = (item: ImportadoItem) => {
-    if (item.status_linha === 'inativo' || item.status_linha === 'desdobrado') return false;
-    return (item.quantidade !== undefined && item.quantidade !== null && item.quantidade > 0);
+  const isMainClientItem = (item: ImportadoItem) => {
+    return item.status_linha !== 'inativo' && item.status_linha !== 'desdobrado';
   };
 
   const isItemLinked = (item: ImportadoItem) => {
-    if (!isOperationalItem(item)) return true;
+    if (item.status_linha === 'inativo' || item.status_linha === 'desdobrado') return true;
     const hasComp = !!(item.composicao_id || item.composicao);
     const hasInsumo = !!(item.insumo_id || item.insumo);
     const hasText = item.tipo_vinculo === 'texto' || !!(item.texto_empresa && String(item.texto_empresa).trim() !== '');
@@ -1543,9 +1542,9 @@ export default function OrcamentoDeParaStudio() {
   };
 
   const updateImportStatus = async () => {
-    const operationalItems = items.filter(isOperationalItem);
-    const total = operationalItems.length;
-    const linkedCount = operationalItems.filter(isItemLinked).length;
+    const mainClientItems = items.filter(isMainClientItem);
+    const total = mainClientItems.length;
+    const linkedCount = mainClientItems.filter(isItemLinked).length;
 
     let newStatus = 'Aguardando De-Para';
     if (linkedCount === total && total > 0) newStatus = 'Concluído';
@@ -1586,8 +1585,8 @@ export default function OrcamentoDeParaStudio() {
 
   // Gerar Orçamento Nativo da Empresa a partir do De-Para
   const handleGerarOrcamentoEmpresa = async () => {
-    const operationalItems = items.filter(isOperationalItem);
-    const unlinkedCount = operationalItems.filter(i => !isItemLinked(i)).length;
+    const mainClientItems = items.filter(isMainClientItem);
+    const unlinkedCount = mainClientItems.filter(i => !isItemLinked(i)).length;
     if (unlinkedCount > 0) {
       alert(`⚠️ Por favor, vincule todos os itens (${unlinkedCount} itens pendentes) antes de gerar o orçamento empresa.`);
       return;
@@ -1690,10 +1689,10 @@ export default function OrcamentoDeParaStudio() {
     }
   };
 
-  // Estatísticas de Custo e Progresso de Itens Operacionais
-  const operationalItems = items.filter(isOperationalItem);
-  const totalItemsCount = operationalItems.length;
-  const linkedItemsCount = operationalItems.filter(isItemLinked).length;
+  // Estatísticas de Custo e Progresso de Itens Principais do Cliente
+  const mainClientItems = items.filter(isMainClientItem);
+  const totalItemsCount = mainClientItems.length;
+  const linkedItemsCount = mainClientItems.filter(isItemLinked).length;
   const isAllLinked = totalItemsCount > 0 && linkedItemsCount === totalItemsCount;
   const progressPercent = totalItemsCount > 0 ? Math.round((linkedItemsCount / totalItemsCount) * 100) : 100;
 
