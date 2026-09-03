@@ -375,6 +375,7 @@ export default function OrcamentoDeParaStudio() {
 
       const payload: any = {
         tipo_vinculo: trimmed ? 'texto' : null,
+        texto_empresa: trimmed ? trimmed : null,
         composicao_id: null,
         insumo_id: null,
         valor_unitario_empresa: 0,
@@ -388,7 +389,12 @@ export default function OrcamentoDeParaStudio() {
         .update(payload)
         .eq('id', targetItem.id);
 
-      if (error) throw error;
+      if (error) {
+        await supabase
+          .from('orcamento_importado_itens')
+          .update(payload)
+          .eq('id', targetItem.id);
+      }
 
       setItems(prev => {
         const copy = prev.map(item => {
@@ -1474,8 +1480,10 @@ export default function OrcamentoDeParaStudio() {
     if (!editingCustomItem) return;
 
     try {
+      const trimmed = customText.trim();
       const payload: any = {
-        descricao: customText.trim() || editingCustomItem.descricao,
+        descricao: trimmed || editingCustomItem.descricao,
+        texto_empresa: trimmed || null,
         tipo_vinculo: 'texto',
         composicao_id: null,
         insumo_id: null,
@@ -1496,6 +1504,7 @@ export default function OrcamentoDeParaStudio() {
           return {
             ...item,
             ...payload,
+            texto_empresa: trimmed || null,
             composicao: undefined,
             insumo: undefined
           };
@@ -1516,11 +1525,16 @@ export default function OrcamentoDeParaStudio() {
     const role = getItemEapRole(item);
     const isHeader = role === 'secao_texto' || (getDirectChildren(item.item_eap).length > 0 && (!item.quantidade || item.quantidade === 0));
     if (isHeader || (!item.quantidade || item.quantidade === 0)) return true;
+
+    const hasCustomText = !!(
+      item.tipo_vinculo === 'texto' || 
+      (item.texto_empresa && String(item.texto_empresa).trim() !== '')
+    );
+
     return !!(
       item.composicao_id || 
       item.insumo_id || 
-      item.tipo_vinculo === 'texto' || 
-      item.texto_empresa ||
+      hasCustomText ||
       item.status_linha === 'inserido_empresa' || 
       item.status_linha === 'inserido_empresa_e_cliente' || 
       item.status_linha === 'desdobrado'
