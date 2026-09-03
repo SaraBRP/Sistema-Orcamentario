@@ -532,9 +532,17 @@ export default function OrcamentoDeParaStudio() {
           supabase.schema('engenharia').from('orcamento_importado_itens').update({ status_linha: 'ativo' }).eq('id', item.id).then(() => {});
         }
 
+        let vinculo = item.tipo_vinculo;
+        let textoEmp = item.texto_empresa;
+        if (textoEmp && !vinculo) {
+          vinculo = 'texto';
+        }
+
         return {
           ...item,
           status_linha: status,
+          tipo_vinculo: vinculo,
+          texto_empresa: textoEmp,
           composicao: item.composicao_id ? compsMap[item.composicao_id] : undefined,
           insumo: item.insumo_id ? insumosMap[item.insumo_id] : undefined
         };
@@ -1522,23 +1530,14 @@ export default function OrcamentoDeParaStudio() {
 
   const isItemLinked = (item: ImportadoItem) => {
     if (item.status_linha === 'inativo') return true;
-    const role = getItemEapRole(item);
-    const isHeader = role === 'secao_texto' || (getDirectChildren(item.item_eap).length > 0 && (!item.quantidade || item.quantidade === 0));
-    if (isHeader || (!item.quantidade || item.quantidade === 0)) return true;
+    if (item.status_linha === 'desdobrado' || item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente') return true;
+    if (!item.quantidade || item.quantidade === 0) return true;
 
-    const hasCustomText = !!(
-      item.tipo_vinculo === 'texto' || 
-      (item.texto_empresa && String(item.texto_empresa).trim() !== '')
-    );
+    const hasComp = !!(item.composicao_id || item.composicao);
+    const hasInsumo = !!(item.insumo_id || item.insumo);
+    const hasText = item.tipo_vinculo === 'texto' || !!(item.texto_empresa && String(item.texto_empresa).trim() !== '');
 
-    return !!(
-      item.composicao_id || 
-      item.insumo_id || 
-      hasCustomText ||
-      item.status_linha === 'inserido_empresa' || 
-      item.status_linha === 'inserido_empresa_e_cliente' || 
-      item.status_linha === 'desdobrado'
-    );
+    return hasComp || hasInsumo || hasText;
   };
 
   const updateImportStatus = async () => {
