@@ -523,28 +523,26 @@ export default function Orcamentos() {
       const { data: rows, error: rowsError } = await supabase
         .schema('engenharia')
         .from('orcamento_importado_itens')
-        .select('orcamento_importado_id, composicao_id, insumo_id, tipo_vinculo, status_linha');
+        .select('orcamento_importado_id, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha');
 
       if (!rowsError && rows) {
         const stats: Record<string, { total: number; linked: number }> = {};
         rows.forEach((r: any) => {
-          if (r.status_linha === 'inativo') return;
+          if (r.status_linha === 'inativo' || r.status_linha === 'desdobrado') return;
+          if (!r.quantidade || r.quantidade === 0) return;
+
           const impId = r.orcamento_importado_id;
           if (!stats[impId]) {
             stats[impId] = { total: 0, linked: 0 };
           }
           stats[impId].total += 1;
-          const isLinked = !!(
-            r.composicao_id || 
-            r.insumo_id || 
-            r.tipo_vinculo === 'texto' || 
-            r.texto_empresa ||
-            r.status_linha === 'inserido_empresa' || 
-            r.status_linha === 'inserido_empresa_e_cliente' || 
-            r.status_linha === 'desdobrado' ||
-            (!r.quantidade || r.quantidade === 0)
-          );
-          if (isLinked) {
+
+          const hasComp = !!(r.composicao_id);
+          const hasInsumo = !!(r.insumo_id);
+          const hasText = r.tipo_vinculo === 'texto' || !!(r.texto_empresa && String(r.texto_empresa).trim() !== '');
+          const isInserted = r.status_linha === 'inserido_empresa' || r.status_linha === 'inserido_empresa_e_cliente';
+
+          if (hasComp || hasInsumo || hasText || isInserted) {
             stats[impId].linked += 1;
           }
         });

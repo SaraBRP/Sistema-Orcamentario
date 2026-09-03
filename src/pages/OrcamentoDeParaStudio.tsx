@@ -1528,22 +1528,24 @@ export default function OrcamentoDeParaStudio() {
     }
   };
 
-  const isItemLinked = (item: ImportadoItem) => {
-    if (item.status_linha === 'inativo') return true;
-    if (item.status_linha === 'desdobrado' || item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente') return true;
-    if (!item.quantidade || item.quantidade === 0) return true;
+  const isOperationalItem = (item: ImportadoItem) => {
+    if (item.status_linha === 'inativo' || item.status_linha === 'desdobrado') return false;
+    return (item.quantidade !== undefined && item.quantidade !== null && item.quantidade > 0);
+  };
 
+  const isItemLinked = (item: ImportadoItem) => {
+    if (!isOperationalItem(item)) return true;
     const hasComp = !!(item.composicao_id || item.composicao);
     const hasInsumo = !!(item.insumo_id || item.insumo);
     const hasText = item.tipo_vinculo === 'texto' || !!(item.texto_empresa && String(item.texto_empresa).trim() !== '');
-
-    return hasComp || hasInsumo || hasText;
+    const isInserted = item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente';
+    return hasComp || hasInsumo || hasText || isInserted;
   };
 
   const updateImportStatus = async () => {
-    const validItems = items.filter(i => i.status_linha !== 'inativo');
-    const total = validItems.length;
-    const linkedCount = validItems.filter(isItemLinked).length;
+    const operationalItems = items.filter(isOperationalItem);
+    const total = operationalItems.length;
+    const linkedCount = operationalItems.filter(isItemLinked).length;
 
     let newStatus = 'Aguardando De-Para';
     if (linkedCount === total && total > 0) newStatus = 'Concluído';
@@ -1584,7 +1586,8 @@ export default function OrcamentoDeParaStudio() {
 
   // Gerar Orçamento Nativo da Empresa a partir do De-Para
   const handleGerarOrcamentoEmpresa = async () => {
-    const unlinkedCount = items.filter(i => !isItemLinked(i)).length;
+    const operationalItems = items.filter(isOperationalItem);
+    const unlinkedCount = operationalItems.filter(i => !isItemLinked(i)).length;
     if (unlinkedCount > 0) {
       alert(`⚠️ Por favor, vincule todos os itens (${unlinkedCount} itens pendentes) antes de gerar o orçamento empresa.`);
       return;
@@ -1593,60 +1596,33 @@ export default function OrcamentoDeParaStudio() {
     setSaving(true);
     try {
       const today = new Date();
-      const dd = String(today.getDate()).padStart(2, '0');
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const year = today.getFullYear();
-      const ddmm = `${dd}${mm}`;
+      const yearStr = today.getFullYear();
+      const nextSeqStr = '001';
+      const codigo = `ORC.${nextSeqStr}/${yearStr}`;
 
-      const { data: existing } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .select('codigo')
-        .like('codigo', `${ddmm}.%`);
-
-      let nextSeq = 1;
-      if (existing && existing.length > 0) {
-        const seqs = existing.map((o: any) => {
-          const parts = o.codigo.split('.');
-          return parts.length >= 2 ? parseInt(parts[1], 10) || 0 : 0;
-        });
-        nextSeq = Math.max(...seqs) + 1;
-      }
-      const codigo = `${ddmm}.${String(nextSeq).padStart(3, '0')}.0-${year}`;
-
-      const { data: newOrc, error: newOrcError } = await supabase
+      const { data: newOrc, error: orcError } = await supabase
         .schema('engenharia')
         .from('orcamentos')
         .insert({
           codigo,
           nome: importHeader.projeto || importHeader.nome_arquivo,
-          descricao: `Gerado a partir da importação: ${importHeader.nome_arquivo}`,
           cliente: importHeader.cliente,
-          projeto: importHeader.projeto,
           status: 'Em Elaboração',
+          revisao: '00',
+          data_base: new Date().toISOString().split('T')[0],
+          bdi_padrao: 0,
           orcamento_importado_id: importId
         })
         .select('id')
         .single();
 
-      if (newOrcError) throw newOrcError;
+      if (orcError) throw orcError;
 
-      // Marca a planilha importada como Concluída
-      await supabase
-        .schema('engenharia')
-        .from('orcamentos_importados')
-        .update({ status: 'Concluído' })
-        .eq('id', importId);
-
-      setImportHeader((prev: any) => ({ ...prev, status: 'Concluído' }));
-
-      // Filtra apenas itens válidos (ignora linhas inativas E ignora desdobrados internos de composição do preview)
       const validItems = items.filter(i => i.status_linha !== 'inativo' && i.status_linha !== 'desdobrado');
-
       const itensPayload = validItems.map((item: any) => {
         const role = getItemEapRole(item);
         const linkedRef = item.composicao || item.insumo;
-        const isHeader = role === 'secao_texto' || item.tipo_vinculo === 'texto' || item.quantidade === 0;
+        const isHeader = role === 'secao_texto' || (!linkedRef && (item.quantidade === 0 || !item.quantidade));
 
         if (isHeader) {
           return {
@@ -1664,29 +1640,28 @@ export default function OrcamentoDeParaStudio() {
             total_mat: 0,
             total_mo: 0,
             total: 0,
+            insumo_id: null,
             composicao_id: null
           };
         }
 
-        const matVal = item.tipo_vinculo === 'insumo' ? item.valor_unitario_empresa : item.valor_unitario_empresa * 0.7;
-        const moVal = item.tipo_vinculo === 'insumo' ? 0 : item.valor_unitario_empresa * 0.3;
-        const itemDesc = (item.descricao && item.descricao.trim() !== '') ? item.descricao : (linkedRef?.descricao || 'Item sem descrição');
-
+        const compBreak = getCompanyBreakdown(item);
         return {
           orcamento_id: newOrc.id,
           item_eap: item.item_eap,
           codigo: linkedRef?.codigo || null,
-          banco_fonte: 'Própria',
-          descricao: itemDesc,
+          banco_fonte: linkedRef?.fonte || 'Banco Próprio',
+          descricao: item.texto_empresa || linkedRef?.descricao || item.descricao,
           unidade: item.unidade || linkedRef?.unidade || 'un',
-          quantidade: item.quantidade || 0,
-          valor_unitario_mat: matVal,
-          valor_unitario_mo: moVal,
-          valor_unitario: item.valor_unitario_empresa || item.valor_unitario_orig || 0,
-          valor_unitario_com_bdi: item.valor_unitario_empresa || item.valor_unitario_orig || 0,
-          total_mat: (item.quantidade || 0) * matVal,
-          total_mo: (item.quantidade || 0) * moVal,
-          total: item.total_empresa || item.total_orig || 0,
+          quantidade: item.quantidade || 1,
+          valor_unitario_mat: compBreak.matUnit,
+          valor_unitario_mo: compBreak.moUnit,
+          valor_unitario: compBreak.unitTotal,
+          valor_unitario_com_bdi: compBreak.unitTotal,
+          total_mat: compBreak.matTotal,
+          total_mo: compBreak.moTotal,
+          total: compBreak.matTotal + compBreak.moTotal,
+          insumo_id: item.insumo_id || null,
           composicao_id: item.composicao_id || null
         };
       });
@@ -1715,10 +1690,10 @@ export default function OrcamentoDeParaStudio() {
     }
   };
 
-  // Estatísticas de Custo e Progresso (desconsidera linhas inativas)
-  const validItems = items.filter(i => i.status_linha !== 'inativo');
-  const totalItemsCount = validItems.length;
-  const linkedItemsCount = validItems.filter(isItemLinked).length;
+  // Estatísticas de Custo e Progresso de Itens Operacionais
+  const operationalItems = items.filter(isOperationalItem);
+  const totalItemsCount = operationalItems.length;
+  const linkedItemsCount = operationalItems.filter(isItemLinked).length;
   const isAllLinked = totalItemsCount > 0 && linkedItemsCount === totalItemsCount;
   const progressPercent = totalItemsCount > 0 ? Math.round((linkedItemsCount / totalItemsCount) * 100) : 100;
 
