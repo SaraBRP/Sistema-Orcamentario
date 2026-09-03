@@ -528,6 +528,7 @@ export default function Orcamentos() {
       if (!rowsError && rows) {
         const stats: Record<string, { total: number; linked: number }> = {};
         rows.forEach((r: any) => {
+          if (r.status_linha === 'inativo') return;
           const impId = r.orcamento_importado_id;
           if (!stats[impId]) {
             stats[impId] = { total: 0, linked: 0 };
@@ -537,10 +538,11 @@ export default function Orcamentos() {
             r.composicao_id || 
             r.insumo_id || 
             r.tipo_vinculo === 'texto' || 
-            r.status_linha === 'inativo' || 
+            r.texto_empresa ||
             r.status_linha === 'inserido_empresa' || 
             r.status_linha === 'inserido_empresa_e_cliente' || 
-            r.status_linha === 'desdobrado'
+            r.status_linha === 'desdobrado' ||
+            (!r.quantidade || r.quantidade === 0)
           );
           if (isLinked) {
             stats[impId].linked += 1;

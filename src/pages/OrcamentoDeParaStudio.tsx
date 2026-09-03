@@ -1512,14 +1512,25 @@ export default function OrcamentoDeParaStudio() {
   };
 
   const isItemLinked = (item: ImportadoItem) => {
+    if (item.status_linha === 'inativo') return true;
     const role = getItemEapRole(item);
-    if (role === 'secao_texto') return true;
-    return !!(item.composicao_id || item.insumo_id || item.tipo_vinculo === 'texto' || item.status_linha === 'inativo' || item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente' || item.status_linha === 'desdobrado');
+    const isHeader = role === 'secao_texto' || (getDirectChildren(item.item_eap).length > 0 && (!item.quantidade || item.quantidade === 0));
+    if (isHeader || (!item.quantidade || item.quantidade === 0)) return true;
+    return !!(
+      item.composicao_id || 
+      item.insumo_id || 
+      item.tipo_vinculo === 'texto' || 
+      item.texto_empresa ||
+      item.status_linha === 'inserido_empresa' || 
+      item.status_linha === 'inserido_empresa_e_cliente' || 
+      item.status_linha === 'desdobrado'
+    );
   };
 
   const updateImportStatus = async () => {
-    const total = items.length;
-    const linkedCount = items.filter(isItemLinked).length;
+    const validItems = items.filter(i => i.status_linha !== 'inativo');
+    const total = validItems.length;
+    const linkedCount = validItems.filter(isItemLinked).length;
 
     let newStatus = 'Aguardando De-Para';
     if (linkedCount === total && total > 0) newStatus = 'Concluído';
@@ -1691,11 +1702,12 @@ export default function OrcamentoDeParaStudio() {
     }
   };
 
-  // Estatísticas de Custo e Progresso
-  const totalItemsCount = items.length;
-  const linkedItemsCount = items.filter(isItemLinked).length;
-  const isAllLinked = linkedItemsCount === totalItemsCount && totalItemsCount > 0;
-  const progressPercent = totalItemsCount > 0 ? Math.round((linkedItemsCount / totalItemsCount) * 100) : 0;
+  // Estatísticas de Custo e Progresso (desconsidera linhas inativas)
+  const validItems = items.filter(i => i.status_linha !== 'inativo');
+  const totalItemsCount = validItems.length;
+  const linkedItemsCount = validItems.filter(isItemLinked).length;
+  const isAllLinked = totalItemsCount > 0 && linkedItemsCount === totalItemsCount;
+  const progressPercent = totalItemsCount > 0 ? Math.round((linkedItemsCount / totalItemsCount) * 100) : 100;
 
   const totalCliente = items.filter(i => i.status_linha !== 'inativo').reduce((acc, i) => acc + (i.total_orig || 0), 0);
   const totalEmpresa = items.filter(i => i.status_linha !== 'inativo').reduce((acc, i) => acc + (i.total_empresa || i.total_orig || 0), 0);
