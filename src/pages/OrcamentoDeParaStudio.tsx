@@ -27,7 +27,7 @@ type ImportadoItem = {
   total_mo_orig?: number;
   composicao_id?: string;
   insumo_id?: string;
-  tipo_vinculo?: 'composicao' | 'insumo' | 'texto';
+  tipo_vinculo?: 'composicao' | 'insumo' | 'texto' | 'secao' | null;
   valor_unitario_empresa: number;
   total_empresa: number;
   is_summary?: boolean;
@@ -89,16 +89,20 @@ const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
 
     const isDesdobrado = item.status_linha === 'desdobrado';
 
-    // Se for um sub-item desdobrado constituinte de uma composição, ele é filho direto da linha principal acima dele (ex: 2.1.3.1, 2.1.3.2)
+    // 1. Sub-item constituinte de composição (ex: 2.1.1, 2.1.2)
     if (isDesdobrado) {
       childSeq++;
       item.item_eap = `${currentParentEap}.${childSeq}`;
       continue;
     }
 
-    // Caso contrário, é uma linha principal do cliente (título ou item operacional)
+    // 2. Título de Seção/Capítulo Nível 1 (ex: 1, 2, 3, 4)
     const origParts = (item.item_eap || '').split('.').filter(Boolean);
-    const isExplicitSection = (origParts.length === 1 && (item.quantidade === 0 || !item.quantidade) && item.status_linha !== 'inserido_empresa');
+    const isExplicitSection = (
+      (origParts.length === 1 && (!item.quantidade || item.quantidade === 0) && item.status_linha !== 'inserido_empresa') ||
+      item.tipo_vinculo === 'secao' ||
+      (item.status_linha === 'inserido_empresa' && (!item.quantidade || item.quantidade === 0))
+    );
 
     if (isExplicitSection) {
       sectionSeq++;
@@ -108,15 +112,15 @@ const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
       currentSectionEap = item.item_eap;
       currentParentEap = item.item_eap;
     } else {
-      // Item operacional principal do cliente/empresa
-      if (origParts.length > 1) {
-        item.item_eap = origParts.join('.');
-      } else {
-        compSeq++;
-        item.item_eap = `${currentSectionEap}.${compSeq}`;
+      // 3. Item Operacional Principal do Cliente/Empresa (ex: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3...)
+      if (sectionSeq === 0) {
+        sectionSeq = 1;
+        currentSectionEap = '1';
       }
-      currentParentEap = item.item_eap;
+      compSeq++;
       childSeq = 0;
+      item.item_eap = `${currentSectionEap}.${compSeq}`;
+      currentParentEap = item.item_eap;
     }
   }
 
@@ -956,28 +960,25 @@ export default function OrcamentoDeParaStudio() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [selectedRowIndex, selectedRowIndexes, lastClickedRowIndex, items]);
 
-  // --- INSERIR NOVA LINHA (ACIMA DA SELECIONADA OU NO FINAL) ---
+  // --- INSERIR NOVA LINHA (APÓS A SELECIONADA OU NO FINAL) ---
   const handleInsertRow = async () => {
     let insertIndex = items.length;
-    let targetEap = `${items.length + 1}`;
+    let isAtVeryEnd = true;
 
     if (selectedRowIndex !== null && selectedRowIndex >= 0 && selectedRowIndex < items.length) {
-      insertIndex = selectedRowIndex;
-      targetEap = items[selectedRowIndex].item_eap || '1';
-    } else if (items.length > 0) {
-      const lastEap = items[items.length - 1].item_eap || '1';
-      const parts = lastEap.split('.');
-      const lastNum = parseInt(parts[0], 10);
-      targetEap = !isNaN(lastNum) ? String(lastNum + 1) : `${items.length + 1}`;
+      // Se tiver linha selecionada, insere logo abaixo dela
+      insertIndex = selectedRowIndex + 1;
+      isAtVeryEnd = (insertIndex === items.length);
     }
 
     try {
       const payload: Omit<ImportadoItem, 'id'> = {
         orcamento_importado_id: importId!,
-        item_eap: targetEap,
+        item_eap: 'temp',
         descricao: 'Nova Linha Inserida',
         unidade: 'un',
-        quantidade: 1,
+        quantidade: isAtVeryEnd ? 0 : 1,
+        tipo_vinculo: isAtVeryEnd ? 'secao' : undefined,
         valor_unitario_orig: 0,
         total_orig: 0,
         valor_unitario_empresa: 0,
@@ -985,18 +986,31 @@ export default function OrcamentoDeParaStudio() {
         status_linha: 'inserido_empresa'
       };
 
-      const { data, error } = await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .insert(payload)
-        .select()
-        .single();
-
-      if (error) throw error;
+      let newItemId = `inserted-${Date.now()}`;
+      try {
+        const { data, error } = await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .insert(payload)
+          .select()
+          .single();
+        if (!error && data?.id) {
+          newItemId = data.id;
+        }
+      } catch {
+        try {
+          const { data: pubData } = await supabase
+            .from('orcamento_importado_itens')
+            .insert(payload)
+            .select()
+            .single();
+          if (pubData?.id) newItemId = pubData.id;
+        } catch {}
+      }
 
       const newItem: ImportadoItem = {
         ...payload,
-        id: data.id
+        id: newItemId
       };
 
       setItems(prev => {
