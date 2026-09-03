@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { Search, ChevronDown, Check, MapPin, Building } from 'lucide-react';
 import { clsx } from 'clsx';
-import { getClientesCadastrados, type ClienteData } from '../lib/clientes';
+import { getClientesCadastrados, LOCAL_STORAGE_CLIENTES_KEY, CLIENTES_BASE_INICIAL, type ClienteData } from '../lib/clientes';
 
 interface ClienteSelectProps {
   value: string;
@@ -16,7 +16,24 @@ export function ClienteSelect({
   placeholder = 'Selecione ou busque o Cliente...',
   disabled = false
 }: ClienteSelectProps) {
-  const [clientes, setClientes] = useState<ClienteData[]>([]);
+  // Inicialização síncrona dos clientes a partir do cache local para carregamento instantâneo
+  const [clientes, setClientes] = useState<ClienteData[]>(() => {
+    try {
+      const saved = localStorage.getItem(LOCAL_STORAGE_CLIENTES_KEY);
+      const list: ClienteData[] = saved ? JSON.parse(saved) : [];
+      const names = new Set(list.map(c => (c.razao_social || '').toLowerCase().trim()));
+      CLIENTES_BASE_INICIAL.forEach(baseClient => {
+        if (!names.has((baseClient.razao_social || '').toLowerCase().trim())) {
+          list.push(baseClient);
+          names.add((baseClient.razao_social || '').toLowerCase().trim());
+        }
+      });
+      return list.sort((a, b) => (a.razao_social || '').localeCompare(b.razao_social || ''));
+    } catch {
+      return CLIENTES_BASE_INICIAL;
+    }
+  });
+
   const [isOpen, setIsOpen] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
   const [loading, setLoading] = useState(false);
@@ -24,10 +41,14 @@ export function ClienteSelect({
 
   useEffect(() => {
     let isMounted = true;
-    setLoading(true);
+    if (clientes.length === 0) {
+      setLoading(true);
+    }
     getClientesCadastrados().then(data => {
       if (isMounted) {
-        setClientes(data);
+        if (data && data.length > 0) {
+          setClientes(data);
+        }
         setLoading(false);
       }
     });

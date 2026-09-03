@@ -31,39 +31,37 @@ export function formatCNPJ(value: string): string {
 
 // Buscar todos os clientes cadastrados (Supabase + LocalStorage + Base Importada da planilha)
 export async function getClientesCadastrados(): Promise<ClienteData[]> {
-  let clientes: ClienteData[] = [];
-
-  // 1. Tentar buscar do Supabase
+  // 1. Carrega imediatamente os clientes da base local e localStorage
+  let localClientes: ClienteData[] = [];
   try {
-    const { data, error } = await supabase
-      .schema('engenharia')
-      .from('clientes')
-      .select('*')
-      .order('razao_social', { ascending: true });
+    const saved = localStorage.getItem(LOCAL_STORAGE_CLIENTES_KEY);
+    if (saved) {
+      localClientes = JSON.parse(saved);
+    }
+  } catch {}
 
-    if (!error && data && data.length > 0) {
-      clientes = data.map(c => ({
-        id: c.id,
-        razao_social: c.razao_social || c.nome_empresa || c.nome || '',
-        nome_fantasia: c.nome_fantasia || '',
-        cnpj: c.cnpj || '',
-        cidade: c.cidade || '',
-        uf: c.uf || '',
-        responsavel: c.responsavel || c.gestor_cliente || '',
-        email: c.email || '',
-        telefone: c.telefone || '',
-        status: c.status || 'ativo',
-        created_at: c.created_at || new Date().toISOString()
-      }));
-    } else {
-      // Tentar schema public caso engenharia não possua a tabela
-      const { data: pubData, error: pubError } = await supabase
+  const existingNames = new Set(localClientes.map(c => (c.razao_social || '').toLowerCase().trim()));
+  CLIENTES_BASE_INICIAL.forEach(baseClient => {
+    if (!existingNames.has((baseClient.razao_social || '').toLowerCase().trim())) {
+      localClientes.push(baseClient);
+      existingNames.add((baseClient.razao_social || '').toLowerCase().trim());
+    }
+  });
+
+  localClientes = localClientes.filter(c => c.id !== 'cli_votorantim' && c.id !== 'cli_brp_metalica');
+  localClientes.sort((a, b) => (a.razao_social || '').localeCompare(b.razao_social || ''));
+
+  // 2. Busca no Supabase com limite de tempo (1.5s) para nunca congelar ou demorar a UI
+  try {
+    const fetchSupabase = async (): Promise<ClienteData[] | null> => {
+      const { data, error } = await supabase
+        .schema('engenharia')
         .from('clientes')
         .select('*')
         .order('razao_social', { ascending: true });
 
-      if (!pubError && pubData && pubData.length > 0) {
-        clientes = pubData.map(c => ({
+      if (!error && data && data.length > 0) {
+        return data.map(c => ({
           id: c.id,
           razao_social: c.razao_social || c.nome_empresa || c.nome || '',
           nome_fantasia: c.nome_fantasia || '',
@@ -77,56 +75,35 @@ export async function getClientesCadastrados(): Promise<ClienteData[]> {
           created_at: c.created_at || new Date().toISOString()
         }));
       }
-    }
-  } catch {}
+      return null;
+    };
 
-  // 2. Mesclar com LocalStorage
-  try {
-    const saved = localStorage.getItem(LOCAL_STORAGE_CLIENTES_KEY);
-    if (saved) {
-      const localList: ClienteData[] = JSON.parse(saved);
-      const existingIds = new Set(clientes.map(c => c.id));
-      const existingNames = new Set(clientes.map(c => c.razao_social.toLowerCase().trim()));
+    const timeoutPromise = new Promise<null>(resolve => setTimeout(() => resolve(null), 1500));
+    const remoteData = await Promise.race([fetchSupabase(), timeoutPromise]);
 
-      localList.forEach(item => {
-        if (!existingIds.has(item.id) && !existingNames.has(item.razao_social.toLowerCase().trim())) {
-          clientes.push(item);
+    if (remoteData && remoteData.length > 0) {
+      const remoteNames = new Set(remoteData.map(c => c.razao_social.toLowerCase().trim()));
+      localClientes.forEach(lc => {
+        if (!remoteNames.has(lc.razao_social.toLowerCase().trim())) {
+          remoteData.push(lc);
         }
       });
+      remoteData.sort((a, b) => a.razao_social.localeCompare(b.razao_social));
+      try {
+        localStorage.setItem(LOCAL_STORAGE_CLIENTES_KEY, JSON.stringify(remoteData));
+      } catch {}
+      return remoteData;
     }
-  } catch {}
+  } catch (e) {
+    console.warn('Uso de base local de clientes ativado (Supabase indisponível/lento):', e);
+  }
 
-  // 3. Incluir clientes da planilha importada se ainda não existirem no cadastro
-  const existingNames = new Set(clientes.map(c => c.razao_social.toLowerCase().trim()));
-  CLIENTES_BASE_INICIAL.forEach(baseClient => {
-    if (!existingNames.has(baseClient.razao_social.toLowerCase().trim())) {
-      clientes.push(baseClient);
-      existingNames.add(baseClient.razao_social.toLowerCase().trim());
-    }
-  });
-
-  // Filtra/Remove quaisquer registros de teste antigos
-  clientes = clientes.filter(c => 
-    c.id !== 'cli_votorantim' && 
-    c.id !== 'cli_brp_metalica'
-  );
-
-  // Ordena alfabeticamente pela razão social
-  clientes.sort((a, b) => a.razao_social.localeCompare(b.razao_social));
-
-  // Atualiza LocalStorage sincronizado com a base importada
+  // Atualiza LocalStorage sincronizado com a base inicial se ainda não salvo
   try {
-    localStorage.setItem(LOCAL_STORAGE_CLIENTES_KEY, JSON.stringify(clientes));
+    localStorage.setItem(LOCAL_STORAGE_CLIENTES_KEY, JSON.stringify(localClientes));
   } catch {}
 
-  // Tenta salvar/sincronizar no Supabase em segundo plano
-  (async () => {
-    try {
-      await supabase.schema('engenharia').from('clientes').upsert(clientes);
-    } catch {}
-  })();
-
-  return clientes;
+  return localClientes;
 }
 
 // Salvar / Criar ou Atualizar Cliente
