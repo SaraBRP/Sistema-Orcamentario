@@ -7,7 +7,7 @@ import {
   ArrowLeft, Search, Plus, Trash2, CheckCircle2, 
   Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X,
   ChevronDown, ChevronRight, Folder, FolderOpen, Strikethrough, Download, PlusCircle, GripVertical,
-  FilePlus, FileMinus
+  FilePlus, FileMinus, Undo, Redo
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -134,6 +134,102 @@ export default function OrcamentoDeParaStudio() {
 
   const [importHeader, setImportHeader] = useState<any>(null);
   const [items, setItems] = useState<ImportadoItem[]>([]);
+  const [historyStack, setHistoryStack] = useState<ImportadoItem[][]>([]);
+  const [redoStack, setRedoStack] = useState<ImportadoItem[][]>([]);
+
+  // Salva instantâneo atual no histórico de Desfazer (Ctrl+Z)
+  const saveSnapshot = () => {
+    if (items.length > 0) {
+      setHistoryStack(prev => [...prev.slice(-49), items.map(i => ({ ...i }))]);
+      setRedoStack([]);
+    }
+  };
+
+  const handleUndo = async () => {
+    if (historyStack.length === 0) return;
+
+    const previousState = historyStack[historyStack.length - 1];
+    setHistoryStack(prev => prev.slice(0, -1));
+    setRedoStack(prev => [...prev, items.map(i => ({ ...i }))]);
+
+    const rebuilt = rebuildStudioEaps(previousState);
+    setItems(rebuilt);
+
+    try {
+      const itemsToUpdate = rebuilt.map(item => ({
+        id: item.id,
+        orcamento_importado_id: importId!,
+        item_eap: item.item_eap,
+        descricao: item.descricao,
+        unidade: item.unidade,
+        quantidade: item.quantidade,
+        valor_unitario_orig: item.valor_unitario_orig,
+        total_orig: item.total_orig,
+        composicao_id: item.composicao_id || null,
+        insumo_id: item.insumo_id || null,
+        tipo_vinculo: item.tipo_vinculo || null,
+        texto_empresa: item.texto_empresa || null,
+        valor_unitario_empresa: item.valor_unitario_empresa || 0,
+        total_empresa: item.total_empresa || 0,
+        status_linha: item.status_linha || 'ativo'
+      }));
+
+      await supabase
+        .schema('engenharia')
+        .from('orcamento_importado_itens')
+        .upsert(itemsToUpdate);
+
+      const localKey = `brp_orcamento_importado_itens_${importId}`;
+      localStorage.setItem(localKey, JSON.stringify(rebuilt));
+    } catch (err) {
+      console.warn('Erro ao sincronizar Undo:', err);
+    }
+
+    updateImportStatus();
+  };
+
+  const handleRedo = async () => {
+    if (redoStack.length === 0) return;
+
+    const nextState = redoStack[redoStack.length - 1];
+    setRedoStack(prev => prev.slice(0, -1));
+    setHistoryStack(prev => [...prev, items.map(i => ({ ...i }))]);
+
+    const rebuilt = rebuildStudioEaps(nextState);
+    setItems(rebuilt);
+
+    try {
+      const itemsToUpdate = rebuilt.map(item => ({
+        id: item.id,
+        orcamento_importado_id: importId!,
+        item_eap: item.item_eap,
+        descricao: item.descricao,
+        unidade: item.unidade,
+        quantidade: item.quantidade,
+        valor_unitario_orig: item.valor_unitario_orig,
+        total_orig: item.total_orig,
+        composicao_id: item.composicao_id || null,
+        insumo_id: item.insumo_id || null,
+        tipo_vinculo: item.tipo_vinculo || null,
+        texto_empresa: item.texto_empresa || null,
+        valor_unitario_empresa: item.valor_unitario_empresa || 0,
+        total_empresa: item.total_empresa || 0,
+        status_linha: item.status_linha || 'ativo'
+      }));
+
+      await supabase
+        .schema('engenharia')
+        .from('orcamento_importado_itens')
+        .upsert(itemsToUpdate);
+
+      const localKey = `brp_orcamento_importado_itens_${importId}`;
+      localStorage.setItem(localKey, JSON.stringify(rebuilt));
+    } catch (err) {
+      console.warn('Erro ao sincronizar Redo:', err);
+    }
+
+    updateImportStatus();
+  };
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
@@ -370,6 +466,7 @@ export default function OrcamentoDeParaStudio() {
   };
 
   const handleSaveInlineText = async (targetItem: ImportadoItem, newText: string) => {
+    saveSnapshot();
     setInlineEditingRowId(null);
     const trimmed = newText.trim();
 
@@ -740,6 +837,8 @@ export default function OrcamentoDeParaStudio() {
     e.preventDefault();
     if (draggedRightIndex === null || draggedRightIndex === targetIndex) return;
 
+    saveSnapshot();
+
     const sourceItem = items[draggedRightIndex];
     const targetItem = items[targetIndex];
     if (!sourceItem || !targetItem) return;
@@ -924,6 +1023,7 @@ export default function OrcamentoDeParaStudio() {
 
   // --- RECUOS DE EAP NA BARRA SUPERIOR E VIA TECLADO (CTRL+SHIFT+SETA) ---
   const handleIndentSelectedRow = () => {
+    saveSnapshot();
     const targetIndexes = Array.from(selectedRowIndexes);
     if (targetIndexes.length === 0 && selectedRowIndex !== null) {
       targetIndexes.push(selectedRowIndex);
@@ -949,6 +1049,7 @@ export default function OrcamentoDeParaStudio() {
   };
 
   const handleOutdentSelectedRow = () => {
+    saveSnapshot();
     const targetIndexes = Array.from(selectedRowIndexes);
     if (targetIndexes.length === 0 && selectedRowIndex !== null) {
       targetIndexes.push(selectedRowIndex);
@@ -976,7 +1077,7 @@ export default function OrcamentoDeParaStudio() {
     });
   };
 
-  // --- ATALHOS DE TECLADO PARA NAVEGAÇÃO E RECUO DE LINHAS ---
+  // --- ATALHOS DE TECLADO PARA NAVEGAÇÃO, RECUO E UNDO/REDO ---
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeEl = document.activeElement;
@@ -987,6 +1088,19 @@ export default function OrcamentoDeParaStudio() {
       if (items.length === 0) return;
 
       const activeIdx = selectedRowIndex ?? 0;
+
+      // 0. Ctrl+Z (Desfazer) e Ctrl+Y / Ctrl+Shift+Z (Refazer)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        e.preventDefault();
+        handleUndo();
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))) {
+        e.preventDefault();
+        handleRedo();
+        return;
+      }
 
       // 1. Ctrl + Shift + Setas (Recuar / Promover Nível EAP)
       if (e.ctrlKey && e.shiftKey) {
@@ -1081,10 +1195,11 @@ export default function OrcamentoDeParaStudio() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [selectedRowIndex, selectedRowIndexes, lastClickedRowIndex, items]);
+  }, [selectedRowIndex, selectedRowIndexes, lastClickedRowIndex, items, historyStack, redoStack]);
 
   // --- INSERIR NOVA LINHA (APÓS A SELECIONADA OU NO FINAL) ---
   const handleInsertRow = async () => {
+    saveSnapshot();
     let insertIndex = items.length;
     let isAtVeryEnd = true;
 
@@ -1161,6 +1276,8 @@ export default function OrcamentoDeParaStudio() {
   // --- DELETAR LINHA INSERIDA ---
   const handleDeleteRow = async (targetItem: ImportadoItem) => {
     if (!window.confirm(`Deseja excluir a linha inserida?`)) return;
+    saveSnapshot();
+
     try {
       // Deleta a linha em si
       const { error } = await supabase
@@ -1265,6 +1382,7 @@ export default function OrcamentoDeParaStudio() {
   // Realizar o vínculo (De-Para) e desdobrar insumos/subcomposições constituintes do Banco Próprio
   const handleLinkItem = async (selected: any) => {
     if (!selectedItemForLink) return;
+    saveSnapshot();
 
     const isComp = searchTab === 'composicoes_propria';
     const unitPrice = parseFloat(selected.valor_unitario || selected.preco_unitario || selected.custo_sem_desoneracao || selected.valor || 0);
@@ -1457,6 +1575,7 @@ export default function OrcamentoDeParaStudio() {
   // Desvincular Composição ou Insumo (Desfazer o De-Para) e remover desdobramentos
   const handleUnlinkItem = async (targetItem: ImportadoItem) => {
     if (!window.confirm("Deseja desvincular este item? Todos os insumos desdobrados serão removidos.")) return;
+    saveSnapshot();
 
     const parentIdx = items.findIndex(i => i.id === targetItem.id);
     const subEapPattern = `${targetItem.item_eap}.`;
@@ -1533,6 +1652,7 @@ export default function OrcamentoDeParaStudio() {
 
   // Alternar Inativação (Riscar Item do Cliente `<s>`)
   const handleToggleInativar = async (targetItem: ImportadoItem) => {
+    saveSnapshot();
     let resolvedStatus: 'ativo' | 'inativo' | 'inserido_empresa' | 'inserido_empresa_e_cliente' | 'desdobrado';
 
     if (targetItem.status_linha === 'inativo') {
@@ -1579,6 +1699,7 @@ export default function OrcamentoDeParaStudio() {
 
   // Alternar se item inserido pela empresa também vai para a planilha do cliente
   const handleToggleInserirCliente = async (targetItem: ImportadoItem) => {
+    saveSnapshot();
     const parts = targetItem.item_eap.split('.');
     let originalStatus: 'desdobrado' | 'inserido_empresa' = 'inserido_empresa';
     if (parts.length > 1) {
@@ -1634,6 +1755,7 @@ export default function OrcamentoDeParaStudio() {
   // Definir Texto Customizado / Título da Seção
   const handleSaveCustomText = async () => {
     if (!editingCustomItem) return;
+    saveSnapshot();
 
     try {
       const trimmed = customText.trim();
@@ -1981,13 +2103,34 @@ export default function OrcamentoDeParaStudio() {
               )}
             </h3>
             <p className="text-[10px] text-slate-500 font-semibold">
-              Atalhos de Teclado: Setas (Navegar) · Shift+Setas (Seleção em Bloco) · Ctrl+Shift+Setas (Recuar / Promover) · Enter (Editar)
+              Atalhos de Teclado: Setas (Navegar) · Shift+Setas (Seleção em Bloco) · Ctrl+Z (Desfazer) · Ctrl+Y (Refazer) · Ctrl+Shift+Setas (Recuar / Promover) · Enter (Editar)
             </p>
           </div>
             
           {/* Ferramentas Superiores */}
           <div className="flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
+              <button
+                onClick={handleUndo}
+                disabled={historyStack.length === 0}
+                className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                title="Desfazer Última Ação [Ctrl + Z]"
+              >
+                <Undo className="w-3.5 h-3.5 text-blue-600" />
+                <span>Desfazer</span>
+              </button>
+              <button
+                onClick={handleRedo}
+                disabled={redoStack.length === 0}
+                className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all"
+                title="Refazer Ação Desfeita [Ctrl + Y ou Ctrl + Shift + Z]"
+              >
+                <Redo className="w-3.5 h-3.5 text-blue-600" />
+                <span>Refazer</span>
+              </button>
+
+              <div className="w-px h-4 bg-slate-200 mx-1"></div>
+
               <button
                 onClick={handleInsertRow}
                 className="px-2.5 py-1 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer shadow-xs transition-all"
