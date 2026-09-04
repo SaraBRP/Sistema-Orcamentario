@@ -1879,7 +1879,6 @@ export default function OrcamentoDeParaStudio() {
           status: 'Em Elaboração',
           revisao: '00',
           data_base: new Date().toISOString().split('T')[0],
-          bdi_padrao: 0,
           orcamento_importado_id: importId
         })
         .select('id')
