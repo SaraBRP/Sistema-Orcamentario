@@ -1916,9 +1916,35 @@ export default function OrcamentoDeParaStudio() {
     setSaving(true);
     try {
       const today = new Date();
-      const yearStr = today.getFullYear();
-      const nextSeqStr = '001';
-      const codigo = `ORC.${nextSeqStr}/${yearStr}`;
+      const dd = String(today.getDate()).padStart(2, '0');
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const ddmm = `${dd}${mm}`;
+      const year = today.getFullYear();
+
+      let nextSeq = 1;
+      try {
+        const { data: existingOrcs } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .select('codigo');
+
+        if (existingOrcs && existingOrcs.length > 0) {
+          const seqs = existingOrcs.map((o: any) => {
+            if (!o || !o.codigo) return 0;
+            const parts = String(o.codigo).split('.');
+            if (parts.length >= 2) {
+              const num = parseInt(parts[1], 10);
+              return isNaN(num) ? 0 : num;
+            }
+            return 0;
+          });
+          const maxSeq = Math.max(0, ...seqs);
+          nextSeq = maxSeq + 1;
+        }
+      } catch {}
+
+      const seqStr = String(nextSeq).padStart(3, '0');
+      const codigo = `${ddmm}.${seqStr}.0-${year}`;
 
       const { data: newOrc, error: orcError } = await supabase
         .schema('engenharia')
@@ -1928,7 +1954,7 @@ export default function OrcamentoDeParaStudio() {
           nome: importHeader.projeto || importHeader.nome_arquivo,
           cliente: importHeader.cliente,
           status: 'Em Elaboração',
-          revisao: '00',
+          revisao: '0',
           data_base: new Date().toISOString().split('T')[0],
           orcamento_importado_id: importId
         })
