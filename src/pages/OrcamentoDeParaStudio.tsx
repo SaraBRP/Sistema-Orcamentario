@@ -1907,9 +1907,7 @@ export default function OrcamentoDeParaStudio() {
             valor_unitario_com_bdi: 0,
             total_mat: 0,
             total_mo: 0,
-            total: 0,
-            insumo_id: null,
-            composicao_id: null
+            total: 0
           };
         }
 
@@ -1928,9 +1926,7 @@ export default function OrcamentoDeParaStudio() {
           valor_unitario_com_bdi: compBreak.unitTotal,
           total_mat: compBreak.matTotal,
           total_mo: compBreak.moTotal,
-          total: compBreak.matTotal + compBreak.moTotal,
-          insumo_id: item.insumo_id || null,
-          composicao_id: item.composicao_id || null
+          total: compBreak.matTotal + compBreak.moTotal
         };
       });
 
