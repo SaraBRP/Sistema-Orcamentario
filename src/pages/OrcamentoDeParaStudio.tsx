@@ -1191,6 +1191,13 @@ export default function OrcamentoDeParaStudio() {
         handleInsertRow();
         return;
       }
+
+      // 8. Tecla Delete / Del: Excluir linha selecionada ou desvincular
+      if (e.key === 'Delete' || e.key === 'Del') {
+        e.preventDefault();
+        handleDeleteSelectedRows();
+        return;
+      }
     };
 
     window.addEventListener('keydown', handleKeyDown);
@@ -1213,7 +1220,7 @@ export default function OrcamentoDeParaStudio() {
       const payload: Omit<ImportadoItem, 'id'> = {
         orcamento_importado_id: importId!,
         item_eap: 'temp',
-        descricao: 'Nova Linha Inserida',
+        descricao: '',
         unidade: 'un',
         quantidade: isAtVeryEnd ? 0 : 1,
         tipo_vinculo: isAtVeryEnd ? 'secao' : undefined,
@@ -1301,6 +1308,50 @@ export default function OrcamentoDeParaStudio() {
     } catch (err: any) {
       console.error(err);
       alert('Erro ao excluir linha: ' + err.message);
+    }
+  };
+
+  // --- DELETAR LINHAS SELECIONADAS (VIA TECLADO DELETE / DEL) ---
+  const handleDeleteSelectedRows = async () => {
+    const targetIndexes = Array.from(selectedRowIndexes);
+    if (targetIndexes.length === 0 && selectedRowIndex !== null) {
+      targetIndexes.push(selectedRowIndex);
+    }
+    if (targetIndexes.length === 0) return;
+
+    const itemsToDelete = targetIndexes.map(idx => items[idx]).filter(Boolean);
+    const insertedItems = itemsToDelete.filter(i => i.status_linha === 'inserido_empresa' || i.status_linha === 'inserido_empresa_e_cliente');
+
+    if (insertedItems.length > 0) {
+      if (!window.confirm(`Deseja excluir ${insertedItems.length} linha(s) inserida(s)?`)) return;
+      saveSnapshot();
+
+      const insertedIds = insertedItems.map(i => i.id);
+      try {
+        await supabase.schema('engenharia').from('orcamento_importado_itens').delete().in('id', insertedIds);
+
+        for (const item of insertedItems) {
+          const subEapPattern = `${item.item_eap}.`;
+          await supabase.schema('engenharia').from('orcamento_importado_itens').delete().eq('orcamento_importado_id', item.orcamento_importado_id).like('item_eap', `${subEapPattern}%`);
+        }
+
+        const insertedIdsSet = new Set(insertedIds);
+        setItems(prev => {
+          const filtered = prev.filter(i => !insertedIdsSet.has(i.id));
+          return rebuildStudioEaps(filtered);
+        });
+        setSelectedRowIndexes(new Set());
+        setSelectedRowIndex(null);
+        updateImportStatus();
+      } catch (err: any) {
+        console.error(err);
+        alert('Erro ao excluir linhas: ' + err.message);
+      }
+    } else {
+      const itemsToUnlink = itemsToDelete.filter(i => i.composicao_id || i.insumo_id || i.texto_empresa);
+      if (itemsToUnlink.length > 0) {
+        itemsToUnlink.forEach(i => handleUnlinkItem(i));
+      }
     }
   };
 
@@ -2098,7 +2149,7 @@ export default function OrcamentoDeParaStudio() {
               )}
             </h3>
             <p className="text-[10px] text-slate-500 font-semibold">
-              Atalhos de Teclado: Setas (Navegar) · Shift+Setas (Seleção em Bloco) · Ctrl+Z (Desfazer) · Ctrl+Y (Refazer) · Ctrl+Shift+Setas (Recuar / Promover) · Enter (Editar)
+              Atalhos de Teclado: Setas (Navegar) · Shift+Setas (Seleção em Bloco) · Ctrl+Z (Desfazer) · Ctrl+Y (Refazer) · Insert (Inserir Linha) · Del / Delete (Excluir Linha) · Enter (Editar)
             </p>
           </div>
             
