@@ -19,14 +19,16 @@ const formatUserDisplayName = (nome?: string | null, email?: string | null) => {
 
 /**
  * Valida se um usuário deve ser listado como Responsável Técnico / Orçamentista.
- * Apenas Orçamentistas e Gestores devem aparecer. Administradores e usuários de teste são excluídos.
+ * Exclui a conta de Administração Sara.alves, contas de teste e Time Comercial.
+ * Mantém todos os orçamentistas e gestores da equipe.
  */
-const isOrcamentistaOuGestorValido = (nome?: string | null, email?: string | null, cargo?: string | null): boolean => {
+const isUsuarioValidoParaResponsavel = (nome?: string | null, email?: string | null): boolean => {
   const nameLower = (nome || '').toLowerCase().trim();
   const emailLower = (email || '').toLowerCase().trim();
-  const cargoLower = (cargo || '').toLowerCase().trim();
 
-  // Exclusões explícitas: Administrador Sara (sara.alves), usuários de teste e termos administrativos
+  if (!nameLower || nameLower === 'time comercial') return false;
+
+  // Exclusões explícitas: Usuária administradora Sara (sara.alves) e contas de teste
   if (
     nameLower.includes('sara.alves') || 
     emailLower.includes('sara.alves') || 
@@ -45,18 +47,6 @@ const isOrcamentistaOuGestorValido = (nome?: string | null, email?: string | nul
     return false;
   }
 
-  // Se houver cargo explícito, excluir cargos administrativos/diretores
-  if (cargoLower) {
-    if (
-      cargoLower.includes('admin') || 
-      cargoLower.includes('administrador') || 
-      cargoLower.includes('diret') || 
-      cargoLower.includes('ti')
-    ) {
-      return false;
-    }
-  }
-
   return true;
 };
 
@@ -65,10 +55,9 @@ export async function getUsuariosCadastrados(): Promise<UsuarioData[]> {
 
   const addUser = (id: string, rawNome?: string | null, rawEmail?: string | null, cargo?: string, status?: string) => {
     const name = formatUserDisplayName(rawNome, rawEmail);
-    if (!name || name === 'Time Comercial' || status === 'excluido') return;
+    if (!name || status === 'excluido') return;
 
-    // Aplica o filtro estrito de Orçamentista e Gestor
-    if (!isOrcamentistaOuGestorValido(name, rawEmail, cargo)) return;
+    if (!isUsuarioValidoParaResponsavel(name, rawEmail)) return;
 
     const key = name.toLowerCase();
     if (!usersMap.has(key)) {
@@ -120,7 +109,7 @@ export async function getUsuariosCadastrados(): Promise<UsuarioData[]> {
     }
   } catch {}
 
-  // 4. Responsáveis cadastrados na tabela de orçamentos (apenas se for um orçamentista/gestor válido)
+  // 4. Responsáveis cadastrados na tabela de orçamentos
   try {
     const { data: orcResps } = await supabase
       .schema('engenharia')
@@ -129,7 +118,7 @@ export async function getUsuariosCadastrados(): Promise<UsuarioData[]> {
 
     if (orcResps) {
       orcResps.forEach(r => {
-        if (r.responsavel && isOrcamentistaOuGestorValido(r.responsavel, null, null)) {
+        if (r.responsavel && isUsuarioValidoParaResponsavel(r.responsavel, null)) {
           addUser(r.responsavel, r.responsavel);
         }
       });
@@ -137,7 +126,7 @@ export async function getUsuariosCadastrados(): Promise<UsuarioData[]> {
   } catch {}
 
   let result = Array.from(usersMap.values());
-  result = result.filter(u => u.nome && u.nome !== 'Time Comercial' && isOrcamentistaOuGestorValido(u.nome, u.email, u.cargo));
+  result = result.filter(u => u.nome && isUsuarioValidoParaResponsavel(u.nome, u.email));
   result.sort((a, b) => a.nome.localeCompare(b.nome));
 
   return result;
