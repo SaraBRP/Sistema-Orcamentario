@@ -289,15 +289,6 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                                 REV {group.latestRevNum}
                               </span>
                             )}
-
-                            {hasRevisions && !isExpanded && (
-                              <span 
-                                onClick={(e) => toggleGroup(group.baseKey, e)}
-                                className="text-[10px] text-blue-600 font-medium hover:underline cursor-pointer"
-                              >
-                                (+{historicalRevisions.length} rev. ant.)
-                              </span>
-                            )}
                           </div>
                         </td>
                         <td className="py-3 px-4 border-r border-slate-200 font-bold text-slate-800">
