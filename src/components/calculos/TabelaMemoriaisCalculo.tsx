@@ -58,6 +58,55 @@ const parseCodeRevision = (code: string | undefined): { baseKey: string; revNum:
   return { baseKey: cleanCode, revNum: 0 };
 };
 
+/**
+ * Resolve o responsável técnico efetivo. Se a revisão atual tiver um responsável definido, usa ele.
+ * Caso contrário, herda de outra revisão do mesmo grupo.
+ */
+const getEffectiveResponsavel = (item: MemorialCalculoRecord, revisions: MemorialCalculoRecord[]): string => {
+  const itemResp = (item.responsavel || item.header?.responsavel || '').trim();
+  if (itemResp && itemResp !== 'Orçamentista BRP') return itemResp;
+  for (const r of revisions) {
+    const rResp = (r.responsavel || r.header?.responsavel || '').trim();
+    if (rResp && rResp !== 'Orçamentista BRP') return rResp;
+  }
+  return itemResp || 'Orçamentista BRP';
+};
+
+/**
+ * Resolve a localidade (Cidade e Estado) efetiva. Herda da revisão anterior se estiver vazia.
+ */
+const getEffectiveLocalidade = (item: MemorialCalculoRecord, revisions: MemorialCalculoRecord[]): { cidade: string; estado: string; label: string } => {
+  let cidade = (item.cidade || item.header?.cidade || '').trim();
+  let estado = (item.estado || item.header?.estado || '').trim();
+
+  if (!cidade) {
+    for (const r of revisions) {
+      const rCid = (r.cidade || r.header?.cidade || '').trim();
+      if (rCid) {
+        cidade = rCid;
+        if (!estado) estado = (r.estado || r.header?.estado || '').trim();
+        break;
+      }
+    }
+  }
+
+  if (!estado) {
+    for (const r of revisions) {
+      const rEst = (r.estado || r.header?.estado || '').trim();
+      if (rEst) {
+        estado = rEst;
+        break;
+      }
+    }
+  }
+
+  cidade = cidade.toUpperCase();
+  estado = (estado || 'GO').toUpperCase();
+
+  const label = cidade ? `${cidade} / ${estado}` : estado;
+  return { cidade, estado, label };
+};
+
 export const TabelaMemoriaisCalculo: React.FC<Props> = ({
   memoriais,
   onSelectMemorial,
@@ -200,6 +249,9 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                   const isExpanded = expandedGroups.has(group.baseKey);
                   const historicalRevisions = group.revisions.slice(1);
 
+                  const mainResp = getEffectiveResponsavel(main, group.revisions);
+                  const mainLoc = getEffectiveLocalidade(main, group.revisions);
+
                   return (
                     <React.Fragment key={group.baseKey}>
                       {/* Linha Principal (Última Revisão / Versão Vigente) */}
@@ -266,13 +318,13 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                         <td className="py-3 px-4 border-r border-slate-200">
                           <div className="font-semibold text-slate-700 flex items-center gap-1.5">
                             <User className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                            <span>{main.responsavel || 'Orçamentista BRP'}</span>
+                            <span>{mainResp}</span>
                           </div>
                         </td>
                         <td className="py-3 px-3 text-center border-r border-slate-200 font-semibold text-slate-600 whitespace-nowrap">
                           <div className="flex items-center justify-center gap-1">
                             <MapPin className="w-3.5 h-3.5 text-slate-400" />
-                            <span>{main.cidade ? `${main.cidade} / ${main.estado}` : `${main.estado}`}</span>
+                            <span>{mainLoc.label}</span>
                           </div>
                         </td>
                         <td className="py-3 px-3 text-center border-r border-slate-200 text-slate-500 font-medium whitespace-nowrap">
@@ -327,6 +379,9 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                       {/* Sub-linhas desdobradas para Revisões Anteriores (Accordion) */}
                       {isExpanded && historicalRevisions.map((rev) => {
                         const revNum = parseCodeRevision(rev.codigoOrcamento).revNum;
+                        const revResp = getEffectiveResponsavel(rev, group.revisions);
+                        const revLoc = getEffectiveLocalidade(rev, group.revisions);
+
                         return (
                           <tr
                             key={rev.id}
@@ -360,13 +415,13 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
                             <td className="py-2.5 px-4 border-r border-slate-200">
                               <div className="font-medium text-slate-700 flex items-center gap-1.5">
                                 <User className="w-3 h-3 text-slate-400 shrink-0" />
-                                <span>{rev.responsavel || main.responsavel}</span>
+                                <span>{revResp}</span>
                               </div>
                             </td>
                             <td className="py-2.5 px-3 text-center border-r border-slate-200 text-slate-600 whitespace-nowrap">
                               <div className="flex items-center justify-center gap-1">
                                 <MapPin className="w-3 h-3 text-slate-400" />
-                                <span>{rev.cidade ? `${rev.cidade} / ${rev.estado}` : `${rev.estado}`}</span>
+                                <span>{revLoc.label}</span>
                               </div>
                             </td>
                             <td className="py-2.5 px-3 text-center border-r border-slate-200 text-slate-500 font-medium whitespace-nowrap">

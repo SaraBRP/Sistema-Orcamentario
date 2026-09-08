@@ -748,6 +748,11 @@ export default function Orcamentos() {
           cliente: orc.cliente,
           projeto: orc.projeto,
           gestor_cliente: orc.gestor_cliente,
+          responsavel: orc.responsavel,
+          cidade: orc.cidade,
+          estado: orc.estado,
+          local_obra: orc.local_obra,
+          empresa: orc.empresa,
           revisao: String(nextRev),
           status: 'Em andamento',
           status_envio: null,
@@ -772,6 +777,17 @@ export default function Orcamentos() {
       if (newOrc?.id) {
         localStorage.removeItem(`orcamento_decisao_${newOrc.id}`);
         localStorage.removeItem(`orcamento_obs_gestor_${newOrc.id}`);
+
+        const oldHeaderStr = localStorage.getItem(`orcamento_header_${orc.id}`);
+        if (oldHeaderStr) {
+          try {
+            const oldHeader = JSON.parse(oldHeaderStr);
+            localStorage.setItem(`orcamento_header_${newOrc.id}`, JSON.stringify({
+              ...oldHeader,
+              codigoOrcamento: newCode
+            }));
+          } catch (e) {}
+        }
       }
 
       // Clona os itens da proposta anterior para a nova revisão

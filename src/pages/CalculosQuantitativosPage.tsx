@@ -394,6 +394,21 @@ export default function CalculosQuantitativosPage() {
         if (alterou) localStorage.setItem('brp_orcamentos_list', JSON.stringify(updatedOrcamentos));
       } catch (e) {}
     }
+
+    if (activeMemorial?.orcamentoId) {
+      const cid = (newHeader.cidade || '').toUpperCase();
+      const est = (newHeader.estado || 'GO').toUpperCase();
+      const loc = [cid, est].filter(Boolean).join(' - ');
+      supabase.schema('engenharia').from('orcamentos').update({
+        projeto: novoNomeProjeto || undefined,
+        cliente: newHeader.cliente || undefined,
+        gestor_cliente: newHeader.gestorCliente || undefined,
+        responsavel: newHeader.responsavel || undefined,
+        cidade: cid || undefined,
+        estado: est || undefined,
+        local_obra: loc || undefined
+      }).eq('id', activeMemorial.orcamentoId).then(() => {});
+    }
   };
 
   const handleUpdateActiveItens = (newItens: ItemMemoriaOficial[]) => {
