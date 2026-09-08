@@ -9,6 +9,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { ModalImportarExcel } from '../components/ModalImportarExcel';
 import { ClienteSelect } from '../components/ClienteSelect';
 import { getUsuariosCadastrados } from '../lib/usuarios';
+import { generateOfficialOrcamentoCode, generateFastOfficialOrcamentoCode } from '../lib/orcamentoCodeGenerator';
 
 const statusBadgeClasses = (status: string) => {
   switch (status) {
@@ -579,62 +580,8 @@ export default function Orcamentos() {
     }
   };
 
-  const generateFastOrcamentoCode = () => {
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const ddmm = `${dd}${mm}`;
-    const year = today.getFullYear();
-
-    const seqs = (orcamentos || []).map((o: any) => {
-      if (!o || !o.codigo) return 0;
-      const parts = String(o.codigo).split('.');
-      if (parts.length >= 2) {
-        const num = parseInt(parts[1], 10);
-        return isNaN(num) ? 0 : num;
-      }
-      return 0;
-    });
-    const maxSeq = Math.max(0, ...seqs);
-    const seqStr = String(maxSeq + 1).padStart(3, '0');
-    return `${ddmm}.${seqStr}.0-${year}`;
-  };
-
-  const generateNextOrcamentoCode = async (): Promise<string> => {
-    const today = new Date();
-    const dd = String(today.getDate()).padStart(2, '0');
-    const mm = String(today.getMonth() + 1).padStart(2, '0');
-    const ddmm = `${dd}${mm}`;
-    const year = today.getFullYear();
-
-    try {
-      const { data, error } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .select('codigo');
-
-      let nextSeq = 1;
-      if (!error && data && data.length > 0) {
-        const seqs = data.map((o: any) => {
-          if (!o || !o.codigo) return 0;
-          const parts = String(o.codigo).split('.');
-          if (parts.length >= 2) {
-            const num = parseInt(parts[1], 10);
-            return isNaN(num) ? 0 : num;
-          }
-          return 0;
-        });
-        const maxSeq = Math.max(0, ...seqs);
-        nextSeq = maxSeq + 1;
-      }
-
-      const seqStr = String(nextSeq).padStart(3, '0');
-      return `${ddmm}.${seqStr}.0-${year}`;
-    } catch (err) {
-      console.error('Erro ao gerar código do orçamento:', err);
-      return generateFastOrcamentoCode();
-    }
-  };
+  const generateFastOrcamentoCode = () => generateFastOfficialOrcamentoCode();
+  const generateNextOrcamentoCode = () => generateOfficialOrcamentoCode();
 
   const handleOpenCreateModal = () => {
     const defaultResp = usuariosCadastrados.length > 0 ? usuariosCadastrados[0].nome : '';

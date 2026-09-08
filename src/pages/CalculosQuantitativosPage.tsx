@@ -8,6 +8,7 @@ import { TabelaMemoriaisCalculo, type MemorialCalculoRecord } from '../component
 import { TabelaParametrosCadastro } from '../components/calculos/TabelaParametrosCadastro';
 import { ClienteSelect } from '../components/ClienteSelect';
 import { getUsuariosCadastrados } from '../lib/usuarios';
+import { generateOfficialOrcamentoCode } from '../lib/orcamentoCodeGenerator';
 import type { ItemMemoriaOficial, DadosComplementaresHeader } from '../types/calculos';
 
 const LOCAL_STORAGE_MEMORIAIS_KEY = 'brp_memoriais_list';
@@ -262,38 +263,7 @@ export default function CalculosQuantitativosPage() {
     }
   };
 
-  const generateNextOrcamentoCode = async (): Promise<string> => {
-    const now = new Date();
-    const day = String(now.getDate()).padStart(2, '0');
-    const month = String(now.getMonth() + 1).padStart(2, '0');
-    const ddmm = `${day}${month}`;
-    const year = now.getFullYear();
-
-    try {
-      const { data } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .select('codigo');
-
-      let nextSeq = 1;
-      if (data && data.length > 0) {
-        const seqs = data.map((o: any) => {
-          const parts = (o.codigo || '').split('.');
-          if (parts.length >= 2) {
-            const num = parseInt(parts[1], 10);
-            return isNaN(num) ? 0 : num;
-          }
-          return 0;
-        });
-        const maxSeq = Math.max(...seqs);
-        nextSeq = maxSeq + 1;
-      }
-      return `${ddmm}.${String(nextSeq).padStart(3, '0')}.0-${year}`;
-    } catch {
-      const numComCodigo = memoriaisList.filter(m => m.codigoOrcamento).length + 1;
-      return `${ddmm}.${String(numComCodigo).padStart(3, '0')}.0-${year}`;
-    }
-  };
+  const generateNextOrcamentoCode = () => generateOfficialOrcamentoCode();
 
   const handleOpenCreateMemorialModal = async () => {
     const nextCode = await generateNextOrcamentoCode();

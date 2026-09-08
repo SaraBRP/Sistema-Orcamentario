@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 // Studio De-Para Exclusivo Banco Próprio com Botão Único "+ Vincular" e Insumos da Composição Linha a Linha
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
+import { generateOfficialOrcamentoCode } from '../lib/orcamentoCodeGenerator';
 import * as XLSX from 'xlsx';
 import { 
   ArrowLeft, Search, Plus, Trash2, CheckCircle2, 
@@ -1915,36 +1916,7 @@ export default function OrcamentoDeParaStudio() {
 
     setSaving(true);
     try {
-      const today = new Date();
-      const dd = String(today.getDate()).padStart(2, '0');
-      const mm = String(today.getMonth() + 1).padStart(2, '0');
-      const ddmm = `${dd}${mm}`;
-      const year = today.getFullYear();
-
-      let nextSeq = 1;
-      try {
-        const { data: existingOrcs } = await supabase
-          .schema('engenharia')
-          .from('orcamentos')
-          .select('codigo');
-
-        if (existingOrcs && existingOrcs.length > 0) {
-          const seqs = existingOrcs.map((o: any) => {
-            if (!o || !o.codigo) return 0;
-            const parts = String(o.codigo).split('.');
-            if (parts.length >= 2) {
-              const num = parseInt(parts[1], 10);
-              return isNaN(num) ? 0 : num;
-            }
-            return 0;
-          });
-          const maxSeq = Math.max(0, ...seqs);
-          nextSeq = maxSeq + 1;
-        }
-      } catch {}
-
-      const seqStr = String(nextSeq).padStart(3, '0');
-      const codigo = `${ddmm}.${seqStr}.0-${year}`;
+      const codigo = await generateOfficialOrcamentoCode();
 
       const { data: newOrc, error: orcError } = await supabase
         .schema('engenharia')
