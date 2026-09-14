@@ -12,6 +12,7 @@ import { clsx } from 'clsx';
 
 import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemorialOficial';
 import DistribuiçãoEquipeTab from '../components/calculos/DistribuiçãoEquipeTab';
+import ListaMateriaisTab from '../components/calculos/ListaMateriaisTab';
 import type { CalculoItem } from '../types/calculos';
 import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
 
@@ -436,23 +437,23 @@ export default function OrcamentoBuilder() {
   const [itens, setItens] = useState<OrcamentoItem[]>([]);
   const [calculos, setCalculos] = useState<CalculoItem[]>([]);
 
-  const initialSubTab = useMemo<'planilha' | 'memoria_calculo' | 'distribuicao_equipe'>(() => {
+  const initialSubTab = useMemo<'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais'>(() => {
     const tabParam = searchParams.get('aba');
-    if (tabParam === 'planilha' || tabParam === 'memoria_calculo' || tabParam === 'distribuicao_equipe') {
+    if (tabParam === 'planilha' || tabParam === 'memoria_calculo' || tabParam === 'distribuicao_equipe' || tabParam === 'lista_materiais') {
       return tabParam;
     }
     if (id) {
       const savedTab = localStorage.getItem(`orc_tab_${id}`);
-      if (savedTab === 'planilha' || savedTab === 'memoria_calculo' || savedTab === 'distribuicao_equipe') {
-        return savedTab;
+      if (savedTab === 'planilha' || savedTab === 'memoria_calculo' || savedTab === 'distribuicao_equipe' || savedTab === 'lista_materiais') {
+        return savedTab as 'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais';
       }
     }
     return 'planilha';
   }, [id, searchParams]);
 
-  const [activeSubTab, setActiveSubTabState] = useState<'planilha' | 'memoria_calculo' | 'distribuicao_equipe'>(initialSubTab);
+  const [activeSubTab, setActiveSubTabState] = useState<'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais'>(initialSubTab);
 
-  const setActiveSubTab = (tab: 'planilha' | 'memoria_calculo' | 'distribuicao_equipe') => {
+  const setActiveSubTab = (tab: 'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais') => {
     setActiveSubTabState(tab);
     if (id) {
       localStorage.setItem(`orc_tab_${id}`, tab);
@@ -4326,6 +4327,19 @@ export default function OrcamentoBuilder() {
           <Users className="w-4 h-4" />
           Distribuição de Equipe
         </button>
+
+        <button
+          onClick={() => setActiveSubTab('lista_materiais')}
+          className={clsx(
+            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+            activeSubTab === 'lista_materiais'
+              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
+          )}
+        >
+          <Package className="w-4 h-4" />
+          LISTA DE MATERIAIS
+        </button>
       </div>
 
       {activeSubTab === 'memoria_calculo' ? (
@@ -4524,6 +4538,13 @@ export default function OrcamentoBuilder() {
             setHasUnsavedChanges(true);
           }}
         />
+        </div>
+      ) : activeSubTab === 'lista_materiais' ? (
+        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <ListaMateriaisTab 
+            orcamentoId={id} 
+            itens={computedItens} 
+          />
         </div>
       ) : (
       /* ── Tabela Orçamentária ────────────────────────────────────────── */
@@ -5740,7 +5761,8 @@ export default function OrcamentoBuilder() {
                     <p className="text-[10px] text-slate-500 font-normal">
                       Exporta somente ({
                         activeSubTab === 'memoria_calculo' ? 'Memória de Cálculo' :
-                        activeSubTab === 'distribuicao_equipe' ? 'Distribuição de Equipe' : 'Planilha Orçamentária'
+                        activeSubTab === 'distribuicao_equipe' ? 'Distribuição de Equipe' :
+                        activeSubTab === 'lista_materiais' ? 'Lista de Materiais' : 'Planilha Orçamentária'
                       }).
                     </p>
                   </button>
