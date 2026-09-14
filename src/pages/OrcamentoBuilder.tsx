@@ -5904,7 +5904,7 @@ export default function OrcamentoBuilder() {
                   .map((item, idx) => {
                     const eapClean = (item.item_eap || '').trim();
                     const level = (item as any).level !== undefined ? (item as any).level : ((item as any).isSecao ? 0 : 1);
-                    const isSecaoRow = (item as any).isSecao || level === 0;
+                    const isSecaoRow = !item.codigo && !item.banco_fonte && !(item as any).composicao_id && ((item as any).isSecao || level === 0);
                     const isCompMother = !isSecaoRow && (item.hasChildren || item.codigo);
 
                     const factor = exibirBdi ? bdiFactor : 1;
@@ -6019,7 +6019,7 @@ export default function OrcamentoBuilder() {
                   .filter(item => (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '')
                   .map((item, idx) => {
                     const level = (item as any).level !== undefined ? (item as any).level : ((item as any).isSecao ? 0 : 1);
-                    const isSecaoRow = (item as any).isSecao || level === 0;
+                    const isSecaoRow = !item.codigo && !item.banco_fonte && !(item as any).composicao_id && ((item as any).isSecao || level === 0);
 
                     return (
                       <tr

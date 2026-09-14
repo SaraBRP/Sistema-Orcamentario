@@ -1885,6 +1885,11 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     };
     (itemMae as any).codigo = itemBanco.codigo || '';
     (itemMae as any).banco_fonte = (itemBanco as any).banco_fonte || '';
+    if (itemBanco.tipo === 'composicao') {
+      (itemMae as any).composicao_id = itemBanco.id;
+    } else {
+      (itemMae as any).insumo_id = itemBanco.id;
+    }
 
     let novosItens: ItemMemoriaOficial[] = [itemMae];
 
@@ -3971,13 +3976,20 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                   const itemTipo = String((item as any).tipo || (item as any).tipo_item || '').toLowerCase();
                   const isSecaoByTipo = itemTipo === 'secao' || itemTipo === 'seção' || itemTipo === 'texto' || itemTipo === 'titulo' || itemTipo === 'título';
 
-                  const isSecaoRow = !isExplicitChild && Boolean(
+                  const hasCodeOrBank = Boolean(
+                    (item as any).codigo || 
+                    (item as any).banco_fonte || 
+                    (item as any).composicao_id || 
+                    (item as any).insumo_id
+                  );
+
+                  const isSecaoRow = !hasCodeOrBank && !isExplicitChild && Boolean(
                     item.isSecao || 
                     (item as any).is_secao || 
                     Boolean((item as any).isTextLine) ||
                     isSecaoByTipo ||
-                    isTopLevelEapByPattern ||
-                    (!(item as any).codigo && !(item as any).banco_fonte)
+                    (!hasCodeOrBank && !(item.unidade && item.unidade.trim() !== '') && isTopLevelEapByPattern) ||
+                    (!(item as any).codigo && !(item as any).banco_fonte && !(item as any).composicao_id)
                   );
 
                   const level = item.level !== undefined 
