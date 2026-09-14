@@ -456,33 +456,19 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
           >
             {/* Header: Logo BRP da Empresa + Emissão */}
             <div className="flex justify-between items-center border-b border-slate-400 pb-3 mb-3">
-              <div className="flex items-center gap-3">
+              <div className="flex items-center">
                 {isSolucoesMetalicas ? (
-                  <div className="flex items-center gap-2">
-                    <img 
-                      src="/logo_brp_metalica.png" 
-                      alt="Logo BRP Soluções Metálicas" 
-                      className="h-10 w-auto object-contain drop-shadow-xs"
-                      onError={e => { e.currentTarget.style.display = 'none'; }}
-                    />
-                    <div className="flex flex-col">
-                      <span className="text-sm font-black text-slate-800 tracking-tight leading-tight">BRP SOLUÇÕES METÁLICAS</span>
-                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Engenharia & Estruturas</span>
-                    </div>
-                  </div>
+                  <img 
+                    src="/logo_brp_metalica.png" 
+                    alt="Logo BRP Soluções Metálicas" 
+                    className="h-12 max-h-14 w-auto object-contain"
+                  />
                 ) : (
-                  <div className="flex items-center gap-2">
-                    <img 
-                      src="/logo_brp.png" 
-                      alt="Logo BRP Engenharia" 
-                      className="h-10 w-auto object-contain drop-shadow-xs"
-                      onError={e => { e.currentTarget.style.display = 'none'; }}
-                    />
-                    <div className="flex flex-col">
-                      <span className="text-sm font-black text-slate-800 tracking-tight leading-tight">BRP ENGENHARIA</span>
-                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Orçamentos & Gestão</span>
-                    </div>
-                  </div>
+                  <img 
+                    src="/logo_brp.png" 
+                    alt="Logo BRP Engenharia" 
+                    className="h-12 max-h-14 w-auto object-contain"
+                  />
                 )}
               </div>
 
