@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Package, ChevronDown, ChevronRight, Search, CheckSquare, Square, 
-  FileSpreadsheet, Filter, Check, RefreshCw, AlertCircle
+  FileSpreadsheet, Check
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';

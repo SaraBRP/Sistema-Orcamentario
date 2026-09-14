@@ -6,7 +6,7 @@ import {
   ArrowLeft, ArrowRight, Save, Plus, Search, Trash2, Import, Calculator, 
   Settings2, FileSpreadsheet, Layers, X, Check, ChevronDown, ChevronRight,
   Indent, Outdent, GripVertical, AlertCircle, Send, Lock, CheckCircle2, XCircle, Clock, ChevronUp, MessageSquare, AlertTriangle, BarChart3, Users,
-  Download, FileText, Undo2, Redo2, RefreshCw
+  Download, FileText, Undo2, Redo2, RefreshCw, Package
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -4463,7 +4463,7 @@ export default function OrcamentoBuilder() {
 
             setItens(prev => {
               const prevMap = new Map(prev.map(item => [item.id, item]));
-              return newMemItens.map(mi => {
+              const updated = newMemItens.map(mi => {
                 const existing = prevMap.get(mi.id);
                 if (existing) {
                   return {
