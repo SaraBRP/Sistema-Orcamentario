@@ -98,8 +98,7 @@ const navSections: NavSection[] = [
     path: '/configuracoes', 
     icon: Settings,
     children: [
-      { name: 'Usuários', path: '/configuracoes?tab=usuarios', icon: Users },
-      { name: 'Acessos', path: '/configuracoes?tab=permissoes', icon: ShieldCheck },
+      { name: 'Usuários & Acessos', path: '/configuracoes?tab=usuarios', icon: Users },
       { name: 'Clientes', path: '/configuracoes?tab=clientes', icon: Briefcase },
     ]
   },
