@@ -1852,10 +1852,6 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       : itens.length;
     
     // Herança inteligente do Nível e Pai da posição de inserção
-    let baseLevel = 0;
-    let isChild = false;
-    let parentCompId: string | undefined = undefined;
-
     const targetRow = targetIndex < itens.length ? itens[targetIndex] : null;
     const isTargetBlank = !targetRow || Boolean(
       !targetRow.descricao && 
