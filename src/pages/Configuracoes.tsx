@@ -787,100 +787,75 @@ export default function Configuracoes() {
         </div>
       </div>
 
-      {/* Navegação por Abas Principais (Usuários & Acessos vs Clientes) */}
-      <div className="flex border-b border-slate-200 bg-white rounded-xl p-1.5 border shadow-2xs gap-1">
-        <button
-          onClick={() => {
-            setActiveTab('usuarios');
-            if (subTabUsuarios !== 'permissoes' && subTabUsuarios !== 'pendentes') {
-              setSubTabUsuarios('lista');
-            }
-          }}
-          className={clsx(
-            'flex-1 py-2.5 px-4 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer',
-            activeTab === 'usuarios'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          )}
-        >
-          <div className="flex items-center gap-1.5">
-            <Users className="w-4 h-4" />
-            <ShieldCheck className="w-4 h-4 opacity-80" />
-          </div>
-          <span>Usuários & Acessos</span>
-          {pendingProfiles.length > 0 && (
-            <span className="bg-amber-400 text-slate-900 text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse">
-              {pendingProfiles.length}
-            </span>
-          )}
-        </button>
-
-        <button
-          onClick={() => setActiveTab('clientes')}
-          className={clsx(
-            'flex-1 py-2.5 px-4 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer',
-            activeTab === 'clientes'
-              ? 'bg-blue-600 text-white shadow-xs'
-              : 'text-slate-600 hover:bg-slate-100'
-          )}
-        >
-          <Briefcase className="w-4 h-4" />
-          <span>Clientes</span>
-          {clientesList.length > 0 && (
-            <span className="bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
-              {clientesList.length}
-            </span>
-          )}
-        </button>
-      </div>
-
-      {/* ABA 1: ÁREA DE USUÁRIOS */}
+      {/* TELA DE USUÁRIOS & ACESSOS */}
       {activeTab === 'usuarios' && (
         <div className="space-y-4">
-          {/* Sub-abas dentro de Usuários & Acessos */}
-          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={() => setSubTabUsuarios('lista')}
-                className={clsx(
-                  'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5',
-                  subTabUsuarios === 'lista'
-                    ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
-                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                )}
-              >
-                <UserCheck className="w-3.5 h-3.5" />
-                <span>Usuários Ativos ({approvedProfiles.length})</span>
-              </button>
-
-              <button
-                onClick={() => setSubTabUsuarios('permissoes')}
-                className={clsx(
-                  'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5',
-                  subTabUsuarios === 'permissoes'
-                    ? 'bg-blue-600 text-white border-blue-600 shadow-2xs'
-                    : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
-                )}
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                <span>Matriz de Permissões de Acesso</span>
-              </button>
-
+          {/* Sub-abas de Usuários & Acessos */}
+          <div className="flex border-b border-slate-200 bg-white rounded-xl p-1.5 border shadow-2xs gap-1">
+            <button
+              onClick={() => setSubTabUsuarios('lista')}
+              className={clsx(
+                'flex-1 py-2.5 px-4 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer',
+                subTabUsuarios === 'lista' || subTabUsuarios === 'pendentes'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              )}
+            >
+              <Users className="w-4 h-4" />
+              <span>Área de Usuários</span>
               {pendingProfiles.length > 0 && (
+                <span className="bg-amber-400 text-slate-900 text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse">
+                  {pendingProfiles.length}
+                </span>
+              )}
+            </button>
+
+            <button
+              onClick={() => setSubTabUsuarios('permissoes')}
+              className={clsx(
+                'flex-1 py-2.5 px-4 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer',
+                subTabUsuarios === 'permissoes'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              )}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              <span>Acessos</span>
+            </button>
+          </div>
+
+          {/* Barra de Filtros e Filtro de Status para Usuários */}
+          {(subTabUsuarios === 'lista' || subTabUsuarios === 'pendentes') && (
+            <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
+              <div className="flex flex-wrap gap-2">
                 <button
-                  onClick={() => setSubTabUsuarios('pendentes')}
+                  onClick={() => setSubTabUsuarios('lista')}
                   className={clsx(
                     'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5',
-                    subTabUsuarios === 'pendentes'
-                      ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs font-black'
-                      : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                    subTabUsuarios === 'lista'
+                      ? 'bg-slate-900 text-white border-slate-900 shadow-2xs'
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
                   )}
                 >
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
-                  <span>Solicitações Pendentes ({pendingProfiles.length})</span>
+                  <UserCheck className="w-3.5 h-3.5" />
+                  <span>Usuários Ativos ({approvedProfiles.length})</span>
                 </button>
-              )}
-            </div>
+
+                {pendingProfiles.length > 0 && (
+                  <button
+                    onClick={() => setSubTabUsuarios('pendentes')}
+                    className={clsx(
+                      'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5',
+                      subTabUsuarios === 'pendentes'
+                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs font-black'
+                        : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                    )}
+                  >
+                    <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
+                    <span>Solicitações Pendentes ({pendingProfiles.length})</span>
+                  </button>
+                )}
+              </div>
 
             {/* Filtros da Tabela (apenas se 'lista' ou 'pendentes') */}
             {(subTabUsuarios === 'lista' || subTabUsuarios === 'pendentes') && (
