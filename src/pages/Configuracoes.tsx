@@ -1971,60 +1971,75 @@ export default function Configuracoes() {
                   />
                 </div>
 
-                {/* Endereço */}
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Logradouro / Rua</label>
-                  <input
-                    type="text"
-                    placeholder="Ex: Av. Industrial"
-                    value={empLogradouro}
-                    onChange={(e) => setEmpLogradouro(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Número / Bairro</label>
-                  <div className="grid grid-cols-2 gap-2">
+                {/* Endereço Completo */}
+                <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-3 bg-slate-50/70 p-3.5 rounded-xl border border-slate-200">
+                  <div className="sm:col-span-2">
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Logradouro / Rua</label>
                     <input
                       type="text"
-                      placeholder="Nº 1200"
-                      value={empNumero}
-                      onChange={(e) => setEmpNumero(e.target.value)}
-                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
-                    />
-                    <input
-                      type="text"
-                      placeholder="Bairro"
-                      value={empBairro}
-                      onChange={(e) => setEmpBairro(e.target.value)}
-                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                      placeholder="Ex: Av. Industrial"
+                      value={empLogradouro}
+                      onChange={(e) => setEmpLogradouro(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
                     />
                   </div>
-                </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Cidade</label>
-                  <input
-                    type="text"
-                    placeholder="Goiânia"
-                    value={empCidade}
-                    onChange={(e) => setEmpCidade(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold"
-                  />
-                </div>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Número</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: 1200"
+                      value={empNumero}
+                      onChange={(e) => setEmpNumero(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
 
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Estado (UF)</label>
-                  <select
-                    value={empUf}
-                    onChange={(e) => setEmpUf(e.target.value)}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-bold"
-                  >
-                    {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(uf => (
-                      <option key={uf} value={uf}>{uf}</option>
-                    ))}
-                  </select>
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Bairro</label>
+                    <input
+                      type="text"
+                      placeholder="Ex: Distrito Industrial"
+                      value={empBairro}
+                      onChange={(e) => setEmpBairro(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">CEP</label>
+                    <input
+                      type="text"
+                      placeholder="74000-000"
+                      value={empCep}
+                      onChange={(e) => setEmpCep(formatEmpresaCEP(e.target.value))}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Cidade</label>
+                    <input
+                      type="text"
+                      placeholder="Goiânia"
+                      value={empCidade}
+                      onChange={(e) => setEmpCidade(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">Estado (UF)</label>
+                    <select
+                      value={empUf}
+                      onChange={(e) => setEmpUf(e.target.value)}
+                      className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-bold"
+                    >
+                      {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(uf => (
+                        <option key={uf} value={uf}>{uf}</option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
 
                 {/* Logotipo */}
