@@ -857,8 +857,7 @@ export default function Configuracoes() {
                 )}
               </div>
 
-            {/* Filtros da Tabela (apenas se 'lista' ou 'pendentes') */}
-            {(subTabUsuarios === 'lista' || subTabUsuarios === 'pendentes') && (
+              {/* Filtros da Tabela */}
               <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto items-center">
                 <div className="relative w-full sm:w-64">
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
@@ -881,8 +880,8 @@ export default function Configuracoes() {
                   <option value="orcamentista">Orçamentista</option>
                 </select>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           {/* VISÃO 1 & 3: TABELA DE USUÁRIOS (ATIVOS OU PENDENTES) */}
           {(subTabUsuarios === 'lista' || subTabUsuarios === 'pendentes') && (
