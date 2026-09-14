@@ -27,3 +27,5 @@ dist-ssr
 
 # Temporary scratch directory
 scratch/
+extracted_media/
+*.b64

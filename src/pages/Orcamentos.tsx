@@ -10,6 +10,7 @@ import { ModalImportarExcel } from '../components/ModalImportarExcel';
 import { ClienteSelect } from '../components/ClienteSelect';
 import { getUsuariosCadastrados } from '../lib/usuarios';
 import { generateOfficialOrcamentoCode, generateFastOfficialOrcamentoCode } from '../lib/orcamentoCodeGenerator';
+import { calculateImportadoProgressStats } from '../lib/importadoProgress';
 
 const statusBadgeClasses = (status: string) => {
   switch (status) {
@@ -228,15 +229,18 @@ export default function Orcamentos() {
     const cidade = parts[0] || '';
     const estado = parts[1] || 'GO';
 
+    const savedEmpresa = localStorage.getItem(`orcamento_empresa_${orc.id}`);
+    const savedResponsavel = localStorage.getItem(`orcamento_responsavel_${orc.id}`);
+
     setEditOrcamentoData({
       id: orc.id,
       codigo: orc.codigo || '',
-      empresa: orc.empresa || 'BRP Soluções Metálicas',
+      empresa: savedEmpresa || orc.empresa || 'BRP Soluções Metálicas',
       descricao: orc.descricao || '',
       cliente: orc.cliente || '',
       projeto: orc.projeto || orc.nome || '',
       gestor_cliente: orc.gestor_cliente || '',
-      responsavel: orc.responsavel || (usuariosCadastrados[0]?.nome || ''),
+      responsavel: savedResponsavel || orc.responsavel || (usuariosCadastrados[0]?.nome || ''),
       cidade,
       estado
     });
@@ -250,29 +254,40 @@ export default function Orcamentos() {
       const cidadeFormatada = formatCidadeUpperNoAccents(editOrcamentoData.cidade).trim();
       const localObra = [cidadeFormatada, editOrcamentoData.estado].filter(Boolean).join(' - ');
 
+      if (editOrcamentoData.id) {
+        try {
+          if (editOrcamentoData.empresa) {
+            localStorage.setItem(`orcamento_empresa_${editOrcamentoData.id}`, editOrcamentoData.empresa);
+          }
+          if (editOrcamentoData.responsavel) {
+            localStorage.setItem(`orcamento_responsavel_${editOrcamentoData.id}`, editOrcamentoData.responsavel);
+          }
+        } catch (e) {}
+      }
+
+      const updatePayload: any = {
+        nome: editOrcamentoData.projeto,
+        projeto: editOrcamentoData.projeto,
+        descricao: editOrcamentoData.descricao,
+        cliente: editOrcamentoData.cliente,
+        gestor_cliente: editOrcamentoData.gestor_cliente,
+        local_obra: localObra
+      };
+
       const { error } = await supabase
         .schema('engenharia')
         .from('orcamentos')
-        .update({
-          empresa: editOrcamentoData.empresa,
-          nome: editOrcamentoData.projeto,
-          projeto: editOrcamentoData.projeto,
-          descricao: editOrcamentoData.descricao,
-          cliente: editOrcamentoData.cliente,
-          gestor_cliente: editOrcamentoData.gestor_cliente,
-          responsavel: editOrcamentoData.responsavel,
-          local_obra: localObra
-        })
+        .update(updatePayload)
         .eq('id', editOrcamentoData.id);
 
       if (error) throw error;
 
-      alert('Orçamento atualizado com sucesso!');
       setIsEditModalOpen(false);
+      alert('Orçamento atualizado com sucesso!');
       fetchOrcamentos();
     } catch (err: any) {
       console.error('Erro ao atualizar orçamento:', err);
-      alert('Erro ao atualizar orçamento: ' + (err.message || err));
+      alert('Erro ao atualizar orçamento: ' + err.message);
     } finally {
       setLoading(false);
     }
@@ -458,7 +473,14 @@ export default function Orcamentos() {
         .order('created_at', { ascending: false });
         
       if (error) throw error;
-      setOrcamentos(data || []);
+      const formatted = (data || []).map((o: any) => {
+        const savedEmp = localStorage.getItem(`orcamento_empresa_${o.id}`);
+        return {
+          ...o,
+          empresa: savedEmp || o.empresa || 'BRP Soluções Metálicas'
+        };
+      });
+      setOrcamentos(formatted);
 
       // Busca os itens completos de cada orçamento para calcular os totais WBS reais
       const { data: items, error: itemsError } = await supabase
@@ -520,35 +542,84 @@ export default function Orcamentos() {
       list.sort((a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime());
       setImportados(list);
 
-      // Busca contagem e progresso de itens por importação
-      const { data: rows, error: rowsError } = await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .select('orcamento_importado_id, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha');
+      // Busca contagem e progresso de itens por importação (Supabase engenharia + public + LocalStorage fallback)
+      let allDbRows: any[] = [];
+      try {
+        const { data: rows, error: rowsError } = await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .select('id, orcamento_importado_id, item_eap, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha');
 
-      if (!rowsError && rows) {
-        const stats: Record<string, { total: number; linked: number }> = {};
-        rows.forEach((r: any) => {
-          if (r.status_linha === 'inativo' || r.status_linha === 'desdobrado') return;
-          if (!r.quantidade || r.quantidade === 0) return;
-
-          const impId = r.orcamento_importado_id;
-          if (!stats[impId]) {
-            stats[impId] = { total: 0, linked: 0 };
-          }
-          stats[impId].total += 1;
-
-          const hasComp = !!(r.composicao_id);
-          const hasInsumo = !!(r.insumo_id);
-          const hasText = r.tipo_vinculo === 'texto' || !!(r.texto_empresa && String(r.texto_empresa).trim() !== '');
-          const isInserted = r.status_linha === 'inserido_empresa' || r.status_linha === 'inserido_empresa_e_cliente';
-
-          if (hasComp || hasInsumo || hasText || isInserted) {
-            stats[impId].linked += 1;
-          }
-        });
-        setImportadosStats(stats);
+        if (!rowsError && rows && rows.length > 0) {
+          allDbRows = rows;
+        } else {
+          const { data: pubRows } = await supabase
+            .from('orcamento_importado_itens')
+            .select('id, orcamento_importado_id, item_eap, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha');
+          if (pubRows) allDbRows = pubRows;
+        }
+      } catch (e) {
+        try {
+          const { data: pubRows } = await supabase
+            .from('orcamento_importado_itens')
+            .select('id, orcamento_importado_id, item_eap, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha');
+          if (pubRows) allDbRows = pubRows;
+        } catch {}
       }
+
+      // Agrupa itens por importId
+      const itemsByImport: Record<string, any[]> = {};
+      allDbRows.forEach(r => {
+        const impId = r.orcamento_importado_id;
+        if (impId) {
+          if (!itemsByImport[impId]) itemsByImport[impId] = [];
+          itemsByImport[impId].push(r);
+        }
+      });
+
+      // Garantia: para cada importação na lista, se estiver sem itens, busca direto por ID ou LocalStorage
+      for (const imp of list) {
+        if (!itemsByImport[imp.id] || itemsByImport[imp.id].length === 0) {
+          try {
+            const { data: specRows } = await supabase
+              .schema('engenharia')
+              .from('orcamento_importado_itens')
+              .select('id, orcamento_importado_id, item_eap, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha')
+              .eq('orcamento_importado_id', imp.id);
+            if (specRows && specRows.length > 0) {
+              itemsByImport[imp.id] = specRows;
+            } else {
+              const { data: pubSpecRows } = await supabase
+                .from('orcamento_importado_itens')
+                .select('id, orcamento_importado_id, item_eap, composicao_id, insumo_id, tipo_vinculo, texto_empresa, quantidade, status_linha')
+                .eq('orcamento_importado_id', imp.id);
+              if (pubSpecRows && pubSpecRows.length > 0) {
+                itemsByImport[imp.id] = pubSpecRows;
+              }
+            }
+          } catch {}
+        }
+
+        if (!itemsByImport[imp.id] || itemsByImport[imp.id].length === 0) {
+          try {
+            const localStr = localStorage.getItem(`brp_orcamento_importado_itens_${imp.id}`);
+            if (localStr) {
+              const localItems = JSON.parse(localStr);
+              if (Array.isArray(localItems) && localItems.length > 0) {
+                itemsByImport[imp.id] = localItems;
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
+      const stats: Record<string, { total: number; linked: number; percent: number }> = {};
+      list.forEach(imp => {
+        const impItems = itemsByImport[imp.id] || [];
+        stats[imp.id] = calculateImportadoProgressStats(impItems);
+      });
+
+      setImportadosStats(stats);
 
       // Busca quais planilhas importadas já geraram um Orçamento Nativo da Empresa
       const { data: createdOrcs } = await supabase
@@ -678,6 +749,12 @@ export default function Orcamentos() {
 
       setIsCreateModalOpen(false);
       if (data?.id) {
+        if (newOrcamentoData.empresa) {
+          localStorage.setItem(`orcamento_empresa_${data.id}`, newOrcamentoData.empresa);
+        }
+        if (newOrcamentoData.responsavel) {
+          localStorage.setItem(`orcamento_responsavel_${data.id}`, newOrcamentoData.responsavel);
+        }
         navigate(`/orcamentos/${data.id}`);
       }
     } catch (err: any) {
@@ -911,19 +988,170 @@ export default function Orcamentos() {
 
   const handleDeleteImportado = async (id: string, nome: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    const confirm = window.confirm(`Deseja excluir permanentemente a planilha importada "${nome}"?`);
+
+    // 0. Busca orçamentos da empresa gerados a partir desta importação
+    let associatedOrcs: any[] = [];
+    try {
+      const { data: dbOrcs } = await supabase
+        .schema('engenharia')
+        .from('orcamentos')
+        .select('id, codigo, nome')
+        .eq('orcamento_importado_id', id);
+      if (dbOrcs && dbOrcs.length > 0) associatedOrcs = [...dbOrcs];
+    } catch (err) {}
+
+    // Fallback/adiciona orçamentos da lista do estado ou public caso tenham o mesmo orcamento_importado_id
+    orcamentos.forEach(o => {
+      if (o.orcamento_importado_id === id && !associatedOrcs.some(a => a.id === o.id)) {
+        associatedOrcs.push(o);
+      }
+    });
+
+    let message = `Deseja excluir permanentemente a planilha importada "${nome}"?`;
+    if (associatedOrcs.length > 0) {
+      const codesStr = associatedOrcs.map(o => o.codigo ? `${o.codigo} (${o.nome})` : o.nome).filter(Boolean).join(', ');
+      message = `⚠️ ATENÇÃO: Esta planilha importada possui o seguinte orçamento da empresa gerado a partir dela:\n\n• ${codesStr}\n\nAo excluir esta importação, o orçamento da empresa também será EXCLUÍDO permanentemente!\n\nTem certeza de que deseja prosseguir com a exclusão?`;
+    } else {
+      message = `Deseja excluir permanentemente a planilha importada "${nome}"? Esta ação não poderá ser desfeita.`;
+    }
+
+    const confirm = window.confirm(message);
     if (!confirm) return;
 
     try {
       setLoading(true);
-      const { error } = await supabase
-        .schema('engenharia')
-        .from('orcamentos_importados')
-        .delete()
-        .eq('id', id);
 
-      if (error) throw error;
-      fetchImportados();
+      // 1. Se existirem orçamentos associados, exclui primeiro os orçamentos empresa e seus itens
+      if (associatedOrcs.length > 0) {
+        const orcIdsToDelete = associatedOrcs.map(o => o.id);
+
+        try {
+          await supabase
+            .schema('engenharia')
+            .from('orcamento_itens')
+            .delete()
+            .in('orcamento_id', orcIdsToDelete);
+        } catch (err) {
+          console.warn('Erro ao deletar orcamento_itens em engenharia:', err);
+        }
+
+        try {
+          await supabase
+            .from('orcamento_itens')
+            .delete()
+            .in('orcamento_id', orcIdsToDelete);
+        } catch (err) {
+          console.warn('Erro ao deletar orcamento_itens em public:', err);
+        }
+
+        try {
+          await supabase
+            .schema('engenharia')
+            .from('orcamentos')
+            .delete()
+            .in('id', orcIdsToDelete);
+        } catch (err) {
+          console.warn('Erro ao deletar orcamentos em engenharia:', err);
+        }
+
+        try {
+          await supabase
+            .from('orcamentos')
+            .delete()
+            .in('id', orcIdsToDelete);
+        } catch (err) {
+          console.warn('Erro ao deletar orcamentos em public:', err);
+        }
+
+        // Limpa LocalStorage dos orçamentos empresa
+        try {
+          const savedOrcsStr = localStorage.getItem('brp_orcamentos_list');
+          if (savedOrcsStr) {
+            const savedOrcs = JSON.parse(savedOrcsStr);
+            const filteredOrcs = savedOrcs.filter((o: any) => !orcIdsToDelete.includes(String(o.id)));
+            localStorage.setItem('brp_orcamentos_list', JSON.stringify(filteredOrcs));
+          }
+        } catch (e) {}
+
+        try {
+          const savedMemsStr = localStorage.getItem('brp_memoriais_calculo_list');
+          if (savedMemsStr) {
+            const savedMems = JSON.parse(savedMemsStr);
+            const filteredMems = savedMems.filter((m: any) => !orcIdsToDelete.includes(String(m.orcamentoId)) && !orcIdsToDelete.includes(String(m.id)));
+            localStorage.setItem('brp_memoriais_calculo_list', JSON.stringify(filteredMems));
+          }
+        } catch (e) {}
+
+        orcIdsToDelete.forEach(idDel => {
+          localStorage.removeItem(`orcamento_calculos_${idDel}`);
+          localStorage.removeItem(`orcamento_parametros_${idDel}`);
+          localStorage.removeItem(`orcamento_header_${idDel}`);
+          localStorage.removeItem(`orcamento_dados_comp_${idDel}`);
+          localStorage.removeItem(`brp_orcamento_itens_${idDel}`);
+        });
+
+        setOrcamentos(prev => prev.filter(o => !orcIdsToDelete.includes(o.id)));
+      }
+
+      // 2. Remove as linhas de itens da planilha importada (engenharia e public)
+      try {
+        await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .delete()
+          .eq('orcamento_importado_id', id);
+      } catch (err) {
+        console.warn('Erro ao deletar itens de engenharia:', err);
+      }
+
+      try {
+        await supabase
+          .from('orcamento_importado_itens')
+          .delete()
+          .eq('orcamento_importado_id', id);
+      } catch (err) {
+        console.warn('Erro ao deletar itens public:', err);
+      }
+
+      // 3. Remove o registro principal de orcamentos_importados (engenharia e public)
+      try {
+        await supabase
+          .schema('engenharia')
+          .from('orcamentos_importados')
+          .delete()
+          .eq('id', id);
+      } catch (err) {
+        console.warn('Erro ao deletar header de engenharia:', err);
+      }
+
+      try {
+        await supabase
+          .from('orcamentos_importados')
+          .delete()
+          .eq('id', id);
+      } catch (err) {
+        console.warn('Erro ao deletar header public:', err);
+      }
+
+      // 4. Limpa o LocalStorage para que o item não ressurja no fallback
+      try {
+        const savedLocalStr = localStorage.getItem('brp_orcamentos_importados_locais');
+        if (savedLocalStr) {
+          const localList = JSON.parse(savedLocalStr);
+          const filteredList = localList.filter((item: any) => item.id !== id);
+          localStorage.setItem('brp_orcamentos_importados_locais', JSON.stringify(filteredList));
+        }
+        localStorage.removeItem(`brp_orcamento_importado_header_${id}`);
+        localStorage.removeItem(`brp_orcamento_importado_itens_${id}`);
+        localStorage.removeItem(`collapsed_eaps_${id}`);
+      } catch (localErr) {
+        console.warn('Erro ao limpar dados locais do LocalStorage:', localErr);
+      }
+
+      // 5. Remove o item do estado da tela imediatamente
+      setImportados(prev => prev.filter(i => i.id !== id));
+      await fetchImportados();
+      await fetchOrcamentos();
     } catch (err: any) {
       console.error(err);
       alert('Erro ao excluir planilha importada: ' + (err.message || err));
@@ -1358,8 +1586,8 @@ export default function Orcamentos() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredImportados.map((imp) => {
-                      const stats = importadosStats[imp.id] || { total: 0, linked: 0 };
-                      const percent = stats.total > 0 ? Math.round((stats.linked / stats.total) * 100) : 0;
+                      const stats = importadosStats[imp.id] || { total: 0, linked: 0, percent: 0 };
+                      const percent = stats.percent !== undefined ? stats.percent : (stats.total > 0 ? Math.round((stats.linked / stats.total) * 100) : 0);
                       const createdOrc = createdImportadosMap[imp.id];
                       const { label: statusLabel, badgeCls } = getImportadoEffectiveStatusInfo(imp, stats, createdOrc);
 

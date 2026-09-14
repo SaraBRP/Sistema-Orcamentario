@@ -118,7 +118,8 @@ export function ModalImportarExcel({ isOpen, onClose, onSuccess }: ModalImportar
   };
 
   // Extração Direta de Células por Posição (r, c) com suporte a Mesclagens (!merges)
-  const getDirectCellValue = (r: number, c: number): string => {
+  // Extração Direta de Células por Posição (r, c) com suporte a Mesclagens (!merges)
+  const getDirectCellValue = (r: number, c: number): any => {
     if (!workbook || !sheetName) return '';
     const ws = workbook.Sheets[sheetName];
     if (!ws) return '';
@@ -138,17 +139,62 @@ export function ModalImportarExcel({ isOpen, onClose, onSuccess }: ModalImportar
     }
 
     if (!cell) return '';
+    // Prioriza o valor bruto numérico original se existir
+    if (cell.v !== undefined && cell.v !== null) {
+      if (typeof cell.v === 'number') return cell.v;
+      if (typeof cell.v === 'string') return cell.v.trim();
+    }
     if (cell.w !== undefined && cell.w !== null) return String(cell.w).trim();
-    if (cell.v !== undefined && cell.v !== null) return String(cell.v).trim();
     return '';
   };
 
-  // Parse numérico seguro
+  // Parse numérico seguro (Inteligente para formato pt-BR e EN)
   const parseNum = (val: any): number => {
-    if (typeof val === 'number') return val;
+    if (typeof val === 'number') return isNaN(val) ? 0 : val;
     if (!val) return 0;
-    const str = String(val).replace(/R\$\s?/gi, '').replace(/\./g, '').replace(',', '.').trim();
-    const num = parseFloat(str);
+
+    const rawStr = String(val).replace(/R\$\s?/gi, '').replace(/\$\s?/g, '').trim();
+    if (!rawStr) return 0;
+
+    // Se já for um número parseável diretamente em JS (ex: "100", "1.2", "1200")
+    if (/^-?\d+(\.\d+)?$/.test(rawStr)) {
+      const num = parseFloat(rawStr);
+      return isNaN(num) ? 0 : num;
+    }
+
+    const hasComma = rawStr.includes(',');
+    const hasDot = rawStr.includes('.');
+
+    let cleanStr = rawStr;
+
+    if (hasComma && hasDot) {
+      const lastCommaIdx = rawStr.lastIndexOf(',');
+      const lastDotIdx = rawStr.lastIndexOf('.');
+
+      if (lastCommaIdx > lastDotIdx) {
+        // Formato pt-BR: Ponto é milhar, vírgula é decimal (ex: "1.200,00" -> "1200.00")
+        cleanStr = rawStr.replace(/\./g, '').replace(',', '.');
+      } else {
+        // Formato EN: Vírgula é milhar, ponto é decimal (ex: "1,200.00" -> "1200.00")
+        cleanStr = rawStr.replace(/,/g, '');
+      }
+    } else if (hasComma) {
+      // Ex: "100,00" ou "1,00" ou "1,2" (pt-BR decimal sem milhar)
+      cleanStr = rawStr.replace(',', '.');
+    } else if (hasDot) {
+      // Ex: "1.200" ou "100.00"
+      const dotCount = (rawStr.match(/\./g) || []).length;
+      if (dotCount > 1) {
+        cleanStr = rawStr.replace(/\./g, '');
+      } else {
+        const parts = rawStr.split('.');
+        if (parts[1] && parts[1].length === 3 && parseInt(parts[0], 10) > 0) {
+          cleanStr = rawStr.replace('.', '');
+        }
+      }
+    }
+
+    const num = parseFloat(cleanStr);
     return isNaN(num) ? 0 : num;
   };
 
@@ -169,9 +215,9 @@ export function ModalImportarExcel({ isOpen, onClose, onSuccess }: ModalImportar
     const startIndex = startRowNum - 1;
 
     for (let r = startIndex; r <= maxRow; r++) {
-      const item_eap = getDirectCellValue(r, colLetterToIdx(colItem));
-      const descricao = getDirectCellValue(r, colLetterToIdx(colDesc));
-      const unidade = getDirectCellValue(r, colLetterToIdx(colUnd));
+      const item_eap = String(getDirectCellValue(r, colLetterToIdx(colItem)) || '').trim();
+      const descricao = String(getDirectCellValue(r, colLetterToIdx(colDesc)) || '').trim();
+      const unidade = String(getDirectCellValue(r, colLetterToIdx(colUnd)) || '').trim();
       const quantidade = parseNum(getDirectCellValue(r, colLetterToIdx(colQtd)));
 
       if (!item_eap && !descricao) continue; // Pula linhas totalmente em branco

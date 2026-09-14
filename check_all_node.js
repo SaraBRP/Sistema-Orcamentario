@@ -4,8 +4,18 @@ import * as fs from 'fs';
 
 const excelPath = "C:\\Users\\Windows 11\\BRP ENGENHARIA\\BRP METALICA - Documentos\\Geral Metalica\\01- Equipe Metálica\\02 - Sara\\11- Agentes IA\\Sistema Orçamentário\\BD\\Bases Orçamentárias\\SINAPI GO\\GO\\SINAPI_Referência_2026_05.xlsx";
 
-const supabaseUrl = 'https://dntpnrzevzkwooihqbbx.supabase.co';
-const supabaseAnonKey = 'sb_publishable_qwnWAG0pELpkSf_6brrZ1A_cWiP477X';
+const envContent = fs.readFileSync('.env', 'utf8');
+const lines = envContent.split('\n');
+let supabaseUrl = '';
+let supabaseAnonKey = '';
+lines.forEach(line => {
+  if (line.startsWith('VITE_SUPABASE_URL=')) {
+    supabaseUrl = line.split('=')[1].trim().replace(/"/g, '').replace(/'/g, '');
+  }
+  if (line.startsWith('VITE_SUPABASE_ANON_KEY=')) {
+    supabaseAnonKey = line.split('=')[1].trim().replace(/"/g, '').replace(/'/g, '');
+  }
+});
 
 const supabase = createClient(supabaseUrl, supabaseAnonKey);
 

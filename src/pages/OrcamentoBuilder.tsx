@@ -1,4 +1,4 @@
-import React, { Fragment, useState, useEffect, useMemo, useRef } from 'react';
+import React, { Fragment, useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../hooks/useAuth';
@@ -6,7 +6,7 @@ import {
   ArrowLeft, ArrowRight, Save, Plus, Search, Trash2, Import, Calculator, 
   Settings2, FileSpreadsheet, Layers, X, Check, ChevronDown, ChevronRight,
   Indent, Outdent, GripVertical, AlertCircle, Send, Lock, CheckCircle2, XCircle, Clock, ChevronUp, MessageSquare, AlertTriangle, BarChart3, Users,
-  Download, FileText
+  Download, FileText, Undo2, Redo2, RefreshCw
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -43,6 +43,64 @@ type OrcamentoItem = {
 };
 
 const STATUS_ENVIO_OPTIONS = ['Ag. Retorno', 'Cancelado', 'Encerrado', 'Consolidado'];
+
+// Função para remover linhas duplicadas (geradas por inserções múltiplas)
+// Função para remover linhas duplicadas (geradas por inserções múltiplas no mesmo EAP)
+const deduplicateBudgetItems = (list: OrcamentoItem[]): { cleanList: OrcamentoItem[]; deletedIds: string[] } => {
+  const cleanList: OrcamentoItem[] = [];
+  const deletedIds: string[] = [];
+
+  let currentSectionTitle = '';
+  let seenInSection = new Set<string>();
+
+  for (let i = 0; i < list.length; i++) {
+    const item = list[i];
+    const hasValues = (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '';
+    if (!hasValues) {
+      cleanList.push(item);
+      continue;
+    }
+
+    const eap = (item.item_eap || '').trim();
+    const code = (item.codigo || '').trim();
+    const desc = (item.descricao || '').trim();
+    const unit = (item.unidade || '').trim();
+    const qty = Number(item.quantidade || 0).toFixed(4);
+    const matU = Number(item.valor_unitario_mat || 0).toFixed(2);
+    const moU = Number(item.valor_unitario_mo || 0).toFixed(2);
+
+    const isSection = !code && (!item.quantidade || item.quantidade === 0);
+
+    if (isSection) {
+      if (desc && desc.toLowerCase() === currentSectionTitle.toLowerCase()) {
+        if (item.id && !item.id.startsWith('temp-') && !item.id.startsWith('blank-')) {
+          deletedIds.push(item.id);
+        }
+        continue;
+      }
+      currentSectionTitle = desc;
+      seenInSection.clear();
+      cleanList.push(item);
+      continue;
+    }
+
+    // A assinatura do item DEVE incluir o item_eap para não tratar insumos pertencentes a composições distintas (ex: 1.4.1 vs 1.5.1) como duplicatas!
+    const sig = eap
+      ? `${eap}|${code}|${desc}`
+      : (code ? `${code}|${desc}` : `${desc}|${unit}|${qty}|${matU}|${moU}`);
+
+    if (seenInSection.has(sig)) {
+      if (item.id && !item.id.startsWith('temp-') && !item.id.startsWith('blank-')) {
+        deletedIds.push(item.id);
+      }
+    } else {
+      seenInSection.add(sig);
+      cleanList.push(item);
+    }
+  }
+
+  return { cleanList, deletedIds };
+};
 
 // Função para calcular os totais hierárquicos (WBS/EAP) de forma dinâmica
 // effectiveMultiplier = produto das quantidades de todas as composições ancestrais
@@ -86,50 +144,31 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
     const eap = (item.item_eap || '').trim();
     if (!eap) continue;
 
-    const hasCode = item.codigo && item.codigo.trim() !== '';
-    const parts = eap.split('.').filter(Boolean);
-    const isSectionHeader = parts.length === 1 || (parts.length === 2 && parts[1] === '0') || (item as any).isSecao;
+    const hasCode = Boolean(item.codigo && item.codigo.trim() !== '');
 
-    let directChildren: typeof computed = [];
+    const cleanEap = eap.replace(/\.+/g, '.').replace(/^\.|\.$/g, '');
+    const parts = cleanEap.split('.').filter(Boolean);
 
-    if (isSectionHeader) {
-      const rootNum = parts[0];
+    const prefix = (parts.length === 2 && parts[1] === '0') ? parts[0] : cleanEap;
+    const prefixDot = prefix + '.';
 
-      // Busca filhos Nível 1 da seção (ex: '2.1', '2.2')
-      directChildren = computed.filter(other => {
-        const otherEap = (other.item_eap || '').trim();
-        if (!otherEap || otherEap === eap) return false;
-        const otherParts = otherEap.split('.').filter(Boolean);
-        return otherParts[0] === rootNum && (otherParts.length === 2 && otherParts[1] !== '0');
+    // Find all descendants of this EAP item
+    const descendants = computed.filter(other => {
+      const otherEap = (other.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      if (!otherEap || otherEap === cleanEap || otherEap === prefix) return false;
+      return otherEap.startsWith(prefixDot);
+    });
+
+    // Filter to direct children (no intermediate item M in computed between prefix and child)
+    const directChildren = descendants.filter(d => {
+      const dEap = (d.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      const hasIntermediate = computed.some(m => {
+        const mEap = (m.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+        if (!mEap || mEap === cleanEap || mEap === prefix || mEap === dEap) return false;
+        return dEap.startsWith(mEap + '.') && (mEap.startsWith(prefixDot) || mEap === prefix);
       });
-
-      // Se não houver itens Nível 1 explícitos (ex: de '1.0' direto para '1.1.1', '1.1.2'),
-      // pega os de menor profundidade sob essa seção
-      if (directChildren.length === 0) {
-        const allDescendants = computed.filter(other => {
-          const otherEap = (other.item_eap || '').trim();
-          if (!otherEap || otherEap === eap) return false;
-          const otherParts = otherEap.split('.').filter(Boolean);
-          return otherParts[0] === rootNum;
-        });
-
-        if (allDescendants.length > 0) {
-          const minDepth = Math.min(...allDescendants.map(d => (d.item_eap || '').split('.').filter(Boolean).length));
-          directChildren = allDescendants.filter(other => {
-            const oParts = (other.item_eap || '').split('.').filter(Boolean);
-            return oParts.length === minDepth;
-          });
-        }
-      }
-    } else {
-      const prefix = eap + '.';
-      directChildren = computed.filter(other => {
-        const otherEap = (other.item_eap || '').trim();
-        if (!otherEap.startsWith(prefix)) return false;
-        const rest = otherEap.slice(prefix.length);
-        return rest.length > 0 && !rest.includes('.');
-      });
-    }
+      return !hasIntermediate;
+    });
 
     if (directChildren.length === 0) {
       // Folha: sem filhos
@@ -147,26 +186,28 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
       item.total_mat = calcQtd * (item.valor_unitario_mat || 0);
       item.total_mo  = calcQtd * (item.valor_unitario_mo || 0);
       item.total     = item.total_mat + item.total_mo;
+      item.valor_unitario = (item.valor_unitario_mat || 0) + (item.valor_unitario_mo || 0);
     } else {
       // Pai (Seção ou Composição/Atividade com filhos): soma filhos diretos já processados
-      const sumMat   = directChildren.reduce((s, d) => s + d.total_mat, 0);
-      const sumMo    = directChildren.reduce((s, d) => s + d.total_mo,  0);
-      const sumTotal = directChildren.reduce((s, d) => s + d.total,     0);
+      const sumMat   = directChildren.reduce((s, d) => s + (d.total_mat || 0), 0);
+      const sumMo    = directChildren.reduce((s, d) => s + (d.total_mo || 0),  0);
+      const sumTotal = directChildren.reduce((s, d) => s + (d.total || 0),     0);
 
       if (hasCode) {
         // Composição com filhos explodidos: agrega filhos
         item.isSummary = false;
-        if (sumTotal > 0 || sumMat > 0 || sumMo > 0) {
-          item.total_mat = sumMat;
-          item.total_mo  = sumMo;
-          item.total     = sumTotal;
-        } else {
-          item.total_mat = (item.quantidade || 0) * (item.valor_unitario_mat || 0);
-          item.total_mo  = (item.quantidade || 0) * (item.valor_unitario_mo || 0);
-          item.total     = item.total_mat + item.total_mo;
-        }
+        const itemQtd = (item.quantidade && item.quantidade > 0) ? item.quantidade : 1;
+        const matVal = sumMat > 0 ? sumMat : (item.quantidade || 0) * (item.valor_unitario_mat || 0);
+        const moVal  = sumMo > 0 ? sumMo : (item.quantidade || 0) * (item.valor_unitario_mo || 0);
+
+        item.total_mat = matVal;
+        item.total_mo  = moVal;
+        item.total     = matVal + moVal;
+        item.valor_unitario_mat = itemQtd > 0 ? matVal / itemQtd : 0;
+        item.valor_unitario_mo  = itemQtd > 0 ? moVal / itemQtd : 0;
+        item.valor_unitario     = itemQtd > 0 ? (matVal + moVal) / itemQtd : 0;
       } else {
-        // Etapa/atividade manual com filhos: é summary → zera campos editáveis
+        // Etapa/atividade manual/seção com filhos: é summary → zera campos editáveis, total é a soma dos filhos
         item.isSummary = true;
         item.total_mat = sumMat;
         item.total_mo  = sumMo;
@@ -236,8 +277,12 @@ const fetchCompositionChildrenRecursively = async (
           total_mat: parseFloat(item.coeficiente || 1) * matCost,
           total_mo: parseFloat(item.coeficiente || 1) * moCost,
           total: parseFloat(item.coeficiente || 1) * (matCost + moCost),
-          composicao_id: item.sub_composicao_id
-        };
+          composicao_id: item.sub_composicao_id,
+          parentCompositionId: composicaoId,
+          parent_composition_id: composicaoId,
+          isChildInsumoOfComposition: true,
+          is_child_insumo: true
+        } as any;
 
         result.push(subcompItem);
 
@@ -285,8 +330,12 @@ const fetchCompositionChildrenRecursively = async (
           total_mat: parseFloat(item.coeficiente || 1) * matCost,
           total_mo: parseFloat(item.coeficiente || 1) * moCost,
           total: parseFloat(item.coeficiente || 1) * (matCost + moCost),
-          composicao_id: null
-        };
+          composicao_id: null,
+          parentCompositionId: composicaoId,
+          parent_composition_id: composicaoId,
+          isChildInsumoOfComposition: true,
+          is_child_insumo: true
+        } as any;
 
         result.push(insumoItem);
       }
@@ -488,26 +537,16 @@ export default function OrcamentoBuilder() {
 
   const [activeParamBindingIndex, setActiveParamBindingIndex] = useState<number | null>(null);
 
-  // Sistema de Desfazer (Ctrl + Z)
-  const historyRef = useRef<OrcamentoItem[][]>([]);
-
-  const pushUndoSnapshot = (currentItens: OrcamentoItem[]) => {
-    if (!currentItens || currentItens.length === 0) return;
-    const snapshot = currentItens.map(item => ({ ...item }));
-    historyRef.current.push(snapshot);
-    if (historyRef.current.length > 50) {
-      historyRef.current.shift();
-    }
+  const handleSelectAllText = (e: React.MouseEvent<HTMLElement>) => {
+    e.stopPropagation();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(e.currentTarget);
+    selection.removeAllRanges();
+    selection.addRange(range);
   };
 
-  const handleUndo = () => {
-    if (historyRef.current.length === 0) return;
-    const previousState = historyRef.current.pop();
-    if (previousState) {
-      setItens(rebuildEapCodes(previousState));
-      setHasUnsavedChanges(true);
-    }
-  };
 
   // Alterna o colapso/expansão de um item EAP
   const toggleCollapse = (eap: string) => {
@@ -590,6 +629,8 @@ export default function OrcamentoBuilder() {
   // BDI & Config Drawer
   const [showConfig, setShowConfig] = useState(false);
   const [configData, setConfigData] = useState({
+    empresa: 'BRP Soluções Metálicas',
+    responsavel: '',
     nome: '',
     descricao: '',
     cliente: '',
@@ -757,6 +798,132 @@ export default function OrcamentoBuilder() {
     return {};
   });
 
+  // Estados do Salvamento Automático & Histórico Desfazer / Refazer
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
+  const [lastSavedTime, setLastSavedTime] = useState<Date | null>(null);
+
+  type BudgetSnapshot = {
+    itens: OrcamentoItem[];
+    equipeDuracoesMap: Record<string, string>;
+    equipeJornadasMap: Record<string, string>;
+    configData: any;
+    removedItemIds: string[];
+  };
+
+  const undoStackRef = useRef<BudgetSnapshot[]>([]);
+  const redoStackRef = useRef<BudgetSnapshot[]>([]);
+  const isUndoRedoActionRef = useRef<boolean>(false);
+
+  const pushUndoSnapshot = useCallback((overrideItens?: OrcamentoItem[]) => {
+    if (isUndoRedoActionRef.current) return;
+    const targetItens = overrideItens || itens;
+    if (!targetItens || targetItens.length === 0) return;
+
+    const snapshot: BudgetSnapshot = {
+      itens: JSON.parse(JSON.stringify(targetItens)),
+      equipeDuracoesMap: { ...equipeDuracoesMap },
+      equipeJornadasMap: { ...equipeJornadasMap },
+      configData: { ...configData },
+      removedItemIds: [...removedItemIds]
+    };
+
+    const last = undoStackRef.current[undoStackRef.current.length - 1];
+    if (last && JSON.stringify(last) === JSON.stringify(snapshot)) {
+      return;
+    }
+
+    undoStackRef.current.push(snapshot);
+    if (undoStackRef.current.length > 50) {
+      undoStackRef.current.shift();
+    }
+    redoStackRef.current = [];
+  }, [itens, equipeDuracoesMap, equipeJornadasMap, configData, removedItemIds]);
+
+  const handleUndo = useCallback(() => {
+    if (undoStackRef.current.length === 0) return;
+
+    const currentSnapshot: BudgetSnapshot = {
+      itens: JSON.parse(JSON.stringify(itens)),
+      equipeDuracoesMap: { ...equipeDuracoesMap },
+      equipeJornadasMap: { ...equipeJornadasMap },
+      configData: { ...configData },
+      removedItemIds: [...removedItemIds]
+    };
+    redoStackRef.current.push(currentSnapshot);
+
+    const prev = undoStackRef.current.pop()!;
+    isUndoRedoActionRef.current = true;
+
+    setItens(rebuildEapCodes(prev.itens));
+    setEquipeDuracoesMap(prev.equipeDuracoesMap || {});
+    setEquipeJornadasMap(prev.equipeJornadasMap || {});
+    if (prev.configData) setConfigData(prev.configData);
+    setRemovedItemIds(prev.removedItemIds || []);
+    setHasUnsavedChanges(true);
+
+    setTimeout(() => {
+      isUndoRedoActionRef.current = false;
+    }, 120);
+  }, [itens, equipeDuracoesMap, equipeJornadasMap, configData, removedItemIds]);
+
+  const handleRedo = useCallback(() => {
+    if (redoStackRef.current.length === 0) return;
+
+    const currentSnapshot: BudgetSnapshot = {
+      itens: JSON.parse(JSON.stringify(itens)),
+      equipeDuracoesMap: { ...equipeDuracoesMap },
+      equipeJornadasMap: { ...equipeJornadasMap },
+      configData: { ...configData },
+      removedItemIds: [...removedItemIds]
+    };
+    undoStackRef.current.push(currentSnapshot);
+
+    const next = redoStackRef.current.pop()!;
+    isUndoRedoActionRef.current = true;
+
+    setItens(rebuildEapCodes(next.itens));
+    setEquipeDuracoesMap(next.equipeDuracoesMap || {});
+    setEquipeJornadasMap(next.equipeJornadasMap || {});
+    if (next.configData) setConfigData(next.configData);
+    setRemovedItemIds(next.removedItemIds || []);
+    setHasUnsavedChanges(true);
+
+    setTimeout(() => {
+      isUndoRedoActionRef.current = false;
+    }, 120);
+  }, [itens, equipeDuracoesMap, equipeJornadasMap, configData, removedItemIds]);
+
+  // Event Listener para atalhos de teclado Ctrl+Z e Ctrl+Y
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isCtrlOrCmd = e.ctrlKey || e.metaKey;
+      if (!isCtrlOrCmd) return;
+
+      const keyLower = e.key.toLowerCase();
+
+      if (keyLower === 'z') {
+        if (e.shiftKey) {
+          e.preventDefault();
+          handleRedo();
+        } else {
+          const targetTag = (document.activeElement?.tagName || '').toLowerCase();
+          const isNativeInput = targetTag === 'input' || targetTag === 'textarea';
+
+          if (!isNativeInput) {
+            e.preventDefault();
+            handleUndo();
+          }
+        }
+      } else if (keyLower === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
+
   // Estados para Modal de Exportação do Orçamento
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [exportScope, setExportScope] = useState<'full' | 'active'>('full');
@@ -788,14 +955,18 @@ export default function OrcamentoBuilder() {
       } catch (e) {}
     }
 
-    // Exportação para Excel (.xlsx) utilizando o Padrão Oficial Formatado da BRP Engenharia
+    // Exportação para Excel (.xlsx) utilizando o Padrão Oficial Formatado da BRP Engenharia / BRP Soluções Metálicas
+    const currentEmpresa = configData.empresa || (orcamento as any)?.empresa || (id ? localStorage.getItem(`orcamento_empresa_${id}`) : null) || 'BRP Soluções Metálicas';
+    const currentResponsavel = configData.responsavel || (orcamento as any)?.responsavel || (id ? localStorage.getItem(`orcamento_responsavel_${id}`) : null) || '';
+
     exportarOrcamentoExcelPadrao({
+      empresa: currentEmpresa,
       codigo: orcamento?.codigo || (configData as any)?.codigo || 'BRP',
       revisao: orcamento?.revisao || (configData as any)?.revisao || '00',
       cliente: orcamento?.cliente || (configData as any)?.cliente || '',
       projeto: orcamento?.projeto || orcamento?.nome || (configData as any)?.nome || '',
       gestor_cliente: orcamento?.gestor_cliente || (configData as any)?.gestor_cliente || '',
-      responsavel: orcamento?.responsavel || (configData as any)?.responsavel || '',
+      responsavel: currentResponsavel,
       cidade: orcamento?.cidade || (configData as any)?.cidade || '',
       estado: orcamento?.estado || (configData as any)?.estado || 'GO',
       itens: computedItens,
@@ -1181,34 +1352,58 @@ export default function OrcamentoBuilder() {
 
 
 
-  // Manipuladores de Drag and Drop (Reordenação de Linhas com Suporte a Blocos e Indicador de Posição Estilo MS Project)
+  // Manipuladores de Drag and Drop (Reordenação de Linhas com Suporte a Blocos de Composições/Seções e Indicador de Posição Estilo MS Project)
   const getBlockLength = (index: number, list: OrcamentoItem[]): number => {
     const item = list[index];
     if (!item) return 1;
-    const eap = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+
+    const itemEap = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+    const prefix = itemEap ? itemEap + '.' : '';
+
+    const isItemSecao = Boolean((item as any).isSecao || (item as any).is_secao || (item as any).isTextLine);
+    const itemLevel = (item as any).level !== undefined 
+      ? (item as any).level 
+      : (isItemSecao ? 0 : (itemEap ? Math.max(1, itemEap.split('.').filter(Boolean).length - 1) : 1));
 
     let count = 1;
-    if (eap) {
-      const prefix = eap + '.';
-      for (let k = index + 1; k < list.length; k++) {
-        const kEap = (list[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-        if (
-          kEap.startsWith(prefix) || 
-          (item.id && list[k].parentCompositionId === item.id) || 
-          (item.id && list[k].composicao_id === item.id)
-        ) {
-          count++;
-        } else {
-          break;
-        }
+    for (let k = index + 1; k < list.length; k++) {
+      const child = list[k];
+      if (!child) break;
+
+      const childEap = (child.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+      const isChildSecao = Boolean((child as any).isSecao || (child as any).is_secao || (child as any).isTextLine);
+      const childLevel = (child as any).level !== undefined 
+        ? (child as any).level 
+        : (isChildSecao ? 0 : (childEap ? Math.max(1, childEap.split('.').filter(Boolean).length - 1) : 1));
+
+      // Se encontrar outra seção de nível 0, encerra o bloco
+      if (isChildSecao && isItemSecao) break;
+
+      const isDirectChildInsumo = Boolean(
+        (item.id && child.parentCompositionId === item.id) ||
+        (item.id && (child as any).parent_composition_id === item.id) ||
+        (item.id && child.composicao_id === item.id)
+      );
+
+      const isEapChild = Boolean(prefix && childEap.startsWith(prefix));
+      const isDeeperLevelChild = Boolean(!isChildSecao && childLevel > itemLevel);
+
+      if (isDirectChildInsumo || isEapChild || isDeeperLevelChild) {
+        count++;
+      } else {
+        break;
       }
     }
+
     return count;
   };
 
   const handleDragStart = (e: React.DragEvent, index: number) => {
+    const activeEl = document.activeElement;
+    const isEditingInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
+
     const item = itens[index];
-    if ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '') {
+    if (!item || isEditingInput || ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '')) {
       e.preventDefault();
       return;
     }
@@ -1220,7 +1415,13 @@ export default function OrcamentoBuilder() {
 
   const handleDragOver = (e: React.DragEvent, index: number) => {
     e.preventDefault();
-    if (draggedRowIndex === null || draggedRowIndex === index) return;
+    if (draggedRowIndex === null) return;
+
+    // Se estiver arrastando sobre uma linha dentro do seu próprio bloco de filhas, ignoramos o indicador
+    const blockLen = getBlockLength(draggedRowIndex, itens);
+    if (index >= draggedRowIndex && index < draggedRowIndex + blockLen) {
+      return;
+    }
 
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const midY = rect.top + rect.height / 2;
@@ -1286,8 +1487,8 @@ export default function OrcamentoBuilder() {
       const draggedItem = copy[draggedRowIndex];
       if (!draggedItem) return prev;
 
-      // Insumo interno de composição
-      const isChild = isChildOfComposition(draggedRowIndex, copy) || Boolean(draggedItem.parentCompositionId);
+      // Insumo interno de composição (movimentação apenas entre irmãos de sua mãe)
+      const isChild = (draggedItem as any).isChildInsumoOfComposition || (draggedItem as any).is_child_insumo;
 
       if (isChild) {
         const compRange = getParentCompositionRange(draggedRowIndex, copy);
@@ -1307,7 +1508,7 @@ export default function OrcamentoBuilder() {
         }
       }
 
-      // Bloco de composição/seção completa (move o pai JUNTO com todos os seus filhos)
+      // Bloco de composição/seção completa (move a mãe JUNTO com todos os seus insumos e filhas)
       const blockLength = getBlockLength(draggedRowIndex, copy);
 
       let targetPos = targetIndex;
@@ -1360,12 +1561,27 @@ export default function OrcamentoBuilder() {
   };
 
   const isBlankRow = (item: OrcamentoItem) => {
-    return (item.item_eap || '').trim() === '' && 
-           (item.descricao || '').trim() === '' && 
+    return (item.descricao || '').trim() === '' && 
            (!item.codigo || item.codigo.trim() === '') &&
            (!item.quantidade || item.quantidade === 0) &&
            (!item.valor_unitario_mat || item.valor_unitario_mat === 0) &&
-           (!item.valor_unitario_mo || item.valor_unitario_mo === 0);
+           (!item.valor_unitario_mo || item.valor_unitario_mo === 0) &&
+           !(item as any).isSecao && !(item as any).is_secao && !(item as any).isTextLine;
+  };
+
+  const isValidOrcamentoItem = (item: any) => {
+    const hasDesc = Boolean(item.descricao && String(item.descricao).trim() !== '');
+    const hasCode = Boolean(item.codigo || item.banco_fonte);
+    const hasQty = Boolean(item.quantidade && parseFloat(item.quantidade) > 0);
+    const hasForm = Boolean(item.equacaoLiteral || item.equacao_literal || item.substituicaoNumerica || item.substituicao_numerica);
+    const isChild = Boolean(item.composicao_id || item.parentCompositionId || item.parent_composition_id || item.isChildInsumoOfComposition || item.is_child_insumo);
+
+    if (isChild && !hasDesc) return false;
+    if (!hasDesc && !hasCode && !hasQty && !hasForm) {
+      const isExplicitSecao = Boolean(item.isSecao || item.is_secao || item.isTextLine);
+      if (!isExplicitSecao) return false;
+    }
+    return true;
   };
 
   const ensureSingleTrailingBlankRow = (list: OrcamentoItem[], orcamentoId: string): OrcamentoItem[] => {
@@ -1435,6 +1651,20 @@ export default function OrcamentoBuilder() {
     });
   };
 
+  const canItemBeParent = (item: OrcamentoItem | null | undefined): boolean => {
+    if (!item) return false;
+    // 1. Linha de texto ou Seção (sem código) → Pode ser mãe
+    if (!item.codigo || (item as any).isSecao || (item as any).is_secao || (item as any).isTextLine) {
+      return true;
+    }
+    // 2. Composição / Subcomposição → Pode ser mãe se tiver composicao_id/sub_composicao_id ou for composição
+    if (item.hasChildren || item.composicao_id || (item as any).sub_composicao_id || (item as any).is_composicao) {
+      return true;
+    }
+    // 3. Caso contrário, é um insumo simples (folha) → NÃO PODE SER MÃE
+    return false;
+  };
+
   // Reconstrói todos os códigos EAP baseados nos níveis hierárquicos fiéis às ramificações (1.1 -> 1.1.1 -> 1.1.3 -> 1.1.3.1)
   const rebuildEapCodes = (list: OrcamentoItem[]): OrcamentoItem[] => {
     const copy = list.map(item => ({ ...item }));
@@ -1455,47 +1685,30 @@ export default function OrcamentoBuilder() {
 
       let level = 0;
 
-      const isSecaoHeader = Boolean(
-        (item as any).isSecao || 
-        (item as any).is_secao ||
-        (item.descricao && (item.descricao.toUpperCase().trim() === 'SAPATAS' || item.descricao.toUpperCase().trim() === 'ESTACAS')) ||
-        (!item.composicao_id && !(item as any).parentCompositionId && !(item as any).isChildInsumoOfComposition && (origParts.length <= 1 || originalEap.endsWith('.0')))
-      );
-
       if ((item as any).level !== undefined && (item as any).level >= 0) {
         level = (item as any).level;
-      } else if (isSecaoHeader) {
-        level = 0;
-      } else {
-        // Verifica se o item pertence a uma composição pai localizada acima dele na tabela
-        let parentCompLevel = -1;
-        if (item.composicao_id) {
-          for (let k = i - 1; k >= 0; k--) {
-            if (copy[k].id === item.composicao_id) {
-              const parentEap = (copy[k].item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-              const pParts = parentEap.split('.').filter(Boolean);
-              parentCompLevel = pParts.length > 0 ? (pParts.length === 2 && pParts[1] === '0' ? 0 : Math.max(0, pParts.length - 1)) : 1;
-              break;
-            }
-          }
-        }
-
-        if (parentCompLevel >= 0 && origParts.length <= 2) {
-          level = parentCompLevel + 1;
+      } else if (origParts.length > 0) {
+        if (origParts.length === 2 && origParts[1] === '0') {
+          level = 0;
         } else {
-          level = Math.max(1, origParts.length > 0 ? origParts.length - 1 : 1);
+          level = Math.max(0, origParts.length - 1);
         }
+      } else {
+        const isExplicitSecao = Boolean((item as any).isSecao || (item as any).is_secao || (item as any).tipo_vinculo === 'secao');
+        level = isExplicitSecao ? 0 : 1;
       }
 
-      // Proteção de Nível: impede salto de níveis desnecessários em relação ao item anterior (ex: evita 1.3.0.1)
+      // Proteção de Nível: impede salto de níveis desnecessários e impede que um insumo folha seja considerado mãe
       if (i > 0) {
         const prevItem = copy[i - 1];
         const prevEap = (prevItem?.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
         const prevParts = prevEap.split('.').filter(Boolean);
         const prevLevel = prevParts.length > 0 ? (prevParts.length === 2 && prevParts[1] === '0' ? 0 : Math.max(0, prevParts.length - 1)) : 0;
 
-        if (level > prevLevel + 1) {
-          level = prevLevel + 1;
+        const maxAllowedLevel = canItemBeParent(prevItem) ? prevLevel + 1 : prevLevel;
+        if (level > maxAllowedLevel) {
+          level = maxAllowedLevel;
+          (item as any).level = level;
         }
       }
 
@@ -1564,7 +1777,8 @@ export default function OrcamentoBuilder() {
         const prevEap = prevItem ? (prevItem.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim() : '';
         const prevLevel = prevItem ? ((prevItem as any).level !== undefined ? (prevItem as any).level : (prevEap ? Math.max(0, prevEap.split('.').filter(Boolean).length - 1) : 0)) : 0;
 
-        if (currentLevel >= prevLevel + 1) continue;
+        const maxAllowed = prevItem && canItemBeParent(prevItem) ? prevLevel + 1 : prevLevel;
+        if (currentLevel >= maxAllowed) continue;
 
         const newLevel = currentLevel + 1;
         const actualDelta = 1;
@@ -1773,6 +1987,12 @@ export default function OrcamentoBuilder() {
       const localObs = id ? localStorage.getItem(`orcamento_obs_gestor_${id}`) : null;
       const effectiveObs = orcData.observacao_gestor || localObs || '';
 
+      const localEmpresa = id ? localStorage.getItem(`orcamento_empresa_${id}`) : null;
+      const localResponsavel = id ? localStorage.getItem(`orcamento_responsavel_${id}`) : null;
+
+      const effectiveEmpresa = localEmpresa || orcData.empresa || 'BRP Soluções Metálicas';
+      const effectiveResponsavel = localResponsavel || orcData.responsavel || '';
+
       const localDC = id ? localStorage.getItem(`orcamento_dados_comp_${id}`) : null;
       let effectiveDC = orcData.dadosComplementares || orcData.dados_complementares || [];
       if (localDC) {
@@ -1795,6 +2015,8 @@ export default function OrcamentoBuilder() {
 
       setOrcamento({
         ...orcData,
+        empresa: effectiveEmpresa,
+        responsavel: effectiveResponsavel,
         observacao_gestor: effectiveObs,
         dadosComplementares: effectiveDC
       });
@@ -1803,6 +2025,8 @@ export default function OrcamentoBuilder() {
       }
       
       setConfigData({
+        empresa: effectiveEmpresa,
+        responsavel: effectiveResponsavel,
         nome: orcData.nome || '',
         descricao: orcData.descricao || '',
         cliente: orcData.cliente || '',
@@ -1866,8 +2090,18 @@ export default function OrcamentoBuilder() {
         }
       }
 
+      // Purga linhas em branco residuais no DB e filtra dados válidos
+      const invalidIds = (effectiveData || []).filter(i => !isValidOrcamentoItem(i) && i.id).map(i => i.id);
+      if (invalidIds.length > 0 && id) {
+        supabase.schema('engenharia').from('orcamento_itens').delete().in('id', invalidIds).then(({ error }) => {
+          if (error) console.error('Erro ao purgar itens residuais do DB:', error);
+        });
+      }
+
+      const validData = (effectiveData || []).filter(isValidOrcamentoItem);
+
       // Ordenar por EAP lexicograficamente
-      const sorted = (effectiveData || []).map((i: any) => {
+      const sorted = validData.map((i: any) => {
         const formulasArr = Array.isArray(i.formulas_lista) ? i.formulas_lista : (Array.isArray(i.formulasLista) ? i.formulasLista : []);
         const firstForm = formulasArr.length > 0 ? formulasArr[0] : {};
 
@@ -1894,7 +2128,15 @@ export default function OrcamentoBuilder() {
         };
       }).sort(sortEap);
 
-      const rebuilt = rebuildEapCodes(sorted);
+      const { cleanList, deletedIds } = deduplicateBudgetItems(sorted);
+      if (deletedIds.length > 0 && id) {
+        console.warn(`Purgando ${deletedIds.length} itens duplicados do banco:`, deletedIds);
+        supabase.schema('engenharia').from('orcamento_itens').delete().in('id', deletedIds).then(({ error }) => {
+          if (error) console.error('Erro ao purgar duplicatas do DB:', error);
+        });
+      }
+
+      const rebuilt = rebuildEapCodes(cleanList);
       setItens(ensureSingleTrailingBlankRow(rebuilt, id!));
 
       // Carrega memórias de cálculo associadas do LocalStorage
@@ -1936,15 +2178,15 @@ export default function OrcamentoBuilder() {
       };
     }
 
-    // 1. Atividade descritiva/manual (sem código) → Negrito, cor preta/escura
+    // 1. Atividade descritiva/manual (Linha Mãe / Seção sem código) → Fundo cinza visível com destaque em negrito
     if (!item.codigo) {
       return {
-        textClass: "text-[11.5px] font-bold text-slate-900",
-        rowBgClass: "bg-slate-200/80 hover:bg-slate-300/80 border-l-slate-500"
+        textClass: "text-[11.5px] font-bold text-slate-950",
+        rowBgClass: "bg-slate-200/90 hover:bg-slate-300/90 border-l-4 border-l-slate-700"
       };
     }
 
-    // 2. Composição com filhos (hasChildren === true) → Semi-negrito
+    // 2. Composição com filhos (hasChildren === true) → Fundo azul suave marcante com semi-negrito
     if (item.codigo && item.hasChildren) {
       const isActive = selectedRowIndex !== null && (
         selectedRowIndex === index || 
@@ -1953,16 +2195,17 @@ export default function OrcamentoBuilder() {
 
       return {
         textClass: isActive 
-          ? "text-[11.5px] font-bold text-slate-900" 
-          : "text-[11px] font-semibold text-slate-900",
-        rowBgClass: "bg-slate-50 hover:bg-slate-100/80 border-l-blue-400"
+          ? "text-[11.5px] font-bold text-slate-950" 
+          : "text-[11px] font-bold text-slate-900",
+        rowBgClass: "bg-blue-50/70 hover:bg-blue-100/80 border-l-4 border-l-blue-600"
       };
     }
 
-    // 3. Insumos e subcomposições folhas (sem filhos, com código) → Fonte normal legível
+    // 3. Insumos e subcomposições folhas (sem filhos, com código) → Linhas com alternância de fundo e borda nítida
+    const isEven = index % 2 === 0;
     return {
-      textClass: "text-[11px] font-normal text-slate-800",
-      rowBgClass: "bg-white hover:bg-slate-50 border-l-transparent"
+      textClass: "text-[11px] font-medium text-slate-800",
+      rowBgClass: isEven ? "bg-slate-50/70 hover:bg-slate-100/90 border-l-slate-300" : "bg-white hover:bg-slate-100/90 border-l-slate-300"
     };
   };
 
@@ -2516,16 +2759,26 @@ export default function OrcamentoBuilder() {
     }
   };
 
-  // Salvar planilha
-  const handleSavePlanilha = async () => {
+  // Salvar planilha (com suporte a salvamento automático silencioso)
+  const handleSavePlanilha = async (isManual = false) => {
     setSaving(true);
+    setAutoSaveStatus('saving');
     try {
       if (id) {
         try {
+          if (configData.empresa) {
+            localStorage.setItem(`orcamento_empresa_${id}`, configData.empresa);
+            setOrcamento((prev: any) => ({ ...prev, empresa: configData.empresa }));
+          }
+          if (configData.responsavel !== undefined) {
+            localStorage.setItem(`orcamento_responsavel_${id}`, configData.responsavel);
+            setOrcamento((prev: any) => ({ ...prev, responsavel: configData.responsavel }));
+          }
           localStorage.setItem(`orcamento_equipe_${id}`, JSON.stringify({
             duracoes: equipeDuracoesMap,
             jornadas: equipeJornadasMap
           }));
+          localStorage.setItem(`brp_orcamento_itens_${id}`, JSON.stringify(itens));
         } catch (e) {}
       }
 
@@ -2658,6 +2911,9 @@ export default function OrcamentoBuilder() {
             payload.total_orig = existingImportRow.total_orig;
             usedImportIds.add(existingImportRow.id);
           } else {
+            payload.id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+              ? crypto.randomUUID()
+              : `inserted-imp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
             payload.valor_unitario_orig = 0;
             payload.total_orig = 0;
           }
@@ -2670,7 +2926,13 @@ export default function OrcamentoBuilder() {
             .schema('engenharia')
             .from('orcamento_importado_itens')
             .upsert(importItemsToUpsert);
-          if (upsertImportError) throw upsertImportError;
+          if (upsertImportError) {
+            console.warn('Erro ao sincronizar orcamento_importado_itens no schema engenharia, tentando fallback public:', upsertImportError);
+            const { error: pubErr } = await supabase
+              .from('orcamento_importado_itens')
+              .upsert(importItemsToUpsert);
+            if (pubErr) throw upsertImportError;
+          }
         }
 
         const importRowsToDelete: string[] = [];
@@ -2715,8 +2977,18 @@ export default function OrcamentoBuilder() {
       const itemsToUpdate: any[] = [];
       const itemsToInsert: any[] = [];
 
-      computedItens
-        .filter(item => (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '')
+      const { cleanList: cleanComputedItens, deletedIds: extraDeletedIds } = deduplicateBudgetItems(computedItens);
+
+      if (extraDeletedIds.length > 0) {
+        await supabase
+          .schema('engenharia')
+          .from('orcamento_itens')
+          .delete()
+          .in('id', extraDeletedIds);
+      }
+
+      cleanComputedItens
+        .filter(isValidOrcamentoItem)
         .forEach(item => {
           const payload: any = {
             orcamento_id: id,
@@ -2769,24 +3041,59 @@ export default function OrcamentoBuilder() {
       }
 
       if (itemsToInsert.length > 0) {
-        const { error: insertError } = await supabase
+        const { data: insertedData, error: insertError } = await supabase
           .schema('engenharia')
           .from('orcamento_itens')
-          .insert(itemsToInsert);
+          .insert(itemsToInsert)
+          .select('id, item_eap');
 
         if (insertError) throw insertError;
+
+        if (insertedData && insertedData.length > 0) {
+          const insertedMap = new Map(insertedData.map((d: any) => [d.item_eap, d.id]));
+          setItens(prev => prev.map(item => {
+            const newId = insertedMap.get(item.item_eap);
+            return newId ? { ...item, id: newId } : item;
+          }));
+        }
       }
 
       setHasUnsavedChanges(false);
-      alert('Planilha orçamentária salva com sucesso!');
-      loadOrcamento(); // recarrega para atualizar IDs temporários e ordenações
+      setAutoSaveStatus('saved');
+      setLastSavedTime(new Date());
+      if (isManual) {
+        alert('Planilha orçamentária salva com sucesso!');
+      }
     } catch (err: any) {
-      console.error(err);
-      alert('Erro ao salvar planilha: ' + err.message);
+      console.error('Erro ao salvar planilha:', err);
+      setAutoSaveStatus('error');
+      if (isManual) {
+        alert('Erro ao salvar planilha: ' + err.message);
+      }
     } finally {
       setSaving(false);
     }
   };
+
+  // Temporizador para Salvamento Automático (1.5s após a última edição)
+  const autoSaveTimeoutRef = useRef<any>(null);
+  useEffect(() => {
+    if (!hasUnsavedChanges || loading || !id || isReadOnly) return;
+
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+
+    autoSaveTimeoutRef.current = setTimeout(() => {
+      handleSavePlanilha(false);
+    }, 1500);
+
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, [hasUnsavedChanges, itens, configData, equipeDuracoesMap, equipeJornadasMap, loading, id, isReadOnly]);
 
   // Buscar itens para importação
   const searchImportItems = async () => {
@@ -2905,7 +3212,27 @@ export default function OrcamentoBuilder() {
     return { index, eap: newEap };
   };
 
-  // Importar item selecionado do painel lateral para a planilha
+  // Helper para verificar se a linha está completamente em branco (sem código, sem descrição, sem quantidade, sem composição)
+  const isRowBlank = (item: OrcamentoItem | undefined): boolean => {
+    if (!item) return false;
+    const hasCode = Boolean(item.codigo && item.codigo.trim() !== '');
+    const hasDesc = Boolean(item.descricao && item.descricao.trim() !== '');
+    const hasQtd = Boolean(item.quantidade && item.quantidade > 0);
+    const hasComp = Boolean(item.composicao_id);
+    
+    if (!hasCode && !hasDesc && !hasQtd && !hasComp) {
+      return true;
+    }
+    const isTempOrBlank = Boolean(item.id && (item.id.startsWith('blank-') || item.id.startsWith('temp-')));
+    if (isTempOrBlank && !hasCode && !hasComp && (!item.total || item.total === 0)) {
+      if (!hasDesc || item.descricao === 'Nova Linha Inserida' || item.descricao.trim() === '') {
+        return true;
+      }
+    }
+    return false;
+  };
+
+  // Importar item selecionado do painel lateral para a planilha (sempre inserindo novas linhas, sem sobrepor existentes)
   const handleImportItem = async (selected: any) => {
     let matCost = 0;
     let moCost = 0;
@@ -2930,10 +3257,9 @@ export default function OrcamentoBuilder() {
     const destIndex = target.index;
     const nextEap = target.eap;
 
+    // Garante SEMPRE um novo ID temporário único para não sobrescrever itens no Supabase
     const newItem: OrcamentoItem = {
-      id: destIndex !== null && destIndex !== -1 && itens[destIndex]?.id && !itens[destIndex].id.startsWith('temp-') && !itens[destIndex].id.startsWith('blank-') 
-        ? itens[destIndex].id 
-        : `temp-${Date.now()}-${Math.random()}`,
+      id: `temp-import-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       orcamento_id: id!,
       item_eap: nextEap,
       codigo: selected.codigo,
@@ -2950,7 +3276,7 @@ export default function OrcamentoBuilder() {
       total: 0,
       composicao_id: isComp ? selected.id : null,
       isTemp: true,
-      _manualLevel: true  // Preserva o nível calculado; orçamentista decide hierarquia manualmente
+      _manualLevel: true  // Preserva a hierarquia calculada
     };
 
     let children: OrcamentoItem[] = [];
@@ -2958,27 +3284,22 @@ export default function OrcamentoBuilder() {
       children = await fetchCompositionChildrenRecursively(selected.id, nextEap, id!, bdiFactor);
     }
 
+    const insertedCount = 1 + children.length;
+
     setItens(prev => {
       pushUndoSnapshot(prev);
       const copy = [...prev];
-      if (destIndex !== null && destIndex !== -1) {
-        // Protege os antigos filhos do item substituído: marca-os com _manualLevel
-        // para que rebuildEapCodes não os promova automaticamente como filhos do
-        // item recém importado (evita hierarquia automática indesejada).
-        const replacedItem = copy[destIndex];
-        const replacedEap = (replacedItem?.item_eap || '').trim();
-        if (replacedEap) {
-          const prefix = replacedEap + '.';
-          for (let k = destIndex + 1; k < copy.length; k++) {
-            const kEap = (copy[k].item_eap || '').trim();
-            if (kEap.startsWith(prefix)) {
-              copy[k] = { ...copy[k], _manualLevel: true };
-            } else {
-              break;
-            }
-          }
+      if (destIndex !== null && destIndex >= 0 && destIndex < copy.length) {
+        const targetRow = copy[destIndex];
+        const isBlank = isRowBlank(targetRow);
+
+        if (isBlank) {
+          // Se a linha de destino for uma linha em branco sem conteúdo, substitui a linha em branco
+          copy.splice(destIndex, 1, newItem, ...children);
+        } else {
+          // Se a linha de destino contiver conteúdo (linha existente), INSERE as novas linhas sem apagar/sobrepor!
+          copy.splice(destIndex, 0, newItem, ...children);
         }
-        copy.splice(destIndex, 1, newItem, ...children);
       } else {
         copy.push(newItem, ...children);
       }
@@ -2986,7 +3307,8 @@ export default function OrcamentoBuilder() {
     });
 
     // Mantém o drawer de importação aberto para consecutivas inserções e avança o target index
-    setTargetImportRowIndex(destIndex + 1 + children.length);
+    const nextTargetIndex = (destIndex !== null && destIndex >= 0) ? destIndex + insertedCount : itens.length + insertedCount;
+    setTargetImportRowIndex(nextTargetIndex);
     setHasUnsavedChanges(true);
 
     // Marca o item como importado temporariamente (por 2 segundos)
@@ -3053,10 +3375,10 @@ export default function OrcamentoBuilder() {
   }
 
   return (
-    <div className="space-y-6 relative pb-20">
+    <div className="flex flex-col h-[calc(100vh-105px)] overflow-hidden space-y-3 relative">
       {/* Banner de Bloqueio se houver revisão posterior */}
       {isReadOnly && higherRevisionObj && (
-        <div className="bg-amber-500 text-white px-4 py-3 rounded-2xl shadow-md flex items-center justify-between gap-3 text-xs font-semibold animate-in fade-in slide-in-from-top-2 duration-200">
+        <div className="bg-amber-500 text-white px-4 py-3 rounded-2xl shadow-md flex items-center justify-between gap-3 text-xs font-semibold animate-in fade-in slide-in-from-top-2 duration-200 shrink-0">
           <div className="flex items-center gap-2.5">
             <Lock className="w-5 h-5 text-amber-100 shrink-0" />
             <span>
@@ -3072,9 +3394,11 @@ export default function OrcamentoBuilder() {
         </div>
       )}
 
-      {/* Barra Superior */}
-      <div className="flex flex-col md:flex-row justify-between items-start md:items-start gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-        <div className="flex items-center gap-3">
+      {/* Barra Superior Enxuta e Elegante */}
+      <div className="shrink-0 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 bg-white py-2 px-3.5 rounded-2xl border border-slate-200 shadow-2xs">
+        
+        {/* ── Esquerda: Título, Código, REV, Status e Metadados ── */}
+        <div className="flex items-center gap-2 min-w-0">
           <button 
             onClick={() => {
               if (hasUnsavedChanges && !window.confirm('Descartar alterações não salvas?')) return;
@@ -3084,114 +3408,135 @@ export default function OrcamentoBuilder() {
                 navigate('/orcamentos?tab=empresa');
               }
             }}
-            className="p-2 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors cursor-pointer mt-0.5"
+            className="p-1 hover:bg-slate-100 rounded-lg text-slate-500 transition-colors cursor-pointer shrink-0"
+            title="Voltar"
           >
-            <ArrowLeft className="w-5 h-5" />
+            <ArrowLeft className="w-4 h-4" />
           </button>
-          <div>
-            {/* Linha 1: Título + Código + REV + Ver Planilha */}
-            <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-              <h2 className="text-xl font-bold text-slate-800 leading-tight break-words">
+          <div className="min-w-0 flex flex-col justify-center">
+            {/* Linha 1: Título na frente -> Código -> REV -> Status -> Ver Importada */}
+            <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+              <h2 className="text-base font-bold text-slate-800 leading-tight truncate max-w-xs md:max-w-sm" title={orcamento?.nome || orcamento?.projeto || 'Orçamento'}>
                 {orcamento?.nome || orcamento?.projeto || 'Orçamento'}
               </h2>
+              
               {orcamento?.codigo && (
-                <span className="bg-slate-100 text-slate-700 text-xs font-bold px-2 py-0.5 rounded font-mono border border-slate-200/80 whitespace-nowrap shrink-0">
+                <span className="bg-slate-100 text-slate-700 text-[11px] font-bold px-1.5 py-0.5 rounded font-mono border border-slate-200/80 whitespace-nowrap shrink-0">
                   {orcamento.codigo}
                 </span>
               )}
+
               <span className="text-[10px] bg-blue-50 text-blue-700 font-bold px-1.5 py-0.5 rounded border border-blue-100 whitespace-nowrap shrink-0">
                 REV {orcamento?.revisao ?? '0'}
               </span>
+
+              {/* Badge de Status - na frente da revisão */}
+              {(() => {
+                const s = (orcamento?.status || 'Em andamento').trim();
+                const isAprovado = orcamento?.aprovado === true;
+                const isAgValidacao = s.toLowerCase().includes('valida');
+                const isEnviada = s.toLowerCase() === 'enviada';
+                const isCancelada = s.toLowerCase() === 'cancelada';
+
+                let label = s;
+                let cls = 'bg-blue-50 text-blue-700 border-blue-200';
+                let dot = 'bg-blue-500';
+
+                if (isEnviada) {
+                  label = orcamento?.status_envio || 'Enviada';
+                  switch (orcamento?.status_envio) {
+                    case 'Ag. Retorno':
+                      cls = 'bg-violet-50 text-violet-700 border-violet-200';
+                      dot = 'bg-violet-500';
+                      break;
+                    case 'Consolidado':
+                    case 'Consolidada':
+                      cls = 'bg-teal-50 text-teal-800 border-teal-300';
+                      dot = 'bg-teal-500';
+                      break;
+                    case 'Encerrado':
+                    case 'Encerrada':
+                      cls = 'bg-slate-100 text-slate-700 border-slate-300';
+                      dot = 'bg-slate-500';
+                      break;
+                    case 'Cancelado':
+                    case 'Cancelada':
+                      cls = 'bg-rose-50 text-rose-700 border-rose-200';
+                      dot = 'bg-rose-500';
+                      break;
+                    default:
+                      cls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
+                      dot = 'bg-emerald-500';
+                      break;
+                  }
+                } else if (isCancelada) {
+                  label = 'Cancelada';
+                  cls = 'bg-rose-50 text-rose-700 border-rose-200';
+                  dot = 'bg-rose-500';
+                } else if (isAgValidacao && !isAprovado) {
+                  label = 'Ag. Validação';
+                  cls = 'bg-amber-50 text-amber-700 border-amber-300';
+                  dot = 'bg-amber-500';
+                } else if (isAprovado) {
+                  label = 'Aprovado e Ag. Envio';
+                  cls = 'bg-emerald-50 text-emerald-800 border-emerald-300';
+                  dot = 'bg-emerald-500';
+                } else {
+                  const decisao = orcamento?.decisao_gestor || (id ? localStorage.getItem(`orcamento_decisao_${id}`) : null);
+                  if (decisao === 'aprovar_pendencia') {
+                    label = 'Com Pendências';
+                    cls = 'bg-amber-50 text-amber-800 border-amber-300 font-bold';
+                    dot = 'bg-amber-600';
+                  } else if (decisao === 'recusar') {
+                    label = 'Recusado pelo Gestor';
+                    cls = 'bg-rose-50 text-rose-700 border-rose-300 font-bold';
+                    dot = 'bg-rose-600';
+                  } else {
+                    label = 'Em andamento';
+                    cls = 'bg-blue-50 text-blue-700 border-blue-200';
+                    dot = 'bg-blue-500';
+                  }
+                }
+
+                const isPulsing = isAgValidacao && !isAprovado;
+                return (
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    <span className={clsx('inline-flex items-center gap-1.5 text-[10px] font-bold px-2 py-0.5 rounded-full border whitespace-nowrap shrink-0 shadow-2xs', cls)}>
+                      <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', dot, isPulsing && 'animate-pulse')} />
+                      {label}
+                    </span>
+                    {/* Ícone discreto de Salvamento Automático em frente ao status */}
+                    {autoSaveStatus === 'saving' ? (
+                      <span title="Salvando alterações..." className="text-blue-600 animate-spin shrink-0 flex items-center justify-center">
+                        <RefreshCw className="w-3.5 h-3.5" />
+                      </span>
+                    ) : autoSaveStatus === 'error' ? (
+                      <span title="Erro ao salvar / Não salvo" className="text-rose-600 shrink-0 flex items-center justify-center">
+                        <XCircle className="w-3.5 h-3.5" />
+                      </span>
+                    ) : (
+                      <span title="Salvo automaticamente" className="text-emerald-600 shrink-0 flex items-center justify-center">
+                        <Check className="w-3.5 h-3.5 stroke-[3]" />
+                      </span>
+                    )}
+                  </div>
+                );
+              })()}
+
               {orcamento?.orcamento_importado_id && (
                 <button
                   onClick={() => navigate(`/orcamentos/depara/${orcamento.orcamento_importado_id}`)}
-                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold px-2.5 py-0.5 rounded border border-purple-100 text-[10px] cursor-pointer flex items-center gap-1 transition-all"
+                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded border border-purple-100 text-[10px] cursor-pointer flex items-center gap-1 transition-all shrink-0"
                   title="Acessar a planilha importada original e o Studio De-Para"
                 >
-                  <FileSpreadsheet className="w-3.5 h-3.5 text-purple-600" />
-                  <span>Ver Planilha Importada</span>
+                  <FileSpreadsheet className="w-3 h-3 text-purple-600" />
+                  <span>Ver Importada</span>
                 </button>
               )}
             </div>
-            {/* Linha 2: Badge de Status (abaixo do REV) */}
-            {(() => {
-              const s = (orcamento?.status || 'Em andamento').trim();
-              const isAprovado = orcamento?.aprovado === true;
-              const isAgValidacao = s.toLowerCase().includes('valida');
-              const isEnviada = s.toLowerCase() === 'enviada';
-              const isCancelada = s.toLowerCase() === 'cancelada';
 
-              let label = s;
-              let cls = 'bg-blue-50 text-blue-700 border-blue-200';
-              let dot = 'bg-blue-500';
-
-              if (isEnviada) {
-                label = orcamento?.status_envio || 'Enviada';
-                switch (orcamento?.status_envio) {
-                  case 'Ag. Retorno':
-                    cls = 'bg-violet-50 text-violet-700 border-violet-200';
-                    dot = 'bg-violet-500';
-                    break;
-                  case 'Consolidado':
-                  case 'Consolidada':
-                    cls = 'bg-teal-50 text-teal-800 border-teal-300';
-                    dot = 'bg-teal-500';
-                    break;
-                  case 'Encerrado':
-                  case 'Encerrada':
-                    cls = 'bg-slate-100 text-slate-700 border-slate-300';
-                    dot = 'bg-slate-500';
-                    break;
-                  case 'Cancelado':
-                  case 'Cancelada':
-                    cls = 'bg-rose-50 text-rose-700 border-rose-200';
-                    dot = 'bg-rose-500';
-                    break;
-                  default:
-                    cls = 'bg-emerald-50 text-emerald-700 border-emerald-200';
-                    dot = 'bg-emerald-500';
-                    break;
-                }
-              } else if (isCancelada) {
-                label = 'Cancelada';
-                cls = 'bg-rose-50 text-rose-700 border-rose-200';
-                dot = 'bg-rose-500';
-              } else if (isAgValidacao && !isAprovado) {
-                label = 'Ag. Validação';
-                cls = 'bg-amber-50 text-amber-700 border-amber-300';
-                dot = 'bg-amber-500';
-              } else if (isAprovado) {
-                label = 'Aprovado e Ag. Envio';
-                cls = 'bg-emerald-50 text-emerald-800 border-emerald-300';
-                dot = 'bg-emerald-500';
-              } else {
-                const decisao = orcamento?.decisao_gestor || (id ? localStorage.getItem(`orcamento_decisao_${id}`) : null);
-                if (decisao === 'aprovar_pendencia') {
-                  label = 'Com Pendências';
-                  cls = 'bg-amber-50 text-amber-800 border-amber-300 font-bold';
-                  dot = 'bg-amber-600';
-                } else if (decisao === 'recusar') {
-                  label = 'Recusado pelo Gestor';
-                  cls = 'bg-rose-50 text-rose-700 border-rose-300 font-bold';
-                  dot = 'bg-rose-600';
-                } else {
-                  label = 'Em andamento';
-                  cls = 'bg-blue-50 text-blue-700 border-blue-200';
-                  dot = 'bg-blue-500';
-                }
-              }
-
-              const isPulsing = isAgValidacao && !isAprovado;
-              return (
-                <div className="flex items-center gap-2 mt-1">
-                  <span className={clsx('inline-flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-0.5 rounded-full border whitespace-nowrap shadow-xs', cls)}>
-                    <span className={clsx('w-1.5 h-1.5 rounded-full shrink-0', dot, isPulsing && 'animate-pulse')} />
-                    {label}
-                  </span>
-                </div>
-              );
-            })()}
-            <p className="text-slate-400 text-xs mt-0.5 flex flex-wrap items-center gap-x-2">
+            {/* Linha 2: Metadados (Cliente, Gestor, Orçamentista, Local) */}
+            <p className="text-slate-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-x-1.5 leading-none">
               <span>Cliente: <span className="font-semibold text-slate-600">{orcamento?.cliente || 'Não informado'}</span></span>
               <span>·</span>
               <span>Gestor: <span className="font-semibold text-slate-600">{orcamento?.gestor_cliente || 'Não informado'}</span></span>
@@ -3210,134 +3555,74 @@ export default function OrcamentoBuilder() {
             </p>
           </div>
         </div>
-        
-        {/* ── Lado direito: ferramentas de edição ── */}
-        <div className="flex items-start gap-2 shrink-0 flex-wrap justify-end">
 
-          {/* Grupo BDI — empilhado verticalmente */}
-          <div className="flex flex-col gap-1">
+        {/* ── Direita: Toolbar de 2 Sub-Linhas Organizadas ── */}
+        <div className="flex flex-col gap-1.5 shrink-0 justify-center items-end">
+          
+          {/* Sub-Linha 1 (CIMA): BDI, Curva ABC, Exportar, Salvar & Workflow */}
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {/* Botões BDI Alinhados Horizontalmente */}
             <button 
+              type="button"
               onClick={() => setExibirBdi(!exibirBdi)}
               className={clsx(
-                "px-3 py-1.5 rounded-lg text-xs font-bold border transition-colors cursor-pointer flex items-center gap-1.5",
+                "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center gap-1 shadow-2xs",
                 exibirBdi 
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200" 
+                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" 
                   : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
               )}
+              title={exibirBdi ? 'Ocultar BDI na planilha' : 'Exibir BDI na planilha'}
             >
-              <Calculator className="w-3.5 h-3.5" />
-              {exibirBdi ? 'COM BDI' : 'SEM BDI'}
+              <Calculator className="w-3 h-3" />
+              <span>{exibirBdi ? 'COM BDI' : 'SEM BDI'}</span>
             </button>
             <button 
+              type="button"
               onClick={() => setShowConfig(!showConfig)}
-              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              title="Configurações do BDI"
             >
-              <Settings2 className="w-3.5 h-3.5" />
-              BDI / Config.
+              <Settings2 className="w-3 h-3" />
+              <span>BDI / Config.</span>
             </button>
-          </div>
 
-          <div className="w-px h-10 bg-slate-200 self-center" />
+            <div className="w-px h-4 bg-slate-200 self-center" />
 
-          {/* Ferramentas de linha e estrutura — empilhadas */}
-          <div className="flex flex-col gap-1">
+            {/* Curva ABC, Exportar & Salvar */}
+            <button 
+              type="button"
+              onClick={() => navigate(`/curva-abc?id=${id}`)}
+              className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-2 py-1 rounded-lg text-[11px] font-bold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              title="Abrir a Curva ABC deste orçamento"
+            >
+              <BarChart3 className="w-3 h-3 text-purple-600" />
+              <span>Curva ABC</span>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => setShowExportModal(true)}
+              className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 px-2 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              title="Exportar Orçamento Completo ou por Aba (Excel .xlsx / PDF)"
+            >
+              <Download className="w-3 h-3 text-emerald-700" />
+              <span>Exportar</span>
+            </button>
+
             <button
               type="button"
-              disabled={selectedRowIndex === null && selectedRowIndices.size === 0}
-              onClick={() => {
-                const idx = selectedRowIndex !== null ? selectedRowIndex : (selectedRowIndices.size > 0 ? Math.min(...Array.from(selectedRowIndices)) : null);
-                if (idx !== null && idx !== -1) insertRowAbove(idx);
-              }}
-              title="Inserir nova linha em branco sobre a selecionada"
-              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-50 disabled:hover:bg-white px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm"
+              disabled={saving || isReadOnly}
+              onClick={() => handleSavePlanilha(true)}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-2.5 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition-all cursor-pointer shadow-2xs disabled:opacity-50"
+              title="Salvar alterações no banco de dados"
             >
-              <Plus className="w-3.5 h-3.5 text-blue-600" />
-              Inserir Linha
+              <Save className="w-3 h-3 text-white" />
+              <span>{saving ? 'Salvando...' : 'Salvar'}</span>
             </button>
-            <div className="relative">
-              <button
-                type="button"
-                onClick={() => setShowOutlineMenu(!showOutlineMenu)}
-                className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-sm w-full"
-              >
-                <Layers className="w-3.5 h-3.5 text-blue-600" />
-                Tópicos
-                <ChevronDown className="w-3 h-3 text-slate-400 ml-auto" />
-              </button>
-              {showOutlineMenu && (
-                <>
-                  <div className="fixed inset-0 z-30" onClick={() => setShowOutlineMenu(false)} />
-                  <div className="absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-40 text-xs text-slate-700 font-medium">
-                    <button type="button" onClick={expandAll} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 cursor-pointer font-semibold">
-                      <span className="text-blue-500 font-bold">+</span> Mostrar subtarefas (Expandir)
-                    </button>
-                    <button type="button" onClick={collapseAll} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 cursor-pointer font-semibold">
-                      <span className="text-red-500 font-bold">-</span> Ocultar subtarefas (Recolher)
-                    </button>
-                    <div className="border-t border-slate-100 my-1" />
-                    {[1, 2, 3, 4, 5].map((lvl) => (
-                      <button
-                        key={lvl}
-                        type="button"
-                        onClick={() => collapseToLevel(lvl)}
-                        className="w-full text-left px-4 py-2 hover:bg-slate-50 cursor-pointer font-medium flex items-center justify-between"
-                      >
-                        <span>Nível {lvl}</span>
-                        <span className="text-[10px] text-slate-400">Até Nível {lvl}</span>
-                      </button>
-                    ))}
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
 
-          {/* Botões Indent/Outdent — empilhados */}
-          <div className="flex flex-col border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shadow-sm self-start">
-            <button
-              type="button"
-              disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
-              onClick={outdentMultipleRows}
-              title="Recuar à Esquerda (Alt+Shift+←)"
-              className="p-1.5 bg-white disabled:opacity-40 text-slate-600 hover:text-blue-600 rounded cursor-pointer transition-all border border-slate-200"
-            >
-              <Outdent className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
-              onClick={indentMultipleRows}
-              title="Recuar à Direita (Alt+Shift+→)"
-              className="p-1.5 bg-white disabled:opacity-40 text-slate-600 hover:text-blue-600 rounded cursor-pointer transition-all border border-slate-200"
-            >
-              <Indent className="w-4 h-4" />
-            </button>
-          </div>
+            <div className="w-px h-4 bg-slate-200 self-center" />
 
-
-          {/* Atalho para Curva ABC e Exportar Orçamento */}
-          <div className="flex flex-col gap-1">
-            <div className="flex items-center gap-1.5">
-              <button 
-                onClick={() => navigate(`/curva-abc?id=${id}`)}
-                className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                title="Abrir a Curva ABC deste orçamento"
-              >
-                <BarChart3 className="w-4 h-4 text-purple-600" />
-                <span>Curva ABC</span>
-              </button>
-
-              <button 
-                onClick={() => setShowExportModal(true)}
-                className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 px-3.5 py-1.5 rounded-lg text-xs font-extrabold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
-                title="Exportar Orçamento Completo ou por Aba (Excel .xlsx / PDF)"
-              >
-                <Download className="w-4 h-4 text-emerald-700" />
-                <span>Exportar</span>
-              </button>
-            </div>
-
-            {/* Botão de workflow — aparece abaixo de Importar conforme status */}
+            {/* Ações de Workflow (Enviar & Cancelar LADO A LADO) */}
             {(() => {
               const rawStatus = (orcamento?.status || '').trim();
               const isAgValidacao = rawStatus.toLowerCase().includes('valida');
@@ -3347,122 +3632,117 @@ export default function OrcamentoBuilder() {
               const isRecusado = (orcamento?.decisao_gestor === 'recusar' || (id ? localStorage.getItem(`orcamento_decisao_${id}`) === 'recusar' : false)) && !isAprovado;
               const isEmAndamento = !isAgValidacao && !isEnviada && !isCancelada;
 
-              // 1. Se o parecer do gestor for APROVADO (e ainda não foi marcado como enviado nem cancelado):
               if (isAprovado && !isEnviada && !isCancelada) {
                 return (
-                  <div className="flex flex-col gap-1 w-full">
+                  <div className="flex items-center gap-1">
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => setShowStatusEnvioModal(true)}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold border-2 border-emerald-400 text-emerald-800 bg-emerald-100 hover:bg-emerald-200 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-sm w-full justify-center whitespace-nowrap"
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 border-emerald-400 text-emerald-800 bg-emerald-100 hover:bg-emerald-200 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      {updatingStatus ? 'Enviando...' : 'Enviar ao Cliente'}
+                      <Send className="w-3 h-3" />
+                      <span>{updatingStatus ? 'Enviando...' : 'Enviar ao Cliente'}</span>
                     </button>
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs w-full justify-center whitespace-nowrap"
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                      Cancelar Orçamento
+                      <XCircle className="w-3 h-3 text-rose-500" />
+                      <span>Cancelar</span>
                     </button>
                   </div>
                 );
               }
 
-              // 2. Se está aguardando validação do gestor (e não foi aprovado nem cancelado):
               if (isAgValidacao && !isAprovado && !isCancelada) {
                 return (
-                  <div className="flex flex-col gap-1 w-full">
-                    <span className="px-3 py-1.5 rounded-lg text-[10px] font-semibold border border-amber-200 text-amber-600 bg-amber-50 flex items-center gap-1.5 whitespace-nowrap justify-center">
-                      <Clock className="w-3 h-3 animate-pulse shrink-0" /> Ag. aprovação
+                  <div className="flex items-center gap-1">
+                    <span className="px-2 py-1 rounded-lg text-[10px] font-semibold border border-amber-200 text-amber-700 bg-amber-50 flex items-center gap-1 whitespace-nowrap">
+                      <Clock className="w-3 h-3 animate-pulse shrink-0 text-amber-600" />
+                      <span>Ag. aprovação</span>
                     </span>
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => { if (window.confirm('Cancelar este orçamento e remover do fluxo de aprovação?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs w-full justify-center whitespace-nowrap"
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                      Cancelar Orçamento
+                      <XCircle className="w-3 h-3 text-rose-500" />
+                      <span>Cancelar</span>
                     </button>
                   </div>
                 );
               }
 
-              // 3. Se foi RECUSADO pelo gestor (devolvido em Em andamento sem aprovação):
               if (isRecusado && !isEnviada && !isCancelada) {
                 return (
-                  <div className="flex flex-col gap-1 w-full">
+                  <div className="flex items-center gap-1">
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => { if (window.confirm('Enviar esta planilha revisada para nova validação do gestor?')) handleUpdateStatus('Ag. Validação'); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold border-2 border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-sm w-full justify-center whitespace-nowrap"
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      {updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}
+                      <Send className="w-3 h-3" />
+                      <span>{updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}</span>
                     </button>
-
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento recusado?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs w-full justify-center whitespace-nowrap"
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                      Cancelar Orçamento
+                      <XCircle className="w-3 h-3 text-rose-500" />
+                      <span>Cancelar</span>
                     </button>
                   </div>
                 );
               }
 
-              // 4. Se está Em andamento (início normal, com pendências, ou sem recusa prévia):
               if (isEmAndamento) {
                 const decisao = orcamento?.decisao_gestor || (id ? localStorage.getItem(`orcamento_decisao_${id}`) : null);
                 const isComPendencia = decisao === 'aprovar_pendencia';
 
                 return (
-                  <div className="flex flex-col gap-1 w-full">
+                  <div className="flex items-center gap-1">
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => { if (window.confirm('Enviar esta planilha para validação do gestor?')) handleUpdateStatus('Ag. Validação'); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold border-2 border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-sm w-full justify-center whitespace-nowrap"
+                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <Send className="w-3.5 h-3.5" />
-                      {updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}
+                      <Send className="w-3 h-3 text-amber-700" />
+                      <span>{updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}</span>
                     </button>
 
                     {isComPendencia && (
                       <button
                         disabled={updatingStatus || isReadOnly}
                         onClick={() => setShowStatusEnvioModal(true)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-sm w-full justify-center whitespace-nowrap"
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                       >
-                        <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-                        {updatingStatus ? 'Enviando...' : 'Confirmar Envio'}
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>Confirmar Envio</span>
                       </button>
                     )}
 
                     <button
                       disabled={updatingStatus || isReadOnly}
                       onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 shadow-xs w-full justify-center whitespace-nowrap"
+                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <XCircle className="w-3.5 h-3.5 text-rose-500" />
-                      Cancelar Orçamento
+                      <XCircle className="w-3 h-3 text-rose-500" />
+                      <span>Cancelar</span>
                     </button>
                   </div>
                 );
               }
 
-              // 4. Se o status é Enviada:
               if (isEnviada) {
                 return (
-                  <div className="flex flex-col gap-1 w-full">
-                    <div className="relative w-full">
+                  <div className="flex items-center gap-1">
+                    <div className="relative">
                       <button
                         disabled={updatingStatus}
                         onClick={() => setShowStatusEnvioMenu(p => !p)}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-colors cursor-pointer flex items-center gap-1.5 disabled:opacity-50 w-full justify-between"
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                       >
                         <span>Status de Envio</span>
                         {showStatusEnvioMenu ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
@@ -3515,33 +3795,31 @@ export default function OrcamentoBuilder() {
                       )}
                     </div>
 
-                    {/* Botão de criar nova revisão se não houver revisão posterior e status de envio for Encerrada */}
                     {!isReadOnly && !higherRevisionObj && orcamento?.status_envio === 'Encerrada' && (
                       <button
                         disabled={updatingStatus}
                         onClick={handleCreateRevisionFromCurrent}
-                        className="px-3 py-1.5 rounded-lg text-xs font-bold border border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-100 transition-all cursor-pointer flex items-center gap-1.5 justify-center w-full shadow-xs"
+                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-100 transition-all cursor-pointer flex items-center gap-1 justify-center shadow-2xs whitespace-nowrap"
                       >
-                        <Plus className="w-3.5 h-3.5" /> + Nova Revisão
+                        <Plus className="w-3 h-3" /> + Nova Revisão
                       </button>
                     )}
                   </div>
                 );
               }
 
-              // 5. Se foi Cancelada:
               if (isCancelada) {
                 return (
-                  <div className="flex flex-col gap-1 w-full">
-                    <span className="px-3 py-1.5 rounded-lg text-[10px] font-bold border border-rose-200 text-rose-700 bg-rose-50 flex items-center gap-1.5 whitespace-nowrap justify-center">
-                      <XCircle className="w-3.5 h-3.5 text-rose-600 shrink-0" /> Orçamento Cancelado
+                  <div className="flex items-center gap-1">
+                    <span className="px-2 py-1 rounded-lg text-[10px] font-bold border border-rose-200 text-rose-700 bg-rose-50 flex items-center gap-1 whitespace-nowrap">
+                      <XCircle className="w-3 h-3 text-rose-600 shrink-0" /> Cancelado
                     </span>
                     <button
                       disabled={updatingStatus}
                       onClick={() => { if (window.confirm('Reabrir este orçamento para o status "Em andamento"?')) handleUpdateStatus('Em andamento', null); }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer flex items-center gap-1.5 disabled:opacity-50 w-full justify-center shadow-xs"
+                      className="px-2 py-1 rounded-lg text-[11px] font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
                     >
-                      <ArrowLeft className="w-3.5 h-3.5" /> Reabrir (Em andamento)
+                      <ArrowLeft className="w-3.5 h-3.5" /> Reabrir
                     </button>
                   </div>
                 );
@@ -3551,6 +3829,108 @@ export default function OrcamentoBuilder() {
             })()}
           </div>
 
+          {/* Sub-Linha 2 (BAIXO): Desfazer, Refazer, Inserir Linha, Tópicos & Recuos */}
+          <div className="flex items-center gap-1.5 flex-wrap justify-end">
+            {/* Undo / Redo */}
+            <div className="flex items-center gap-0.5">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={undoStackRef.current.length === 0}
+                className="p-1 px-1.5 bg-white hover:bg-slate-100 disabled:opacity-40 border border-slate-200 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                title="Desfazer (Ctrl + Z)"
+              >
+                <Undo2 className="w-3 h-3 text-slate-600" />
+                <span>Desfazer</span>
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={redoStackRef.current.length === 0}
+                className="p-1 px-1.5 bg-white hover:bg-slate-100 disabled:opacity-40 border border-slate-200 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer transition-colors shadow-2xs"
+                title="Refazer (Ctrl + Y)"
+              >
+                <Redo2 className="w-3 h-3 text-slate-600" />
+                <span>Refazer</span>
+              </button>
+            </div>
+
+            <div className="w-px h-4 bg-slate-200 self-center" />
+
+            {/* Inserir Linha & Tópicos */}
+            <button
+              type="button"
+              disabled={selectedRowIndex === null && selectedRowIndices.size === 0}
+              onClick={() => {
+                const idx = selectedRowIndex !== null ? selectedRowIndex : (selectedRowIndices.size > 0 ? Math.min(...Array.from(selectedRowIndices)) : null);
+                if (idx !== null && idx !== -1) insertRowAbove(idx);
+              }}
+              title="Inserir nova linha sobre a selecionada"
+              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 disabled:opacity-50 disabled:hover:bg-white px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+            >
+              <Plus className="w-3 h-3 text-blue-600" />
+              <span>Inserir Linha</span>
+            </button>
+
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setShowOutlineMenu(!showOutlineMenu)}
+                className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-2 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              >
+                <Layers className="w-3 h-3 text-blue-600" />
+                <span>Tópicos</span>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
+              </button>
+              {showOutlineMenu && (
+                <>
+                  <div className="fixed inset-0 z-30" onClick={() => setShowOutlineMenu(false)} />
+                  <div className="absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-lg py-1.5 z-40 text-xs text-slate-700 font-medium">
+                    <button type="button" onClick={expandAll} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 cursor-pointer font-semibold">
+                      <span className="text-blue-500 font-bold">+</span> Mostrar subtarefas (Expandir)
+                    </button>
+                    <button type="button" onClick={collapseAll} className="w-full text-left px-4 py-2 hover:bg-slate-50 flex items-center gap-2 cursor-pointer font-semibold">
+                      <span className="text-red-500 font-bold">-</span> Ocultar subtarefas (Recolher)
+                    </button>
+                    <div className="border-t border-slate-100 my-1" />
+                    {[1, 2, 3, 4, 5].map((lvl) => (
+                      <button
+                        key={lvl}
+                        type="button"
+                        onClick={() => collapseToLevel(lvl)}
+                        className="w-full text-left px-4 py-2 hover:bg-slate-50 cursor-pointer font-medium flex items-center justify-between"
+                      >
+                        <span>Nível {lvl}</span>
+                        <span className="text-[10px] text-slate-400">Até Nível {lvl}</span>
+                      </button>
+                    ))}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Indent / Outdent */}
+            <div className="flex border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shadow-2xs">
+              <button
+                type="button"
+                disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
+                onClick={outdentMultipleRows}
+                title="Recuar à Esquerda (Alt+Shift+←)"
+                className="p-1 bg-white disabled:opacity-40 text-slate-600 hover:text-blue-600 rounded cursor-pointer transition-all border border-slate-200"
+              >
+                <Outdent className="w-3 h-3" />
+              </button>
+              <button
+                type="button"
+                disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
+                onClick={indentMultipleRows}
+                title="Recuar à Direita (Alt+Shift+→)"
+                className="p-1 bg-white disabled:opacity-40 text-slate-600 hover:text-blue-600 rounded cursor-pointer transition-all border border-slate-200"
+              >
+                <Indent className="w-3 h-3" />
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3761,7 +4141,26 @@ export default function OrcamentoBuilder() {
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
+            <div>
+              <label className="block text-xs font-bold text-slate-800 mb-1">Empresa Responsável</label>
+              <select
+                value={configData.empresa || 'BRP Soluções Metálicas'}
+                onChange={e => { setConfigData(p => ({ ...p, empresa: e.target.value })); setHasUnsavedChanges(true); }}
+                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
+              >
+                <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
+                <option value="BRP Engenharia">BRP Engenharia</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-bold text-slate-800 mb-1">Orçamentista / Responsável</label>
+              <input type="text" value={configData.responsavel || ''} 
+                onFocus={e => e.target.select()}
+                onChange={e => { setConfigData(p => ({ ...p, responsavel: e.target.value })); setHasUnsavedChanges(true); }}
+                placeholder="Nome do responsável"
+                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
+            </div>
             <div>
               <label className="block text-xs font-bold text-slate-800 mb-1">Nome do Orçamento</label>
               <input type="text" value={configData.nome} 
@@ -3873,7 +4272,7 @@ export default function OrcamentoBuilder() {
       )}
 
       {/* ── Sub-Abas do Orçamento (Planilha Orçamentária vs Memória de Cálculo vs Distribuição de Equipe) ── */}
-      <div className="flex items-center space-x-2 border-b border-slate-200 pb-2 overflow-x-auto">
+      <div className="shrink-0 flex items-center space-x-2 border-b border-slate-200 pb-2 overflow-x-auto">
         <button
           onClick={() => setActiveSubTab('planilha')}
           className={clsx(
@@ -3923,6 +4322,7 @@ export default function OrcamentoBuilder() {
       </div>
 
       {activeSubTab === 'memoria_calculo' ? (
+        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
         <DocumentoMemorialOficial
           highlightedEap={highlightedEap}
           header={{
@@ -3959,55 +4359,70 @@ export default function OrcamentoBuilder() {
               setHasUnsavedChanges(true);
             }
           }}
-          itens={computedItens.map((i: any) => {
-            const eapClean = (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-            const eapParts = eapClean.split('.').filter(Boolean);
+          itens={computedItens
+            .filter((i: any) => {
+              const hasDesc = Boolean(i.descricao && String(i.descricao).trim() !== '');
+              const hasCode = Boolean(i.codigo || i.banco_fonte);
+              const hasQty = Boolean(i.quantidade && parseFloat(i.quantidade) > 0);
+              const hasForm = Boolean(i.equacaoLiteral || i.equacao_literal || i.substituicaoNumerica || i.substituicao_numerica);
+              const isSec = Boolean(i.isSecao || i.is_secao || i.isTextLine);
+              const isChild = Boolean(i.isChildInsumoOfComposition || i.is_child_insumo);
 
-            const isExplicitChildInsumoOrSubComp = Boolean(
-              i.composicao_id ||
-              i.parentCompositionId ||
-              i.isChildInsumoOfComposition
-            );
+              if (isChild && !hasDesc) return false;
+              if (!isSec && !hasDesc && !hasCode && !hasQty && !hasForm) return false;
+              return true;
+            })
+            .map((i: any) => {
+              const eapClean = (i.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+              const eapParts = eapClean.split('.').filter(Boolean);
 
-            let isSecao = false;
-            if (isExplicitChildInsumoOrSubComp) {
-              isSecao = false;
-            } else if (i.descricao && (i.descricao.toUpperCase().trim() === 'SAPATAS' || i.descricao.toUpperCase().trim() === 'ESTACAS')) {
-              isSecao = true;
-            } else if (i.isSecao === false || i.is_secao === false) {
-              isSecao = false;
-            } else if (i.isSecao === true || i.is_secao === true || Boolean((i as any).isTextLine)) {
-              isSecao = true;
-            } else if (!i.codigo && !i.banco_fonte && (eapParts.length <= 1 || eapClean.endsWith('.0'))) {
-              isSecao = true;
-            } else {
-              isSecao = false;
-            }
+              const isExplicitChildInsumoOrSubComp = Boolean(
+                i.composicao_id ||
+                i.parentCompositionId ||
+                (i as any).parent_composition_id ||
+                i.isChildInsumoOfComposition ||
+                (i as any).is_child_insumo
+              );
 
-            const level = i.level !== undefined ? i.level : (isSecao ? 0 : Math.max(1, eapParts.length - 1));
-            const isCollapsed = i.collapsed !== undefined ? i.collapsed : (collapsedEaps ? collapsedEaps.has(eapClean) : false);
+              const isTopLevelEapByPattern = eapParts.length === 1 && eapClean.length > 0;
+              const itemTipo = String(i.tipo || (i as any).tipo_item || '').toLowerCase();
+              const isSecaoByTipo = itemTipo === 'secao' || itemTipo === 'seção' || itemTipo === 'texto' || itemTipo === 'titulo' || itemTipo === 'título';
 
-            return {
-              id: i.id,
-              item_eap: i.item_eap,
-              descricao: i.descricao,
-              unidade: isSecao ? '' : (i.unidade || 'UN'),
-              quantidade: i.quantidade || 0,
-              isSecao: isSecao,
-              level: level,
-              collapsed: isCollapsed,
-              codigo: i.codigo || '',
-              banco_fonte: i.banco_fonte || '',
-              composicao_id: i.composicao_id || '',
-              isChildInsumoOfComposition: Boolean(i.isChildInsumoOfComposition),
-              parentCompositionId: i.parentCompositionId || '',
-              parametrosLocais: i.parametrosLocais || i.parametros_locais || [],
-              formulasLista: i.formulasLista || i.formulas_lista || [],
-              equacaoLiteral: i.equacaoLiteral || i.equacao_literal || '',
-              substituicaoNumerica: i.substituicaoNumerica || i.substituicao_numerica || '',
-              observacaoMemoria: i.observacaoMemoria || i.observacao_memoria || ''
-            };
-          })}
+              let isSecao = false;
+              if (isExplicitChildInsumoOrSubComp) {
+                isSecao = false;
+              } else if (i.isSecao === true || i.is_secao === true || Boolean((i as any).isTextLine) || isSecaoByTipo || isTopLevelEapByPattern) {
+                isSecao = true;
+              } else if (!i.codigo && !i.banco_fonte) {
+                isSecao = true;
+              } else {
+                isSecao = false;
+              }
+
+              const level = i.level !== undefined ? i.level : (isSecao ? 0 : Math.max(1, eapParts.length - 1));
+              const isCollapsed = i.collapsed !== undefined ? i.collapsed : (collapsedEaps ? collapsedEaps.has(eapClean) : false);
+
+              return {
+                id: i.id,
+                item_eap: i.item_eap,
+                descricao: i.descricao,
+                unidade: isSecao ? '' : (i.unidade || 'UN'),
+                quantidade: i.quantidade || 0,
+                isSecao: isSecao,
+                level: level,
+                collapsed: isCollapsed,
+                codigo: i.codigo || '',
+                banco_fonte: i.banco_fonte || '',
+                composicao_id: i.composicao_id || '',
+                isChildInsumoOfComposition: Boolean(i.isChildInsumoOfComposition),
+                parentCompositionId: i.parentCompositionId || '',
+                parametrosLocais: i.parametrosLocais || i.parametros_locais || [],
+                formulasLista: i.formulasLista || i.formulas_lista || [],
+                equacaoLiteral: i.equacaoLiteral || i.equacao_literal || '',
+                substituicaoNumerica: i.substituicaoNumerica || i.substituicao_numerica || '',
+                observacaoMemoria: i.observacaoMemoria || i.observacao_memoria || ''
+              };
+            })}
           onChangeItens={(newMemItens) => {
             const nextCollapsed = new Set<string>();
             newMemItens.forEach(mi => {
@@ -4086,7 +4501,9 @@ export default function OrcamentoBuilder() {
             setHasUnsavedChanges(true);
           }}
         />
+        </div>
       ) : activeSubTab === 'distribuicao_equipe' ? (
+        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
         <DistribuiçãoEquipeTab 
           orcamentoId={id} 
           itens={computedItens} 
@@ -4098,23 +4515,24 @@ export default function OrcamentoBuilder() {
             setHasUnsavedChanges(true);
           }}
         />
+        </div>
       ) : (
       /* ── Tabela Orçamentária ────────────────────────────────────────── */
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+      <div className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+        <div className="flex-1 overflow-auto min-h-0">
           <table className="w-max min-w-full border-collapse">
-            <thead>
-              <tr className="bg-slate-50 border-b border-slate-200 text-center text-xs font-bold text-slate-500 uppercase tracking-wider select-none">
+            <thead className="sticky top-0 z-20 bg-slate-200/90 shadow-2xs border-b border-slate-300">
+              <tr className="bg-slate-200/90 border-b border-slate-300 text-center text-xs font-bold text-slate-800 uppercase tracking-wider select-none sticky top-0 z-20">
                 {/* Item */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.item}px`, minWidth: `${colWidths.item}px`, maxWidth: `${colWidths.item}px` }}
                 >
                   <div className="flex items-center justify-center">
                     <span className="truncate w-full text-center">ITEM</span>
                     <div
                       onMouseDown={(e) => startColumnResize('item', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Item"
                     />
                   </div>
@@ -4122,14 +4540,14 @@ export default function OrcamentoBuilder() {
 
                 {/* Descrição */}
                 <th 
-                  className="border border-slate-200/80 px-4 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-4 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.descricao}px`, minWidth: `${colWidths.descricao}px`, maxWidth: `${colWidths.descricao}px` }}
                 >
                   <div className="flex items-center justify-center">
                     <span className="truncate w-full text-center">DESCRIÇÃO</span>
                     <div
                       onMouseDown={(e) => startColumnResize('descricao', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Descrição"
                     />
                   </div>
@@ -4137,14 +4555,14 @@ export default function OrcamentoBuilder() {
 
                 {/* Unidade */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.unidade}px`, minWidth: `${colWidths.unidade}px`, maxWidth: `${colWidths.unidade}px` }}
                 >
                   <div className="flex items-center justify-center">
                     <span className="truncate w-full text-center">UND.</span>
                     <div
                       onMouseDown={(e) => startColumnResize('unidade', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Unidade"
                     />
                   </div>
@@ -4152,14 +4570,14 @@ export default function OrcamentoBuilder() {
 
                 {/* Quantidade */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.quantidade}px`, minWidth: `${colWidths.quantidade}px`, maxWidth: `${colWidths.quantidade}px` }}
                 >
                   <div className="flex items-center justify-center">
                     <span className="truncate w-full text-center">QTDE.</span>
                     <div
                       onMouseDown={(e) => startColumnResize('quantidade', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Quantidade"
                     />
                   </div>
@@ -4167,16 +4585,16 @@ export default function OrcamentoBuilder() {
 
                 {/* Mat Unit */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.matUnit}px`, minWidth: `${colWidths.matUnit}px`, maxWidth: `${colWidths.matUnit}px` }}
                 >
                   <div className="flex items-center justify-center">
-                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
-                      MAT. UNIT<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-800">
+                      MAT. UNIT<br/><span className="text-[10px] text-slate-500 font-normal">(R$)</span>
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('matUnit', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4184,16 +4602,16 @@ export default function OrcamentoBuilder() {
 
                 {/* M.O Unit */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.moUnit}px`, minWidth: `${colWidths.moUnit}px`, maxWidth: `${colWidths.moUnit}px` }}
                 >
                   <div className="flex items-center justify-center">
-                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
-                      M.O. UNIT<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-800">
+                      M.O. UNIT<br/><span className="text-[10px] text-slate-500 font-normal">(R$)</span>
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('moUnit', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4201,16 +4619,16 @@ export default function OrcamentoBuilder() {
 
                 {/* Unit */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.unit}px`, minWidth: `${colWidths.unit}px`, maxWidth: `${colWidths.unit}px` }}
                 >
                   <div className="flex items-center justify-center">
-                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
-                      UNIT<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-800">
+                      UNIT<br/><span className="text-[10px] text-slate-500 font-normal">(R$)</span>
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('unit', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4218,16 +4636,16 @@ export default function OrcamentoBuilder() {
 
                 {/* Mat Total */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.matTotal}px`, minWidth: `${colWidths.matTotal}px`, maxWidth: `${colWidths.matTotal}px` }}
                 >
                   <div className="flex items-center justify-center">
-                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
-                      MAT. TOTAL<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-800">
+                      MAT. TOTAL<br/><span className="text-[10px] text-slate-500 font-normal">(R$)</span>
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('matTotal', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4235,16 +4653,16 @@ export default function OrcamentoBuilder() {
 
                 {/* M.O Total */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs text-slate-800"
                   style={{ width: `${colWidths.moTotal}px`, minWidth: `${colWidths.moTotal}px`, maxWidth: `${colWidths.moTotal}px` }}
                 >
                   <div className="flex items-center justify-center">
-                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-700">
-                      M.O. TOTAL<br/><span className="text-[10px] text-slate-400 font-normal">(R$)</span>
+                    <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-bold text-slate-800">
+                      M.O. TOTAL<br/><span className="text-[10px] text-slate-500 font-normal">(R$)</span>
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('moTotal', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-200/70 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4252,7 +4670,7 @@ export default function OrcamentoBuilder() {
 
                 {/* Total */}
                 <th 
-                  className="border border-slate-200/80 px-2 py-2 text-center relative"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-2 py-2.5 text-center relative shadow-2xs"
                   style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px`, maxWidth: `${colWidths.total}px` }}
                 >
                   <div className="flex items-center justify-center">
@@ -4264,13 +4682,13 @@ export default function OrcamentoBuilder() {
 
                 {/* Ações */}
                 <th 
-                  className="border border-slate-200/80 px-1 py-2 text-center relative w-12 min-w-[48px] max-w-[48px]"
+                  className="sticky top-0 z-20 bg-slate-200/90 border border-slate-300 px-1 py-2.5 text-center relative w-12 min-w-[48px] max-w-[48px] shadow-2xs"
                 >
-                  <span className="truncate w-full text-center text-[10px] font-bold text-slate-400">AÇÕES</span>
+                  <span className="truncate w-full text-center text-[10px] font-bold text-slate-500">AÇÕES</span>
                 </th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
+            <tbody className="divide-y divide-slate-300">
               {computedItens.length === 0 ? (
                 <tr>
                   <td colSpan={11} className="py-16 text-center text-slate-400 font-medium">
@@ -4335,7 +4753,7 @@ export default function OrcamentoBuilder() {
                         onClick={(e) => handleRowClick(index, e)}
                         style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '6px solid #d97706', transition: 'all 0.3s ease' } : {}}
                         className={clsx(
-                          "transition-all group select-none border-l-4",
+                          "transition-all group select-text border-l-4",
                           styles.rowBgClass,
                           isHighlighted ? "!bg-amber-200 !border-l-amber-600 text-amber-950 font-bold" : "",
                           selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
@@ -4356,7 +4774,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.item}px`, minWidth: `${colWidths.item}px`, maxWidth: `${colWidths.item}px` }}
                         className={clsx(
-                          "border border-slate-200/60 p-0 relative outline-none",
+                          "border border-slate-300 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 0 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                       >
@@ -4396,7 +4814,7 @@ export default function OrcamentoBuilder() {
                           }
                         }}
                         className={clsx(
-                          "border border-slate-200/60 p-0 relative align-middle outline-none",
+                          "border border-slate-300 p-0 relative align-middle outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 1 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                         style={{ width: `${colWidths.descricao}px`, minWidth: `${colWidths.descricao}px`, maxWidth: `${colWidths.descricao}px` }}
@@ -4424,9 +4842,10 @@ export default function OrcamentoBuilder() {
                               id={`cell-input-${index}-1`}
                               onFocus={() => handleInputFocus(index, 1)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
+                              onDoubleClick={(e) => handleSelectAllText(e)}
                               tabIndex={0}
                               className={clsx(
-                                "w-full bg-transparent pr-10 pl-1 py-2 outline-none break-words whitespace-normal leading-normal select-text",
+                                "w-full bg-transparent pr-10 pl-1 py-2 outline-none break-words whitespace-normal leading-normal select-text cursor-text",
                                 styles.textClass
                               )}
                               title={item.descricao}
@@ -4440,6 +4859,7 @@ export default function OrcamentoBuilder() {
                               value={item.descricao}
                               onFocus={() => handleInputFocus(index, 1)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
+                              onDoubleClick={(e) => (e.target as HTMLInputElement).select()}
                               onKeyDown={(e) => handleInputKeyDownInCell(e, index, 1)}
                               onChange={(e) => handleCellChange(index, 'descricao', e.target.value)}
                               className={clsx(
@@ -4493,7 +4913,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.unidade}px`, minWidth: `${colWidths.unidade}px`, maxWidth: `${colWidths.unidade}px` }}
                         className={clsx(
-                          "border border-slate-200/60 p-0 relative outline-none",
+                          "border border-slate-300 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 2 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                       >
@@ -4531,14 +4951,14 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.quantidade}px`, minWidth: `${colWidths.quantidade}px`, maxWidth: `${colWidths.quantidade}px` }}
                         className={clsx(
-                          "border border-slate-200/60 p-0 relative outline-none",
+                          "border border-slate-300 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 3 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
                           hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 ? "bg-rose-50/60 ring-1 ring-rose-400" : ""
                         )}
                       >
                         {/* Balão de alerta flutuante quando a quantidade está vazia/zerada */}
                         {hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 && (
-                          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-md shadow-xl flex items-center gap-1.5 z-40 whitespace-nowrap pointer-events-none animate-pulse">
+                          <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-md shadow-xl flex items-center gap-1.5 z-10 whitespace-nowrap pointer-events-none animate-pulse">
                             <div className="absolute -top-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-b-rose-600 w-0 h-0" />
                             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
                             <span>Preencha a quantidade!</span>
@@ -4680,7 +5100,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.matUnit}px`, minWidth: `${colWidths.matUnit}px`, maxWidth: `${colWidths.matUnit}px` }}
                         className={clsx(
-                          "border border-slate-200/60 p-0 relative outline-none",
+                          "border border-slate-300 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 4 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                       >
@@ -4717,7 +5137,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.moUnit}px`, minWidth: `${colWidths.moUnit}px`, maxWidth: `${colWidths.moUnit}px` }}
                         className={clsx(
-                          "border border-slate-200/60 p-0 relative outline-none",
+                          "border border-slate-300 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 5 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
                       >
@@ -4752,7 +5172,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.unit}px`, minWidth: `${colWidths.unit}px`, maxWidth: `${colWidths.unit}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-3 py-2 text-right tabular-nums relative outline-none",
+                          "border border-slate-300 px-3 py-2 text-right tabular-nums relative outline-none",
                           styles.textClass,
                           activeCell?.rowIndex === index && activeCell?.colIndex === 6 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
                         )}
@@ -4773,7 +5193,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.matTotal}px`, minWidth: `${colWidths.matTotal}px`, maxWidth: `${colWidths.matTotal}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
+                          "border border-slate-300 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
                           (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-900 text-[11px]" :
                           isCompActive ? "font-bold text-slate-800" :
                           item.hasChildren && hasValues ? "font-semibold text-slate-800" :
@@ -4797,7 +5217,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.moTotal}px`, minWidth: `${colWidths.moTotal}px`, maxWidth: `${colWidths.moTotal}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
+                          "border border-slate-300 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
                           (isSectionRow || item.isSummary) && hasValues ? "font-bold text-slate-900 text-[11px]" :
                           isCompActive ? "font-bold text-slate-800" :
                           item.hasChildren && hasValues ? "font-semibold text-slate-800" :
@@ -4821,7 +5241,7 @@ export default function OrcamentoBuilder() {
                         }}
                         style={{ width: `${colWidths.total}px`, minWidth: `${colWidths.total}px`, maxWidth: `${colWidths.total}px` }}
                         className={clsx(
-                          "border border-slate-200/60 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
+                          "border border-slate-300 px-1.5 py-2 text-right tabular-nums relative outline-none whitespace-nowrap overflow-hidden text-[11px]",
                           (isSectionRow || item.isSummary) && hasValues ? "font-extrabold text-blue-900 text-[11.5px]" :
                           isCompActive ? "font-bold text-blue-700" :
                           item.hasChildren && item.codigo && hasValues ? "font-semibold text-blue-600" :
@@ -4833,7 +5253,7 @@ export default function OrcamentoBuilder() {
                       </td>
 
                       {/* Remover Linha */}
-                      <td className="border border-slate-200/60 px-2 py-2 text-center">
+                      <td className="border border-slate-300 px-2 py-2 text-center">
                         <button 
                           onClick={() => handleRemoveRow(index)}
                           className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded transition-colors cursor-pointer opacity-0 group-hover:opacity-100"
@@ -4862,7 +5282,7 @@ export default function OrcamentoBuilder() {
         </div>
 
         {/* Rodapé Dinâmico */}
-        <div className="bg-slate-50 p-5 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-sm font-bold text-slate-700">
+        <div className="shrink-0 bg-slate-50 p-4 border-t border-slate-200 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 text-sm font-bold text-slate-700">
           <button 
             onClick={handleAddRow}
             className="border-2 border-dashed border-blue-300 hover:border-blue-600 text-blue-600 px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all cursor-pointer bg-white"
@@ -4907,7 +5327,7 @@ export default function OrcamentoBuilder() {
               Descartar
             </button>
             <button 
-              onClick={handleSavePlanilha}
+              onClick={() => handleSavePlanilha(true)}
               disabled={saving}
               className="px-4 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-bold transition-colors cursor-pointer flex items-center gap-1"
             >

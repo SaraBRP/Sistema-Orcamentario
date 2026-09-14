@@ -1,12 +1,15 @@
 const { createClient } = require('@supabase/supabase-js');
 const fs = require('fs');
 
-const supabaseUrl = 'https://omrnyzuzkbyklygthydo.supabase.co';
 const envContent = fs.readFileSync('.env', 'utf8');
 const lines = envContent.split('\n');
+let supabaseUrl = '';
 let key = '';
 lines.forEach(line => {
-  if (line.includes('VITE_SUPABASE_ANON_KEY')) {
+  if (line.startsWith('VITE_SUPABASE_URL=')) {
+    supabaseUrl = line.split('=')[1].trim().replace(/"/g, '').replace(/'/g, '');
+  }
+  if (line.startsWith('VITE_SUPABASE_ANON_KEY=')) {
     key = line.split('=')[1].trim().replace(/"/g, '').replace(/'/g, '');
   }
 });

@@ -9,7 +9,6 @@ import type {
   FormulaBibliotecaItem,
   ParametroLinhaItem
 } from '../../types/calculos';
-import { CATALOGO_CAMPOS_SISTEMA } from '../../types/calculos';
 import { BibliotecaFormulasModal } from './BibliotecaFormulasModal';
 import { getFormulasDisponiveis } from './GerenciadorFormulas';
 import { ModalSelecaoBancoMemoria, type ItemBancoSelecionado } from './ModalSelecaoBancoMemoria';
@@ -31,7 +30,7 @@ import { CroquiBloco } from './CroquiBloco';
 import { CroquiTubulao } from './CroquiTubulao';
 import { CroquiEstaca } from './CroquiEstaca';
 import { supabase } from '../../lib/supabase';
-import { getParametrosCadastrados } from '../../utils/parametrosStorage';
+import { getParametrosCadastrados, getListaParametrosRefSistema } from '../../utils/parametrosStorage';
 
 export const ESTADOS_BRASIL = [
   'AC', 'AL', 'AP', 'AM', 'BA', 'CE', 'DF', 'ES', 'GO', 'MA', 
@@ -258,32 +257,48 @@ export function recalcularEAPsMemoria(list: ItemMemoriaOficial[]): ItemMemoriaOf
   const counters: number[] = [];
   let prevLevel = 0;
 
-  return list.map((item, idx) => {
+  // Filtra insumos filhos órfãos/fantasmas sem descrição E linhas em branco residuais (sem descrição, sem código, sem quantidade e sem seção)
+  const listLimpa = list.filter(item => {
+    const hasDesc = Boolean(item.descricao && item.descricao.trim() !== '');
+    const hasCode = Boolean((item as any).codigo || (item as any).banco_fonte);
+    const hasQty = Boolean(item.quantidade && item.quantidade > 0);
+    const hasFormula = Boolean(item.equacaoLiteral || item.substituicaoNumerica || item.observacaoMemoria);
+    const isSecao = Boolean(item.isSecao || (item as any).is_secao || (item as any).isTextLine);
+
+    if (item.isChildInsumoOfComposition && !hasDesc) return false;
+    if (!isSecao && !hasDesc && !hasCode && !hasQty && !hasFormula) return false;
+    return true;
+  });
+
+  return listLimpa.map((item, idx) => {
     const isExplicitChild = Boolean(
       item.isChildInsumoOfComposition ||
       (item as any).composicao_id ||
-      (item as any).parentCompositionId
+      (item as any).parentCompositionId ||
+      (item as any).parent_composition_id
     );
 
-    const eapClean = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
-    const eapParts = eapClean.split('.').filter(Boolean);
+    const itemTipo = String((item as any).tipo || (item as any).tipo_item || '').toLowerCase();
+    const isSecaoByTipo = itemTipo === 'secao' || itemTipo === 'seção' || itemTipo === 'texto' || itemTipo === 'titulo' || itemTipo === 'título';
+
+    const itemEapClean = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+    const isTopLevelEapByPattern = itemEapClean.length > 0 && !itemEapClean.includes('.');
 
     let isSecaoClean = false;
     if (isExplicitChild) {
       isSecaoClean = false;
-    } else if (item.descricao && (item.descricao.toUpperCase().trim() === 'SAPATAS' || item.descricao.toUpperCase().trim() === 'ESTACAS')) {
+    } else if (item.isSecao === true || (item as any).is_secao === true || Boolean((item as any).isTextLine) || isSecaoByTipo) {
       isSecaoClean = true;
-    } else if (item.isSecao === false || (item as any).is_secao === false) {
-      isSecaoClean = false;
-    } else if (item.isSecao === true || (item as any).is_secao === true || Boolean((item as any).isTextLine)) {
+    } else if (isTopLevelEapByPattern) {
       isSecaoClean = true;
-    } else if (!(item as any).codigo && !(item as any).banco_fonte && (idx === 0 || eapParts.length <= 1 || eapClean.endsWith('.0'))) {
+    } else if (!(item as any).codigo && !(item as any).banco_fonte && !(item as any).composicao_id) {
       isSecaoClean = true;
     } else {
       isSecaoClean = false;
     }
+
     let rawLevel = item.level !== undefined ? item.level : (isSecaoClean ? 0 : 1);
-    if (idx === 0) {
+    if (isSecaoClean) {
       rawLevel = 0;
     }
 
@@ -585,6 +600,16 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   const [undoStack, setUndoStack] = useState<ItemMemoriaOficial[][]>([]);
   const [draftDesc, setDraftDesc] = useState('');
 
+  const handleSelectAllText = (e: React.MouseEvent<HTMLElement>) => {
+    e.stopPropagation();
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(e.currentTarget);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
   const generateUUID = () => {
     if (typeof crypto !== 'undefined' && crypto.randomUUID) {
       return crypto.randomUUID();
@@ -664,9 +689,9 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   }>>([]);
 
   const [novoGlobalNome, setNovoGlobalNome] = useState('');
-  const [novoGlobalTipo, setNovoGlobalTipo] = useState(CATALOGO_CAMPOS_SISTEMA[0]?.label || '');
+  const [novoGlobalTipo, setNovoGlobalTipo] = useState(() => getListaParametrosRefSistema()[0]?.label || '');
   const [novoGlobalValor, setNovoGlobalValor] = useState<number | ''>('');
-  const [novoGlobalUnidade, setNovoGlobalUnidade] = useState(CATALOGO_CAMPOS_SISTEMA[0]?.unidade || 'm²');
+  const [novoGlobalUnidade, setNovoGlobalUnidade] = useState(() => getListaParametrosRefSistema()[0]?.unidade || 'm²');
   const [novoGlobalItemId, setNovoGlobalItemId] = useState('');
   const [editingGlobalIndex, setEditingGlobalIndex] = useState<number | null>(null);
   const [selectedGlobalParamIndex, setSelectedGlobalParamIndex] = useState<number>(0);
@@ -1294,7 +1319,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     }
 
     // 3. Catálogo Oficial de Campos do Sistema
-    CATALOGO_CAMPOS_SISTEMA.forEach(campo => {
+    getListaParametrosRefSistema().forEach(campo => {
       if (campo.chave !== 'personalizado') {
         list.push({
           key: campo.chave,
@@ -1708,15 +1733,30 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     }
   };
 
-  // Escuta global para atalhos no documento (Ctrl+Z, Insert para nova seção, Alt+Shift+Setas para recuo)
+  // Escuta global para atalhos no documento (Ctrl+Z, Delete para excluir linhas, Insert para nova seção, Alt+Shift+Setas para recuo)
   useEffect(() => {
     const handleGlobalKeyDown = (e: KeyboardEvent) => {
       if (readonly || showBancoModal || showBibliotecaModal || editingItemModal || paramEditorIndex !== null) return;
+
+      const activeEl = document.activeElement;
+      const isTyping = activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        (activeEl as HTMLElement).isContentEditable
+      );
 
       if ((e.ctrlKey || e.metaKey) && (e.key === 'z' || e.key === 'Z')) {
         e.preventDefault();
         handleUndo();
         return;
+      }
+
+      if (e.key === 'Delete' || e.code === 'Delete') {
+        if (!isTyping) {
+          e.preventDefault();
+          handleRemoveSelectedRows();
+          return;
+        }
       }
 
       if (e.altKey && e.shiftKey) {
@@ -1904,6 +1944,35 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     const novaLista = recalcularEAPsMemoria(copia);
     onChangeItens(novaLista);
     setSelectedRowIndex(targetIndex);
+  };
+
+
+
+  // Excluir todas as linhas selecionadas (ou a linha ativa) e suas filhas
+  const handleRemoveSelectedRows = () => {
+    let targets = Array.from(selectedRowIndices);
+    if (targets.length === 0 && selectedRowIndex !== null) {
+      targets.push(selectedRowIndex);
+    }
+    if (targets.length === 0) return;
+
+    pushUndoSnapshot(itens);
+    const copia = [...itens];
+
+    // Ordena os índices em ordem decrescente para remoção limpa sem alterar o índice das anteriores
+    targets.sort((a, b) => b - a);
+
+    targets.forEach(index => {
+      if (index < 0 || index >= copia.length) return;
+      const numFilhos = contarItensFilhos(index, copia);
+      const blockSize = numFilhos + 1;
+      copia.splice(index, blockSize);
+    });
+
+    const novaLista = recalcularEAPsMemoria(copia);
+    onChangeItens(novaLista);
+    setSelectedRowIndex(null);
+    setSelectedRowIndices(new Set());
   };
 
 
@@ -3304,7 +3373,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     const atual = [...(header.dadosComplementares || [])];
     const item = { ...atual[index], [campo]: val };
     if (campo === 'parametroNome') {
-      const found = CATALOGO_CAMPOS_SISTEMA.find(c => c.label === val);
+      const found = getListaParametrosRefSistema().find(c => c.label === val);
       if (found) item.unidade = found.unidade;
     }
     atual[index] = item;
@@ -3423,14 +3492,14 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                       onChange={(e) => {
                         const val = e.target.value;
                         setNovoGlobalTipo(val);
-                        const found = CATALOGO_CAMPOS_SISTEMA.find(c => c.label === val);
+                        const found = getListaParametrosRefSistema().find(c => c.label === val);
                         if (found) setNovoGlobalUnidade(found.unidade);
                       }}
                       className="w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 bg-white font-medium text-slate-800"
                     >
-                      {CATALOGO_CAMPOS_SISTEMA.map(c => (
+                      {getListaParametrosRefSistema().map(c => (
                         <option key={c.chave} value={c.label}>
-                          {c.label} ({c.unidade})
+                          {c.label} {c.unidade ? `(${c.unidade})` : ''}
                         </option>
                       ))}
                     </select>
@@ -3667,11 +3736,11 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                           <td className="p-2.5 text-slate-600 font-medium">
                             {isEditingThisRow && !readonly ? (
                               <select
-                                value={dc.parametroNome || CATALOGO_CAMPOS_SISTEMA[0]?.label}
+                                value={dc.parametroNome || getListaParametrosRefSistema()[0]?.label}
                                 onChange={(e) => handleUpdateDadoComplementar(idx, 'parametroNome', e.target.value)}
                                 className="w-full px-2 py-1 border border-blue-400 bg-white rounded text-xs font-medium text-slate-700 outline-none shadow-2xs"
                               >
-                                {CATALOGO_CAMPOS_SISTEMA.map(c => (
+                                {getListaParametrosRefSistema().map(c => (
                                   <option key={c.chave} value={c.label}>{c.label}</option>
                                 ))}
                               </select>
@@ -3890,14 +3959,35 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                     return null;
                   }
 
+                  const isExplicitChild = Boolean(
+                    item.isChildInsumoOfComposition ||
+                    (item as any).parentCompositionId ||
+                    (item as any).parent_composition_id ||
+                    (item as any).composicao_id
+                  );
+
+                  const itemEapClean = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+                  const isTopLevelEapByPattern = itemEapClean.length > 0 && !itemEapClean.includes('.');
+                  const itemTipo = String((item as any).tipo || (item as any).tipo_item || '').toLowerCase();
+                  const isSecaoByTipo = itemTipo === 'secao' || itemTipo === 'seção' || itemTipo === 'texto' || itemTipo === 'titulo' || itemTipo === 'título';
+
+                  const isSecaoRow = !isExplicitChild && Boolean(
+                    item.isSecao || 
+                    (item as any).is_secao || 
+                    Boolean((item as any).isTextLine) ||
+                    isSecaoByTipo ||
+                    isTopLevelEapByPattern ||
+                    (!(item as any).codigo && !(item as any).banco_fonte)
+                  );
+
                   const level = item.level !== undefined 
                     ? item.level 
-                    : (item.isSecao ? 0 : (item.item_eap ? Math.max(1, item.item_eap.split('.').length - 1) : 1));
+                    : (isSecaoRow ? 0 : (item.item_eap ? Math.max(1, item.item_eap.split('.').length - 1) : 1));
                   const indentPx = level === 0 ? 0 : level * 20;
                   const numFilhos = contarItensFilhos(index, itens);
                   const isParent = numFilhos > 0;
 
-                  if (item.isSecao) {
+                  if (isSecaoRow) {
                     return (
                       <tr 
                         key={item.id || index} 
@@ -3953,7 +4043,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                 </button>
                               )}
                               {readonly ? (
-                                <span className="font-bold text-slate-900 uppercase truncate">{item.descricao || 'SEÇÃO'}</span>
+                                <span className="font-bold text-slate-900 text-[11px] uppercase truncate">{item.descricao || 'SEÇÃO'}</span>
                               ) : (
                                 <div className="relative flex-1 flex items-center group/desc">
                                   <input
@@ -3968,7 +4058,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                       copia[index].descricao = e.target.value;
                                       onChangeItens(copia);
                                     }}
-                                    className="w-full bg-transparent font-bold text-slate-900 outline-none uppercase focus:bg-white focus:ring-2 focus:ring-blue-500/30 rounded px-1.5 py-0.5 pr-7 placeholder:lowercase placeholder:font-normal placeholder:italic placeholder:text-slate-400"
+                                    className="w-full bg-transparent font-bold text-slate-900 text-[11px] outline-none uppercase focus:bg-white focus:ring-2 focus:ring-blue-500/30 rounded px-1.5 py-0.5 pr-7 placeholder:lowercase placeholder:font-normal placeholder:italic placeholder:text-slate-400"
                                   />
                                   {!readonly && (
                                     <button
@@ -3993,7 +4083,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                         {/* MEMÓRIA DE CÁLCULO E PARÂMETROS DA LINHA DE SEÇÃO (TRANSCRIÇÃO PROFISSIONAL) */}
                         <td className="py-2.5 px-4 border-r border-slate-200 align-middle">
                           <div className="flex items-center gap-2">
-                            {!readonly && item.isSecao && item.descricao.trim().length > 0 && (
+                            {!readonly && isSecaoRow && (
                               <>
                                 <button
                                   type="button"
@@ -4159,11 +4249,15 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                               if (readonly || !isEditableTextLine) {
                                 return (
                                   <div className="flex-1 flex items-center justify-between min-w-0 pr-6">
-                                    <span className={
-                                      isChildRow
-                                        ? "font-normal text-slate-600 text-[11px] leading-snug select-text truncate"
-                                        : "font-semibold text-slate-900 text-xs leading-snug select-text uppercase truncate"
-                                    } title={item.descricao}>
+                                    <span
+                                      onDoubleClick={(e) => handleSelectAllText(e)}
+                                      className={
+                                        isChildRow
+                                          ? "font-normal text-slate-600 text-[10.5px] leading-snug select-text cursor-text truncate"
+                                          : "font-semibold text-slate-800 text-[11px] leading-snug select-text cursor-text uppercase truncate"
+                                      }
+                                      title={item.descricao}
+                                    >
                                       {item.descricao}
                                     </span>
                                     {!readonly && (
@@ -4190,6 +4284,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                   data-row={index}
                                   data-col={1}
                                   onKeyDown={(e) => handleCellKeyDown(e, index, 1)}
+                                  onDoubleClick={(e) => (e.target as HTMLInputElement).select()}
                                   value={item.descricao}
                                   placeholder="Digite a descrição do serviço de texto..."
                                   onChange={(e) => {
@@ -4199,8 +4294,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                   }}
                                   className={`w-full bg-transparent outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/30 rounded px-1.5 py-0.5 pr-7 ${
                                     isChildRow
-                                      ? "font-normal text-slate-500 text-[11px] leading-snug placeholder:font-normal placeholder:italic placeholder:text-slate-400"
-                                      : "font-bold text-slate-900 text-xs leading-snug uppercase placeholder:lowercase placeholder:font-normal placeholder:italic placeholder:text-slate-400"
+                                      ? "font-normal text-slate-500 text-[10.5px] leading-snug placeholder:font-normal placeholder:italic placeholder:text-slate-400"
+                                      : "font-bold text-slate-800 text-[11px] leading-snug uppercase placeholder:lowercase placeholder:font-normal placeholder:italic placeholder:text-slate-400"
                                   }`}
                                 />
                               );
@@ -4320,7 +4415,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
 
                       {/* MEMÓRIA DE CÁLCULO PASSO A PASSO / FÓRMULA VINCULADA À LINHA */}
                       {(() => {
-                        if (item.isSecao) {
+                        if (isSecaoRow) {
                           return (
                             <td className="py-2 px-5 text-slate-400 italic text-[11px] border-r border-slate-200">
                               Linha de Seção / Título
@@ -4346,7 +4441,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                 ) : null}
                               </div>
 
-                              <div className="flex items-center gap-1 shrink-0">
+                              <div className="flex items-center gap-1.5 shrink-0">
                                 {temFormula && !readonly && (
                                   <button
                                     type="button"
@@ -4362,7 +4457,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                   </button>
                                 )}
 
-                                 {/* Botão Acessar Memorial removido das composições e insumos conforme solicitado */}
+                                {/* Botões Calcular e Acessar Memorial disponíveis apenas nas Linhas de Texto (Seção/Título) */}
                               </div>
                             </div>
                           </td>
@@ -5807,7 +5902,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                         value={newParamData.chave || ''}
                         onChange={(e) => {
                           const selectedChave = e.target.value;
-                          const campo = CATALOGO_CAMPOS_SISTEMA.find(c => c.chave === selectedChave);
+                          const campo = getListaParametrosRefSistema().find(c => c.chave === selectedChave);
                           if (campo) {
                             if (campo.chave === 'personalizado') {
                               setNewParamData({ label: '', chave: 'personalizado', valor: newParamData.valor, unidade: '', categoria: 'Geral' });
@@ -5819,9 +5914,9 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                         className="w-full px-2.5 py-1.5 border border-slate-300 rounded-xl text-xs font-semibold text-slate-900 outline-none focus:border-blue-500 bg-white cursor-pointer"
                       >
                         <option value="">-- Escolha um Campo do Catálogo --</option>
-                        {Array.from(new Set(CATALOGO_CAMPOS_SISTEMA.map(c => c.categoria))).map(cat => (
+                        {Array.from(new Set(getListaParametrosRefSistema().map(c => c.categoria))).map(cat => (
                           <optgroup key={cat} label={cat} className="font-bold text-slate-800">
-                            {CATALOGO_CAMPOS_SISTEMA.filter(c => c.categoria === cat).map(c => (
+                            {getListaParametrosRefSistema().filter(c => c.categoria === cat).map(c => (
                               <option key={c.chave} value={c.chave} className="font-medium text-slate-900">
                                 {c.label} {c.unidade ? `(${c.unidade})` : ''}
                               </option>

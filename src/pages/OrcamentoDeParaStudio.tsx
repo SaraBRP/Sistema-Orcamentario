@@ -1,9 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 // Studio De-Para Exclusivo Banco Próprio com Botão Único "+ Vincular" e Insumos da Composição Linha a Linha
 import { useParams, useNavigate, useOutletContext } from 'react-router-dom';
 import { supabase } from '../lib/supabase';
 import { generateOfficialOrcamentoCode } from '../lib/orcamentoCodeGenerator';
-import * as XLSX from 'xlsx';
+import { exportarPlanilhaClientePreenchida } from '../lib/excelExporter';
+import { calculateImportadoProgressStats, hasDirectDesdobrados } from '../lib/importadoProgress';
+import { ClienteSelect } from '../components/ClienteSelect';
+import { getUsuariosCadastrados } from '../lib/usuarios';
 import { 
   ArrowLeft, Search, Plus, Trash2, CheckCircle2, 
   Layers, Package, ArrowRight, RefreshCw, Calculator, FileSpreadsheet, X,
@@ -65,24 +68,20 @@ const sortEap = (a: string, b: string) => {
 const isDesdobradoEap = (itemEap: string, allItems: ImportadoItem[]) => {
   const parts = (itemEap || '').split('.');
   if (parts.length <= 1) return false;
-  for (let i = 1; i < parts.length; i++) {
-    const ancestorEap = parts.slice(0, i).join('.');
-    const ancestor = allItems.find(it => it.item_eap === ancestorEap);
-    if (ancestor && ancestor.composicao_id) {
-      return true;
-    }
+  const directParentEap = parts.slice(0, -1).join('.');
+  const directParent = allItems.find(it => it.item_eap === directParentEap);
+  if (directParent && (directParent.composicao_id || directParent.composicao)) {
+    return true;
   }
   return false;
 };
 
 const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
   const copy = list.map(item => ({ ...item }));
-  let sectionSeq = 0;
-  let compSeq = 0;
-  let childSeq = 0;
-
-  let currentSectionEap = '1';
-  let currentParentEap = '1.1';
+  let counters: number[] = [];
+  let currentParentEap = '1';
+  let desdobradoSeq = 0;
+  let lastHeaderLevel = 1;
 
   for (let i = 0; i < copy.length; i++) {
     const item = copy[i];
@@ -90,39 +89,69 @@ const rebuildStudioEaps = (list: ImportadoItem[]): ImportadoItem[] => {
 
     const isDesdobrado = item.status_linha === 'desdobrado';
 
-    // 1. Sub-item constituinte de composição (ex: 2.1.1, 2.1.2)
+    // 1. Sub-item constituinte de composição (ex: 2.1.1.1, 2.1.1.2)
     if (isDesdobrado) {
-      childSeq++;
-      item.item_eap = `${currentParentEap}.${childSeq}`;
+      desdobradoSeq++;
+      item.item_eap = `${currentParentEap}.${desdobradoSeq}`;
+      const desdobradoDepth = (item.item_eap || '').split('.').length - 1;
+      counters[desdobradoDepth] = desdobradoSeq;
       continue;
     }
 
-    // 2. Título de Seção/Capítulo Nível 1 (ex: 1, 2, 3, 4)
+    desdobradoSeq = 0;
+
     const origParts = (item.item_eap || '').split('.').filter(Boolean);
-    const isExplicitSection = (
-      (origParts.length === 1 && (!item.quantidade || item.quantidade === 0) && item.status_linha !== 'inserido_empresa') ||
-      item.tipo_vinculo === 'secao' ||
-      (item.status_linha === 'inserido_empresa' && (!item.quantidade || item.quantidade === 0))
+    const isSectionHeader = (
+      (!item.quantidade || item.quantidade === 0) && 
+      !item.composicao_id && 
+      !item.insumo_id &&
+      item.status_linha !== 'desdobrado'
     );
 
-    if (isExplicitSection) {
-      sectionSeq++;
-      compSeq = 0;
-      childSeq = 0;
-      item.item_eap = String(sectionSeq);
-      currentSectionEap = item.item_eap;
-      currentParentEap = item.item_eap;
-    } else {
-      // 3. Item Operacional Principal do Cliente/Empresa (ex: 1.1, 1.2, 1.3, 2.1, 2.2, 2.3...)
-      if (sectionSeq === 0) {
-        sectionSeq = 1;
-        currentSectionEap = '1';
+    let targetLevel = (item as any).level;
+    if (targetLevel === undefined || targetLevel === null) {
+      if (isSectionHeader) {
+        targetLevel = origParts.length > 0 ? origParts.length : 1;
+        lastHeaderLevel = targetLevel;
+      } else {
+        // Item operacional
+        if (origParts.length > 0) {
+          if (origParts.length <= lastHeaderLevel) {
+            targetLevel = lastHeaderLevel + 1;
+          } else {
+            targetLevel = origParts.length;
+          }
+        } else {
+          targetLevel = lastHeaderLevel + 1;
+        }
       }
-      compSeq++;
-      childSeq = 0;
-      item.item_eap = `${currentSectionEap}.${compSeq}`;
-      currentParentEap = item.item_eap;
     }
+
+    targetLevel = Math.max(1, targetLevel);
+    const depth = targetLevel - 1;
+
+    // Descarta níveis mais profundos se subiu na árvore EAP
+    if (counters.length > depth + 1) {
+      counters = counters.slice(0, depth + 1);
+    }
+
+    // Garante que níveis superiores existam
+    for (let d = 0; d < depth; d++) {
+      if (!counters[d] || counters[d] <= 0) {
+        counters[d] = 1;
+      }
+    }
+
+    // Incrementa ou inicializa o contador do nível atual
+    if (!counters[depth] || counters[depth] <= 0) {
+      counters[depth] = 1;
+    } else {
+      counters[depth]++;
+    }
+
+    const newEap = counters.join('.');
+    item.item_eap = newEap;
+    currentParentEap = newEap;
   }
 
   return copy;
@@ -237,6 +266,69 @@ export default function OrcamentoDeParaStudio() {
   const [selectedRowIndexes, setSelectedRowIndexes] = useState<Set<number>>(new Set());
   const [lastClickedRowIndex, setLastClickedRowIndex] = useState<number | null>(null);
   const [existingOrcamento, setExistingOrcamento] = useState<any>(null);
+  const [syncingOrcamento, setSyncingOrcamento] = useState(false);
+
+  // Estados do Modal "Novo Orçamento da Empresa"
+  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
+  const [isSubmittingModal, setIsSubmittingModal] = useState(false);
+  const [usuariosCadastrados, setUsuariosCadastrados] = useState<any[]>([]);
+  const [newOrcamentoData, setNewOrcamentoData] = useState({
+    codigo: '',
+    empresa: 'BRP Soluções Metálicas',
+    projeto: '',
+    cliente: '',
+    gestor_cliente: '',
+    responsavel: '',
+    cidade: '',
+    estado: 'GO'
+  });
+
+  // Controle de visibilidade das colunas detalhadas da empresa (Qtd, Mat Unit, MO Unit, Valor Unit, Mat Total, MO Total)
+  const [showEmpresaDetails, setShowEmpresaDetails] = useState(true);
+
+  const [exibirBdi, setExibirBdi] = useState(false);
+
+  const toolbarRef = useRef<HTMLDivElement>(null);
+  const [toolbarHeight, setToolbarHeight] = useState<number>(58);
+
+  useEffect(() => {
+    if (!toolbarRef.current) return;
+    const observer = new ResizeObserver(() => {
+      if (toolbarRef.current) {
+        setToolbarHeight(toolbarRef.current.offsetHeight);
+      }
+    });
+    observer.observe(toolbarRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const bdiFactor = (() => {
+    if (existingOrcamento) {
+      const ac = Number(existingOrcamento.bdi_ac || 0);
+      const s = Number(existingOrcamento.bdi_s || 0);
+      const g = Number(existingOrcamento.bdi_g || 0);
+      const r = Number(existingOrcamento.bdi_r || 0);
+      const df = Number(existingOrcamento.bdi_df || 0);
+      const l = Number(existingOrcamento.bdi_l || 0);
+      const i = Number(existingOrcamento.bdi_i || 0);
+
+      const num = (1 + ac + s + r + g) * (1 + df) * (1 + l);
+      const den = 1 - i;
+      if (den > 0 && num / den > 1) {
+        return num / den;
+      }
+    }
+
+    for (const item of items) {
+      const uNoBdi = Number(item.valor_unitario_empresa || 0);
+      const uWithBdi = Number((item as any).valor_unitario_com_bdi || 0);
+      if (uNoBdi > 0 && uWithBdi > 0 && uWithBdi > uNoBdi) {
+        return uWithBdi / uNoBdi;
+      }
+    }
+
+    return 1.285455;
+  })();
 
   // Estado para largura ajustável das colunas
   const [colWidths, setColWidths] = useState<Record<string, number>>({
@@ -251,6 +343,7 @@ export default function OrcamentoDeParaStudio() {
     mo_total: 100,
     preco_cliente: 110,
     ref_empresa: 420,
+    qtd_empresa: 60,
     mat_unit_empresa: 100,
     mo_unit_empresa: 100,
     unit_total_empresa: 100,
@@ -288,6 +381,34 @@ export default function OrcamentoDeParaStudio() {
   const showMatTotal = !!importHeader?.config_mapeamento?.colMatTotal;
   const showMoTotal = !!importHeader?.config_mapeamento?.colMoTotal;
 
+  const calculatedTableWidth = useMemo(() => {
+    let total = (colWidths.eap || 70) + 
+                (colWidths.item_cliente || 420) + 
+                (colWidths.und || 50) + 
+                (colWidths.qtd || 60) + 
+                (colWidths.preco_cliente || 110) + 
+                (colWidths.ref_empresa || 420) + 
+                (colWidths.acoes || 110) + 
+                (colWidths.preco_empresa || 110);
+
+    if (showMatUnit) total += (colWidths.mat_unit || 100);
+    if (showMoUnit) total += (colWidths.mo_unit || 100);
+    if (showUnitTotal) total += (colWidths.unit_total || 100);
+    if (showMatTotal) total += (colWidths.mat_total || 100);
+    if (showMoTotal) total += (colWidths.mo_total || 100);
+
+    if (showEmpresaDetails) {
+      total += (colWidths.qtd_empresa || 60) +
+               (colWidths.mat_unit_empresa || 100) +
+               (colWidths.mo_unit_empresa || 100) +
+               (colWidths.unit_total_empresa || 100) +
+               (colWidths.mat_total_empresa || 100) +
+               (colWidths.mo_total_empresa || 100);
+    }
+
+    return total;
+  }, [colWidths, showMatUnit, showMoUnit, showUnitTotal, showMatTotal, showMoTotal, showEmpresaDetails]);
+
   const getCompanyBreakdown = (item: ImportadoItem) => {
     const isDescendant = (parentEap: string, childEap: string) => {
       if (!parentEap || !childEap || parentEap === childEap) return false;
@@ -295,56 +416,97 @@ export default function OrcamentoDeParaStudio() {
     };
 
     const isMo = (ins: any) => {
-      return ins?.tipo === 'Mão de Obra';
+      if (!ins) return false;
+      const t = String(ins.tipo || ins.tipo_insumo || ins.grupo || '').toLowerCase();
+      return t.includes('mão') || t.includes('mao') || t.includes('serviço') || t.includes('servico') || t.includes('mo');
     };
 
+    const getChildrenCount = (eap: string) => {
+      if (!eap) return 0;
+      const prefix = eap.trim() + '.';
+      return items.filter(i => (i.item_eap || '').trim().startsWith(prefix)).length;
+    };
+
+    const factor = exibirBdi ? bdiFactor : 1;
+
     // Se for insumo isolado na árvore
-    if (item.insumo_id && !getDirectChildren(item.item_eap).length) {
+    if (item.insumo_id && !getChildrenCount(item.item_eap)) {
       const isMoType = isMo(item.insumo);
-      const valUnit = item.valor_unitario_empresa || 0;
-      const valTotal = item.total_empresa || 0;
+      const valUnit = item.valor_unitario_empresa || parseFloat(item.insumo?.valor || item.insumo?.valor_nao_desonerado || 0);
+      const qty = item.quantidade || 1;
+      const valTotal = item.total_empresa || (valUnit * qty);
+      const matU = isMoType ? 0 : valUnit;
+      const moU = isMoType ? valUnit : 0;
+      const matT = isMoType ? 0 : valTotal;
+      const moT = isMoType ? valTotal : 0;
       return {
-        matUnit: isMoType ? 0 : valUnit,
-        moUnit: isMoType ? valUnit : 0,
-        unitTotal: valUnit,
-        matTotal: isMoType ? 0 : valTotal,
-        moTotal: isMoType ? valTotal : 0
+        matUnit: matU * factor,
+        moUnit: moU * factor,
+        unitTotal: valUnit * factor,
+        matTotal: matT * factor,
+        moTotal: moT * factor,
+        total: valTotal * factor
       };
     }
 
     const descendants = items.filter(it => it.status_linha !== 'inativo' && isDescendant(item.item_eap, it.item_eap));
-    const leafInsumos = descendants.filter(it => it.insumo_id && !getDirectChildren(it.item_eap).length);
+    const leafInsumos = descendants.filter(it => (it.status_linha === 'desdobrado' || it.insumo_id) && !getChildrenCount(it.item_eap));
 
     let matTotal = 0;
     let moTotal = 0;
 
     if (leafInsumos.length > 0) {
       leafInsumos.forEach(it => {
-        if (isMo(it.insumo)) {
-          moTotal += (it.total_empresa || 0);
+        const itTotal = it.total_empresa || ((it.valor_unitario_empresa || 0) * (it.quantidade || 1));
+        if (isMo(it.insumo || it.composicao)) {
+          moTotal += itTotal;
         } else {
-          matTotal += (it.total_empresa || 0);
+          matTotal += itTotal;
+        }
+      });
+    } else if (descendants.length > 0) {
+      descendants.forEach(it => {
+        if (!getChildrenCount(it.item_eap) && it.status_linha !== 'desdobrado') {
+          const bd = getCompanyBreakdown(it);
+          const rawFactor = (exibirBdi && bdiFactor > 0) ? bdiFactor : 1;
+          matTotal += bd.matTotal / rawFactor;
+          moTotal += bd.moTotal / rawFactor;
         }
       });
     } else {
-      const isMoType = isMo(item.insumo || item.composicao);
-      const valTotal = item.total_empresa || 0;
-      if (isMoType) {
-        moTotal = valTotal;
+      const comp = item.composicao;
+      const rawCduMat = comp?.mat_sem_desoneracao ?? comp?.custo_material ?? (item as any).valor_unitario_mat_empresa;
+      const rawCduMo  = comp?.mo_sem_desoneracao ?? comp?.custo_mo ?? (item as any).valor_unitario_mo_empresa;
+      const qty = item.quantidade || 1;
+      const valTotal = item.total_empresa || ((item.valor_unitario_empresa || 0) * qty);
+
+      const matU = parseFloat(rawCduMat || 0);
+      const moU  = parseFloat(rawCduMo || 0);
+
+      if (matU > 0 || moU > 0) {
+        matTotal = matU * qty;
+        moTotal  = moU * qty;
       } else {
-        matTotal = valTotal;
+        const isMoType = isMo(item.insumo || item.composicao);
+        if (isMoType) {
+          moTotal = valTotal;
+        } else {
+          matTotal = valTotal;
+        }
       }
     }
 
-    const unitTotal = item.valor_unitario_empresa || 0;
-    const qty = item.quantidade || 1;
-    
+    const qty = (item.quantidade && item.quantidade > 0) ? item.quantidade : 1;
+    const rawUnitTotal = item.valor_unitario_empresa || ((matTotal + moTotal) / qty);
+    const rawTotal = (matTotal + moTotal) > 0 ? (matTotal + moTotal) : (item.total_empresa || (rawUnitTotal * qty));
+
     return {
-      matUnit: matTotal / qty,
-      moUnit: moTotal / qty,
-      unitTotal: unitTotal,
-      matTotal: matTotal,
-      moTotal: moTotal
+      matUnit: (matTotal / qty) * factor,
+      moUnit: (moTotal / qty) * factor,
+      unitTotal: rawUnitTotal * factor,
+      matTotal: matTotal * factor,
+      moTotal: moTotal * factor,
+      total: rawTotal * factor
     };
   };
 
@@ -447,6 +609,7 @@ export default function OrcamentoDeParaStudio() {
   const [searchTerm, setSearchTerm] = useState('');
   const [searchResults, setSearchResults] = useState<any[]>([]);
   const [loadingSearch, setLoadingSearch] = useState(false);
+  const [isLinking, setIsLinking] = useState(false);
 
   // Modal de edição de Texto Customizado / Título da Seção
   const [editingCustomItem, setEditingCustomItem] = useState<ImportadoItem | null>(null);
@@ -456,12 +619,21 @@ export default function OrcamentoDeParaStudio() {
   const [inlineEditingRowId, setInlineEditingRowId] = useState<string | null>(null);
   const [inlineTextValue, setInlineTextValue] = useState<string>('');
 
+  const handleSelectAllText = (e: React.MouseEvent<HTMLElement>) => {
+    const selection = window.getSelection();
+    if (!selection) return;
+    const range = document.createRange();
+    range.selectNodeContents(e.currentTarget);
+    selection.removeAllRanges();
+    selection.addRange(range);
+  };
+
   const getCompanyText = (item: ImportadoItem): string | null => {
-    if (item.texto_empresa !== undefined && item.texto_empresa !== null) {
+    if (item.texto_empresa !== undefined && item.texto_empresa !== null && String(item.texto_empresa).trim() !== '') {
       return item.texto_empresa;
     }
-    if (item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente') {
-      return item.descricao || null;
+    if ((item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente') && item.descricao && String(item.descricao).trim() !== '' && item.descricao !== 'Nova Linha Inserida') {
+      return item.descricao;
     }
     return null;
   };
@@ -475,12 +647,10 @@ export default function OrcamentoDeParaStudio() {
       const oldStatus = targetItem.status_linha;
       const finalStatus = (oldStatus === 'inserido_empresa' || oldStatus === 'inserido_empresa_e_cliente') ? oldStatus : 'ativo';
 
-      const shouldUpdateDesc = (!targetItem.descricao || targetItem.descricao === 'Nova Linha Inserida');
-
       const payload: any = {
         tipo_vinculo: trimmed ? 'texto' : null,
         texto_empresa: trimmed ? trimmed : null,
-        descricao: (trimmed && shouldUpdateDesc) ? trimmed : targetItem.descricao,
+        descricao: targetItem.descricao,
         composicao_id: null,
         insumo_id: null,
         valor_unitario_empresa: 0,
@@ -488,17 +658,25 @@ export default function OrcamentoDeParaStudio() {
         status_linha: finalStatus
       };
 
-      const { error } = await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .update(payload)
-        .eq('id', targetItem.id);
-
-      if (error) {
-        await supabase
+      try {
+        const { error } = await supabase
+          .schema('engenharia')
           .from('orcamento_importado_itens')
           .update(payload)
           .eq('id', targetItem.id);
+
+        if (error) {
+          console.warn('Tentando fallback para atualizar orcamento_importado_itens:', error);
+          const fallbackPayload = { ...payload };
+          delete fallbackPayload.texto_empresa;
+          await supabase
+            .schema('engenharia')
+            .from('orcamento_importado_itens')
+            .update(fallbackPayload)
+            .eq('id', targetItem.id);
+        }
+      } catch (e) {
+        console.warn('Erro ao atualizar Supabase:', e);
       }
 
       setItems(prev => {
@@ -536,6 +714,28 @@ export default function OrcamentoDeParaStudio() {
       loadImportedBudget();
     }
   }, [importId]);
+
+  const saveStudioState = (currentItems: ImportadoItem[], currentHeaderData?: any) => {
+    if (!importId) return;
+    try {
+      localStorage.setItem(`brp_orcamento_importado_itens_${importId}`, JSON.stringify(currentItems));
+
+      const headerToUse = currentHeaderData || importHeader;
+      if (headerToUse) {
+        const savedImportsStr = localStorage.getItem('brp_orcamentos_importados_locais') || '[]';
+        const savedImports: any[] = JSON.parse(savedImportsStr);
+        const idx = savedImports.findIndex((i: any) => i.id === importId);
+        if (idx !== -1) {
+          savedImports[idx] = { ...savedImports[idx], ...headerToUse };
+        } else {
+          savedImports.push({ id: importId, ...headerToUse });
+        }
+        localStorage.setItem('brp_orcamentos_importados_locais', JSON.stringify(savedImports));
+      }
+    } catch (err) {
+      console.warn('Erro ao salvar estado do studio no LocalStorage:', err);
+    }
+  };
 
   const loadImportedBudget = async () => {
     setLoading(true);
@@ -592,9 +792,26 @@ export default function OrcamentoDeParaStudio() {
         const savedImportsStr = localStorage.getItem('brp_orcamentos_importados_locais') || '[]';
         const savedImports = JSON.parse(savedImportsStr);
         headerData = savedImports.find((i: any) => i.id === importId);
+      }
 
-        const savedRowsStr = localStorage.getItem(`brp_orcamento_importado_itens_${importId}`) || '[]';
-        rowsData = JSON.parse(savedRowsStr);
+      let localSavedRows: any[] = [];
+      try {
+        const savedRowsStr = localStorage.getItem(`brp_orcamento_importado_itens_${importId}`);
+        if (savedRowsStr) localSavedRows = JSON.parse(savedRowsStr);
+      } catch {}
+
+      if (rowsData.length === 0 && localSavedRows.length > 0) {
+        rowsData = localSavedRows;
+      } else if (rowsData.length > 0 && localSavedRows.length > 0) {
+        const localMap = new Map<string, any>();
+        localSavedRows.forEach((lr: any) => { if (lr.id) localMap.set(lr.id, lr); });
+        rowsData = rowsData.map((sr: any) => {
+          const lr = localMap.get(sr.id);
+          if (lr && (lr.composicao_id || lr.insumo_id || lr.texto_empresa || lr.status_linha === 'desdobrado')) {
+            return { ...sr, ...lr };
+          }
+          return sr;
+        });
       }
 
       if (headerData) {
@@ -609,32 +826,77 @@ export default function OrcamentoDeParaStudio() {
       const compsMap: Record<string, any> = {};
       const insumosMap: Record<string, any> = {};
 
+      // 1. LocalStorage fallback para Banco Próprio
+      try {
+        const localCompsStr = localStorage.getItem('brp_composicoes_propria_list');
+        if (localCompsStr) {
+          const localComps = JSON.parse(localCompsStr);
+          if (Array.isArray(localComps)) {
+            localComps.forEach((c: any) => { if (c?.id) compsMap[c.id] = c; });
+          }
+        }
+      } catch {}
+
+      try {
+        const localInsumosStr = localStorage.getItem('brp_insumos_proprio_list');
+        if (localInsumosStr) {
+          const localInsumos = JSON.parse(localInsumosStr);
+          if (Array.isArray(localInsumos)) {
+            localInsumos.forEach((i: any) => { if (i?.id) insumosMap[i.id] = i; });
+          }
+        }
+      } catch {}
+
+      // 2. Busca do Supabase engenharia e public
       if (compIds.length > 0) {
-        const { data: comps } = await supabase
-          .schema('engenharia')
-          .from('composicoes')
-          .select('*')
-          .in('id', compIds);
-        if (comps) comps.forEach((c: any) => { compsMap[c.id] = c; });
+        try {
+          const { data: comps } = await supabase
+            .schema('engenharia')
+            .from('composicoes')
+            .select('*')
+            .in('id', compIds);
+          if (comps) comps.forEach((c: any) => { compsMap[c.id] = c; });
+        } catch {}
+
+        const missingCompIds = compIds.filter(id => !compsMap[id]);
+        if (missingCompIds.length > 0) {
+          try {
+            const { data: pubComps } = await supabase
+              .from('composicoes')
+              .select('*')
+              .in('id', missingCompIds);
+            if (pubComps) pubComps.forEach((c: any) => { compsMap[c.id] = c; });
+          } catch {}
+        }
       }
 
       if (insumoIds.length > 0) {
-        const { data: insumos } = await supabase
-          .schema('engenharia')
-          .from('insumos')
-          .select('*')
-          .in('id', insumoIds);
-        if (insumos) insumos.forEach((i: any) => { insumosMap[i.id] = i; });
+        try {
+          const { data: insumos } = await supabase
+            .schema('engenharia')
+            .from('insumos')
+            .select('*')
+            .in('id', insumoIds);
+          if (insumos) insumos.forEach((i: any) => { insumosMap[i.id] = i; });
+        } catch {}
+
+        const missingInsumoIds = insumoIds.filter(id => !insumosMap[id]);
+        if (missingInsumoIds.length > 0) {
+          try {
+            const { data: pubInsumos } = await supabase
+              .from('insumos')
+              .select('*')
+              .in('id', missingInsumoIds);
+            if (pubInsumos) pubInsumos.forEach((i: any) => { insumosMap[i.id] = i; });
+          } catch {}
+        }
       }
 
       const finalItems = itemsList.map((item: any) => {
-        const origParts = (item.item_eap || '').split('.').filter(Boolean);
         let status = item.status_linha || 'ativo';
 
-        // Se uma linha principal do cliente (ex: 1.1, 1.2) estiver com status 'desdobrado' por erro antigo, corrige para 'ativo'
-        if (status === 'desdobrado' && origParts.length <= 2) {
-          status = 'ativo';
-          supabase.schema('engenharia').from('orcamento_importado_itens').update({ status_linha: 'ativo' }).eq('id', item.id).then(() => {});
+        if (isDesdobradoEap(item.item_eap, itemsList) && (!item.descricao || item.descricao === 'Nova Linha Inserida' || status === 'inserido_empresa_e_cliente')) {
+          status = 'desdobrado';
         }
 
         let vinculo = item.tipo_vinculo;
@@ -643,13 +905,38 @@ export default function OrcamentoDeParaStudio() {
           vinculo = 'texto';
         }
 
+        let compObj = item.composicao_id ? compsMap[item.composicao_id] : undefined;
+        let insumoObj = item.insumo_id ? insumosMap[item.insumo_id] : undefined;
+
+        // Fallback resiliente visual: se composicao_id está presente na linha, gera objeto visual caso a busca no banco não retorne
+        if (item.composicao_id && !compObj) {
+          compObj = {
+            id: item.composicao_id,
+            codigo: item.codigo_empresa || 'COMP.',
+            descricao: item.descricao_empresa || item.descricao || 'Composição Vinculada',
+            unidade: item.unidade || 'un',
+            custo_sem_desoneracao: item.valor_unitario_empresa || 0
+          };
+        }
+
+        // Fallback resiliente visual para insumo
+        if (item.insumo_id && !insumoObj) {
+          insumoObj = {
+            id: item.insumo_id,
+            codigo: item.codigo_empresa || 'INS.',
+            descricao: item.descricao_empresa || item.descricao || 'Insumo Vinculado',
+            unidade: item.unidade || 'un',
+            valor: item.valor_unitario_empresa || 0
+          };
+        }
+
         return {
           ...item,
           status_linha: status,
           tipo_vinculo: vinculo,
           texto_empresa: textoEmp,
-          composicao: item.composicao_id ? compsMap[item.composicao_id] : undefined,
-          insumo: item.insumo_id ? insumosMap[item.insumo_id] : undefined
+          composicao: compObj,
+          insumo: insumoObj
         };
       });
 
@@ -660,7 +947,7 @@ export default function OrcamentoDeParaStudio() {
       const { data: generatedOrc, error: genError } = await supabase
         .schema('engenharia')
         .from('orcamentos')
-        .select('id, codigo, nome, status, revisao, created_at')
+        .select('id, codigo, nome, status, revisao, created_at, bdi_ac, bdi_s, bdi_g, bdi_r, bdi_df, bdi_l, bdi_i, dados_complementares')
         .eq('orcamento_importado_id', importId);
 
       let allRevisions: any[] = [];
@@ -682,7 +969,7 @@ export default function OrcamentoDeParaStudio() {
           const { data: revOrcs } = await supabase
             .schema('engenharia')
             .from('orcamentos')
-            .select('id, codigo, nome, status, revisao, created_at')
+            .select('id, codigo, nome, status, revisao, created_at, bdi_ac, bdi_s, bdi_g, bdi_r, bdi_df, bdi_l, bdi_i, dados_complementares')
             .ilike('codigo', `${baseCode}%`);
           
           if (revOrcs && revOrcs.length > 0) {
@@ -726,12 +1013,18 @@ export default function OrcamentoDeParaStudio() {
           const updatedFinalItems = sortedItems.map((item: any) => {
             const matchedOrcItem = orcMap[(item.item_eap || '').trim()];
             if (matchedOrcItem) {
-              const uPrice = parseFloat(matchedOrcItem.valor_unitario_com_bdi || matchedOrcItem.valor_unitario || 0);
-              const tot = parseFloat(matchedOrcItem.total || 0);
+              const uMat = parseFloat(matchedOrcItem.valor_unitario_mat || 0);
+              const uMo = parseFloat(matchedOrcItem.valor_unitario_mo || 0);
+              const uPrice = parseFloat(matchedOrcItem.valor_unitario || (uMat + uMo) || 0);
+              const q = parseFloat(matchedOrcItem.quantidade || 0);
+              const tot = uPrice * q;
               return {
                 ...item,
+                quantidade: q > 0 ? q : item.quantidade,
                 valor_unitario_empresa: uPrice > 0 ? uPrice : item.valor_unitario_empresa,
-                total_empresa: tot > 0 ? tot : item.total_empresa
+                total_empresa: tot > 0 ? tot : item.total_empresa,
+                valor_unitario_mat_empresa: uMat,
+                valor_unitario_mo_empresa: uMo
               };
             }
             return item;
@@ -763,6 +1056,12 @@ export default function OrcamentoDeParaStudio() {
     });
   };
 
+  const getChildDesdobradosOf = (parentItem: ImportadoItem, list: ImportadoItem[]) => {
+    if (!parentItem.item_eap) return [];
+    const prefix = parentItem.item_eap.trim() + '.';
+    return list.filter(i => (i.item_eap || '').trim().startsWith(prefix) && (i.status_linha === 'desdobrado' || i.status_linha === 'inserido_empresa_e_cliente'));
+  };
+
   const hasGrandchildren = (eap: string) => {
     const directChildren = getDirectChildren(eap);
     return directChildren.some(child => {
@@ -772,8 +1071,34 @@ export default function OrcamentoDeParaStudio() {
   };
 
   const getItemEapRole = (item: ImportadoItem): 'secao_texto' | 'item_operacional' => {
+    const isInsertedByEmpresa = item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente';
+
+    // Linhas inseridas pelo orçamentista sempre são operacionais (permitem texto, insumo e composição)
+    if (isInsertedByEmpresa) {
+      return 'item_operacional';
+    }
+
+    // Linhas desdobradas são operacionais
+    if (item.status_linha === 'desdobrado') {
+      return 'item_operacional';
+    }
+
+    // Se possui vínculo, texto de referência da empresa ou sub-itens desdobrados, é um item operacional
+    const hasLinkedRef = Boolean(item.composicao_id || item.insumo_id || item.composicao || item.insumo);
+    const hasCustomText = Boolean(item.texto_empresa && String(item.texto_empresa).trim() !== '');
+    const hasDesdobrados = hasDirectDesdobrados(item.item_eap, items);
+
+    if (hasLinkedRef || hasCustomText || hasDesdobrados) {
+      return 'item_operacional';
+    }
+
+    // Linhas importadas sem quantidade e sem vinculos/textos são exclusivamente linhas de título/seção
+    if (!item.quantidade || item.quantidade === 0) {
+      return 'secao_texto';
+    }
+
     const directChildren = getDirectChildren(item.item_eap);
-    if (directChildren.length > 0 && hasGrandchildren(item.item_eap)) {
+    if (directChildren.length > 0) {
       return 'secao_texto';
     }
     return 'item_operacional';
@@ -834,17 +1159,34 @@ export default function OrcamentoDeParaStudio() {
     e.preventDefault();
   };
 
+  const handleRightDragEnd = () => {
+    setDraggedRightIndex(null);
+  };
+
   const handleRightDrop = async (e: React.DragEvent, targetIndex: number) => {
     e.preventDefault();
-    if (draggedRightIndex === null || draggedRightIndex === targetIndex) return;
+    if (draggedRightIndex === null || draggedRightIndex === targetIndex) {
+      setDraggedRightIndex(null);
+      return;
+    }
 
     saveSnapshot();
 
     const sourceItem = items[draggedRightIndex];
     const targetItem = items[targetIndex];
-    if (!sourceItem || !targetItem) return;
+    if (!sourceItem || !targetItem) {
+      setDraggedRightIndex(null);
+      return;
+    }
 
-    if (sourceItem.status_linha === 'desdobrado' || targetItem.status_linha === 'desdobrado') return;
+    if (sourceItem.status_linha === 'desdobrado' || targetItem.status_linha === 'desdobrado') {
+      setDraggedRightIndex(null);
+      return;
+    }
+    if (getItemEapRole(sourceItem) === 'secao_texto' || getItemEapRole(targetItem) === 'secao_texto') {
+      setDraggedRightIndex(null);
+      return;
+    }
 
     // Coleta os sub-itens desdobrados do source e do target
     const getDesdobradosOf = (parentItem: ImportadoItem) => {
@@ -1022,7 +1364,41 @@ export default function OrcamentoDeParaStudio() {
     }
   };
 
-  // --- RECUOS DE EAP NA BARRA SUPERIOR E VIA TECLADO (CTRL+SHIFT+SETA) ---
+  // --- HELPER DE DETERMINAÇÃO DE NÍVEL E BLOCO SUBORDINADO ---
+  const getItemLevel = (item: ImportadoItem): number => {
+    if ((item as any).level !== undefined && (item as any).level !== null) {
+      return (item as any).level;
+    }
+    const parts = (item.item_eap || '').split('.').filter(Boolean);
+    return parts.length > 0 ? parts.length : 1;
+  };
+
+  const getBlockIndices = (targetIndex: number, list: ImportadoItem[]): number[] => {
+    const target = list[targetIndex];
+    if (!target) return [];
+
+    const targetEap = (target.item_eap || '').trim();
+    const targetLevel = getItemLevel(target);
+    const indices: number[] = [targetIndex];
+
+    for (let k = targetIndex + 1; k < list.length; k++) {
+      const item = list[k];
+      if (!item || item.status_linha === 'inativo') continue;
+
+      const itemLevel = getItemLevel(item);
+      const isChildEap = targetEap ? (item.item_eap || '').startsWith(targetEap + '.') : false;
+
+      if (itemLevel > targetLevel || isChildEap || item.status_linha === 'desdobrado') {
+        indices.push(k);
+      } else {
+        break;
+      }
+    }
+
+    return indices;
+  };
+
+  // --- RECUOS DE EAP NA BARRA SUPERIOR E VIA TECLADO (ALT+SHIFT+SETA, CTRL+SHIFT+SETA, TAB) ---
   const handleIndentSelectedRow = () => {
     saveSnapshot();
     const targetIndexes = Array.from(selectedRowIndexes);
@@ -1035,17 +1411,44 @@ export default function OrcamentoDeParaStudio() {
 
     setItems(prev => {
       const copy = [...prev];
-      targetIndexes.forEach(idx => {
-        if (idx <= 0) return;
-        const current = { ...copy[idx] };
-        const prevItem = copy[idx - 1];
+      const processedIndices = new Set<number>();
+
+      targetIndexes.forEach(baseIdx => {
+        if (processedIndices.has(baseIdx) || baseIdx <= 0) return;
+
+        const current = copy[baseIdx];
+        if (!current || current.status_linha === 'desdobrado') return;
+
+        const prevItem = copy[baseIdx - 1];
         if (!prevItem) return;
 
-        const childrenOfPrev = copy.filter(i => (i.item_eap || '').startsWith(prevItem.item_eap + '.'));
-        current.item_eap = `${prevItem.item_eap}.${childrenOfPrev.length + 1}`;
-        copy[idx] = current;
+        const prevLevel = getItemLevel(prevItem);
+        const currentLevel = getItemLevel(current);
+        const maxAllowedLevel = prevLevel + 1;
+
+        if (currentLevel >= maxAllowedLevel) return;
+
+        const deltaLevel = 1;
+        const blockIndices = getBlockIndices(baseIdx, copy);
+
+        blockIndices.forEach(idx => {
+          processedIndices.add(idx);
+          const item = { ...copy[idx] };
+          if (item.status_linha !== 'desdobrado') {
+            (item as any).level = getItemLevel(item) + deltaLevel;
+          }
+          copy[idx] = item;
+        });
       });
-      return copy;
+
+      const rebuilt = rebuildStudioEaps(copy);
+      rebuilt.forEach(it => {
+        if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+          supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+        }
+      });
+
+      return rebuilt;
     });
   };
 
@@ -1061,20 +1464,38 @@ export default function OrcamentoDeParaStudio() {
 
     setItems(prev => {
       const copy = [...prev];
-      targetIndexes.forEach(idx => {
-        const current = { ...copy[idx] };
-        const parts = (current.item_eap || '').split('.');
-        if (parts.length <= 1) return;
+      const processedIndices = new Set<number>();
 
-        parts.pop();
-        const lastNum = parseInt(parts[parts.length - 1], 10);
-        if (!isNaN(lastNum)) {
-          parts[parts.length - 1] = String(lastNum + 1);
-        }
-        current.item_eap = parts.join('.');
-        copy[idx] = current;
+      targetIndexes.forEach(baseIdx => {
+        if (processedIndices.has(baseIdx)) return;
+
+        const current = copy[baseIdx];
+        if (!current || current.status_linha === 'desdobrado') return;
+
+        const currentLevel = getItemLevel(current);
+        if (currentLevel <= 1) return;
+
+        const deltaLevel = -1;
+        const blockIndices = getBlockIndices(baseIdx, copy);
+
+        blockIndices.forEach(idx => {
+          processedIndices.add(idx);
+          const item = { ...copy[idx] };
+          if (item.status_linha !== 'desdobrado') {
+            (item as any).level = Math.max(1, getItemLevel(item) + deltaLevel);
+          }
+          copy[idx] = item;
+        });
       });
-      return copy;
+
+      const rebuilt = rebuildStudioEaps(copy);
+      rebuilt.forEach(it => {
+        if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+          supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+        }
+      });
+
+      return rebuilt;
     });
   };
 
@@ -1103,18 +1524,28 @@ export default function OrcamentoDeParaStudio() {
         return;
       }
 
-      // 1. Ctrl + Shift + Setas (Recuar / Promover Nível EAP)
-      if (e.ctrlKey && e.shiftKey) {
-        if (e.key === 'ArrowRight' || e.key === 'ArrowDown') {
-          e.preventDefault();
+      // 1. Alt + Shift + Setas / Ctrl + Shift + Setas / Tab / Shift + Tab (Recuar / Promover Nível EAP)
+      const isIndentKey = (e.key === 'ArrowRight' || e.key === 'ArrowDown');
+      const isOutdentKey = (e.key === 'ArrowLeft' || e.key === 'ArrowUp');
+
+      if ((e.altKey || e.ctrlKey) && e.shiftKey && (isIndentKey || isOutdentKey)) {
+        e.preventDefault();
+        if (isIndentKey) {
           handleIndentSelectedRow();
-          return;
-        }
-        if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') {
-          e.preventDefault();
+        } else {
           handleOutdentSelectedRow();
-          return;
         }
+        return;
+      }
+
+      if (e.key === 'Tab') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleOutdentSelectedRow();
+        } else {
+          handleIndentSelectedRow();
+        }
+        return;
       }
 
       // 2. Ctrl + A (Selecionar Todos)
@@ -1170,14 +1601,15 @@ export default function OrcamentoDeParaStudio() {
         return;
       }
 
-      // 6. Enter: Editar a linha ou vincular
+      // 6. Enter: Editar a linha inline ou vincular
       if (e.key === 'Enter' && selectedRowIndex !== null) {
         e.preventDefault();
         const item = items[selectedRowIndex];
         if (item) {
-          if (item.tipo_vinculo === 'texto' || item.status_linha === 'inserido_empresa') {
-            setEditingCustomItem(item);
-            setCustomText(item.descricao || '');
+          const linkedRef = item.composicao || item.insumo;
+          if (!linkedRef) {
+            setInlineEditingRowId(item.id);
+            setInlineTextValue(getCompanyText(item) || '');
           } else {
             setSelectedItemForLink(item);
             setShowLinkDrawer(true);
@@ -1305,7 +1737,23 @@ export default function OrcamentoDeParaStudio() {
         .eq('orcamento_importado_id', targetItem.orcamento_importado_id)
         .like('item_eap', `${subEapPattern}%`);
 
-      setItems(prev => prev.filter(i => i.id !== targetItem.id && !i.item_eap.startsWith(subEapPattern)));
+      let nextItems: ImportadoItem[] = [];
+      setItems(prev => {
+        const filtered = prev.filter(i => i.id !== targetItem.id && !i.item_eap.startsWith(subEapPattern));
+        const rebuilt = rebuildStudioEaps(filtered);
+        rebuilt.forEach(it => {
+          if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+            supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+          }
+        });
+        nextItems = rebuilt;
+        return rebuilt;
+      });
+
+      if (existingOrcamento?.id) {
+        syncOrcamentoEmpresaItens(existingOrcamento.id, nextItems);
+      }
+      updateImportStatus(nextItems);
     } catch (err: any) {
       console.error(err);
       alert('Erro ao excluir linha: ' + err.message);
@@ -1337,13 +1785,24 @@ export default function OrcamentoDeParaStudio() {
         }
 
         const insertedIdsSet = new Set(insertedIds);
+        let nextItems: ImportadoItem[] = [];
         setItems(prev => {
           const filtered = prev.filter(i => !insertedIdsSet.has(i.id));
-          return rebuildStudioEaps(filtered);
+          const rebuilt = rebuildStudioEaps(filtered);
+          rebuilt.forEach(it => {
+            if (it.id && !it.id.startsWith('temp-') && !it.id.startsWith('inserted-')) {
+              supabase.schema('engenharia').from('orcamento_importado_itens').update({ item_eap: it.item_eap }).eq('id', it.id).then(() => {});
+            }
+          });
+          nextItems = rebuilt;
+          return rebuilt;
         });
         setSelectedRowIndexes(new Set());
         setSelectedRowIndex(null);
-        updateImportStatus();
+        if (existingOrcamento?.id) {
+          syncOrcamentoEmpresaItens(existingOrcamento.id, nextItems);
+        }
+        updateImportStatus(nextItems);
       } catch (err: any) {
         console.error(err);
         alert('Erro ao excluir linhas: ' + err.message);
@@ -1433,7 +1892,8 @@ export default function OrcamentoDeParaStudio() {
 
   // Realizar o vínculo (De-Para) e desdobrar insumos/subcomposições constituintes do Banco Próprio
   const handleLinkItem = async (selected: any) => {
-    if (!selectedItemForLink) return;
+    if (!selectedItemForLink || isLinking) return;
+    setIsLinking(true);
     saveSnapshot();
 
     const isComp = searchTab === 'composicoes_propria';
@@ -1589,6 +2049,7 @@ export default function OrcamentoDeParaStudio() {
         }
       }
 
+      let nextItemsState: ImportadoItem[] = [];
       setItems(prev => {
         // Primeiro remove os sub-itens desdobrados antigos para evitar duplicidade
         const cleaned = prev.filter(i => !oldChildIdsToDelete.has(i.id));
@@ -1612,15 +2073,19 @@ export default function OrcamentoDeParaStudio() {
           copy.splice(pIdx + 1, 0, ...childRows);
         }
 
-        return rebuildStudioEaps(copy);
+        nextItemsState = rebuildStudioEaps(copy);
+        return nextItemsState;
       });
 
-      updateImportStatus();
+      saveStudioState(nextItemsState);
+      updateImportStatus(nextItemsState);
       setShowLinkDrawer(false);
       setSelectedItemForLink(null);
     } catch (err: any) {
       console.error(err);
       alert('Erro ao vincular item: ' + err.message);
+    } finally {
+      setIsLinking(false);
     }
   };
 
@@ -1708,7 +2173,6 @@ export default function OrcamentoDeParaStudio() {
     let resolvedStatus: 'ativo' | 'inativo' | 'inserido_empresa' | 'inserido_empresa_e_cliente' | 'desdobrado';
 
     if (targetItem.status_linha === 'inativo') {
-      // Reactivating: calculate original status
       if (isDesdobradoEap(targetItem.item_eap, items)) {
         resolvedStatus = 'desdobrado';
       } else if (!targetItem.descricao) {
@@ -1717,49 +2181,153 @@ export default function OrcamentoDeParaStudio() {
         resolvedStatus = 'ativo';
       }
     } else {
-      // Inactivating
       resolvedStatus = 'inativo';
     }
 
+    const cleanTargetEap = (targetItem.item_eap || '').trim();
+    const prefix = cleanTargetEap ? cleanTargetEap + '.' : '';
+    const affectedItems = items.filter(i => i.id === targetItem.id || (prefix && (i.item_eap || '').trim().startsWith(prefix)));
+    const affectedIds = new Set(affectedItems.map(i => i.id));
+
     try {
-      const payload = {
-        status_linha: resolvedStatus,
-        total_empresa: resolvedStatus === 'inativo' ? 0 : targetItem.total_empresa
-      };
+      for (const item of affectedItems) {
+        const itemStatus = resolvedStatus === 'inativo' ? 'inativo' : (isDesdobradoEap(item.item_eap, items) ? 'desdobrado' : 'ativo');
+        const restoredTotal = itemStatus === 'inativo' 
+          ? 0 
+          : (item.total_empresa > 0 
+              ? item.total_empresa 
+              : (item.valor_unitario_empresa > 0 
+                  ? (item.quantidade || 1) * item.valor_unitario_empresa 
+                  : item.total_orig || 0));
 
-      const { error } = await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .update(payload)
-        .eq('id', targetItem.id);
+        const payload = {
+          status_linha: itemStatus,
+          total_empresa: restoredTotal
+        };
 
-      if (error) throw error;
+        await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .update(payload)
+          .eq('id', item.id);
+      }
 
-      setItems(prev => prev.map(i => {
-        if (i.id === targetItem.id) {
-          return { ...i, ...payload };
-        }
-        return i;
-      }));
+      let nextItems: ImportadoItem[] = [];
+      setItems(prev => {
+        const updated = prev.map(i => {
+          if (affectedIds.has(i.id)) {
+            const itemStatus = resolvedStatus === 'inativo' ? 'inativo' : (isDesdobradoEap(i.item_eap, prev) ? 'desdobrado' : 'ativo');
+            const restoredTotal = itemStatus === 'inativo' 
+              ? 0 
+              : (i.total_empresa > 0 
+                  ? i.total_empresa 
+                  : (i.valor_unitario_empresa > 0 
+                      ? (i.quantidade || 1) * i.valor_unitario_empresa 
+                      : i.total_orig || 0));
 
-      updateImportStatus();
+            return { ...i, status_linha: itemStatus, total_empresa: restoredTotal };
+          }
+          return i;
+        });
+        nextItems = updated;
+        return updated;
+      });
+
+      if (existingOrcamento?.id) {
+        await syncOrcamentoEmpresaItens(existingOrcamento.id, nextItems);
+      }
+      updateImportStatus(nextItems);
     } catch (err: any) {
       console.error(err);
       alert('Erro ao inativar/reativar item: ' + err.message);
     }
   };
 
-  // Alternar se item inserido pela empresa também vai para a planilha do cliente
+  // Alternar se insumo, subcomposição ou linha inserida pela empresa também vai para a planilha do cliente
   const handleToggleInserirCliente = async (targetItem: ImportadoItem) => {
     saveSnapshot();
-    const parts = targetItem.item_eap.split('.');
-    let originalStatus: 'desdobrado' | 'inserido_empresa' = 'inserido_empresa';
-    if (parts.length > 1) {
+
+    const childDesdobrados = getChildDesdobradosOf(targetItem, items);
+
+    // Caso 1: Se for um item principal que possui filhos desdobrados (ex: item 1.2 que possui 1.2.1, 1.2.2...)
+    if (childDesdobrados.length > 0 && targetItem.status_linha !== 'desdobrado') {
+      const allChildrenInserted = childDesdobrados.every(c => c.status_linha === 'inserido_empresa_e_cliente');
+      const targetChildStatus = allChildrenInserted ? 'desdobrado' : 'inserido_empresa_e_cliente';
+
+      const childUpdates = childDesdobrados.map(child => {
+        const refObj = child.composicao || child.insumo;
+        const autoDesc = child.texto_empresa || refObj?.descricao || child.descricao;
+        const desc = autoDesc || 'Item Inserido';
+        const unit = child.unidade || refObj?.unidade || 'un';
+
+        const childBd = getCompanyBreakdown(child);
+        const uPrice = child.valor_unitario_empresa > 0 ? child.valor_unitario_empresa : (childBd.unitTotal || 0);
+        const totPrice = child.total_empresa > 0 ? child.total_empresa : (childBd.total || 0);
+
+        return {
+          id: child.id,
+          status_linha: targetChildStatus,
+          descricao: desc,
+          unidade: unit,
+          valor_unitario_orig: targetChildStatus === 'inserido_empresa_e_cliente' ? uPrice : 0,
+          total_orig: targetChildStatus === 'inserido_empresa_e_cliente' ? totPrice : 0
+        };
+      });
+
+      // Se o item pai estava erroneamente marcado como inserido_empresa_e_cliente por edições anteriores, restaura para 'ativo'
+      let parentUpdate: Partial<ImportadoItem> | null = null;
+      if (targetItem.status_linha === 'inserido_empresa_e_cliente') {
+        parentUpdate = {
+          status_linha: 'ativo'
+        };
+      }
+
+      try {
+        for (const upd of childUpdates) {
+          const { id, ...payload } = upd;
+          await supabase.schema('engenharia').from('orcamento_importado_itens').update(payload).eq('id', id);
+        }
+        if (parentUpdate) {
+          await supabase.schema('engenharia').from('orcamento_importado_itens').update(parentUpdate).eq('id', targetItem.id);
+        }
+
+        const childUpdateMap = new Map(childUpdates.map(u => [u.id, u]));
+
+        setItems(prev => prev.map(i => {
+          if (childUpdateMap.has(i.id)) {
+            const upd = childUpdateMap.get(i.id)!;
+            return { ...i, ...upd };
+          }
+          if (parentUpdate && i.id === targetItem.id) {
+            return { ...i, ...parentUpdate };
+          }
+          return i;
+        }));
+
+        updateImportStatus();
+      } catch (err: any) {
+        console.error(err);
+        alert('Erro ao alternar inserção dos sub-itens no cliente: ' + err.message);
+      }
+      return;
+    }
+
+    // Caso 2: Se for um sub-item desdobrado individual ou linha inserida pela empresa
+    const parts = (targetItem.item_eap || '').split('.');
+    let originalStatus: 'desdobrado' | 'inserido_empresa' | 'ativo' = 'inserido_empresa';
+
+    if (isDesdobradoEap(targetItem.item_eap, items) || targetItem.status_linha === 'desdobrado') {
+      originalStatus = 'desdobrado';
+    } else if (parts.length > 1) {
       const parentEap = parts.slice(0, -1).join('.');
       const parent = items.find(i => i.item_eap === parentEap);
-      if (parent && parent.composicao_id) {
+      if (parent && (parent.composicao_id || parent.composicao)) {
         originalStatus = 'desdobrado';
+      } else if (targetItem.descricao && targetItem.descricao !== 'Nova Linha Inserida' && targetItem.status_linha !== 'inserido_empresa') {
+        originalStatus = 'ativo';
       }
+    } else if (targetItem.descricao && targetItem.descricao !== 'Nova Linha Inserida' && targetItem.status_linha !== 'inserido_empresa') {
+      originalStatus = 'ativo';
     }
 
     const newStatus = targetItem.status_linha === 'inserido_empresa_e_cliente'
@@ -1773,13 +2341,17 @@ export default function OrcamentoDeParaStudio() {
       : (targetItem.descricao && targetItem.descricao !== 'Nova Linha Inserida' ? targetItem.descricao : (autoDesc || 'Item Inserido'));
     const unit = targetItem.unidade || refObj?.unidade || 'un';
 
+    const bd = getCompanyBreakdown(targetItem);
+    const unitPrice = targetItem.valor_unitario_empresa > 0 ? targetItem.valor_unitario_empresa : (bd.unitTotal || 0);
+    const totalPrice = targetItem.total_empresa > 0 ? targetItem.total_empresa : (bd.total || 0);
+
     try {
       const payload: Partial<ImportadoItem> = {
         status_linha: newStatus,
         descricao: desc,
         unidade: unit,
-        valor_unitario_orig: newStatus === 'inserido_empresa_e_cliente' ? targetItem.valor_unitario_empresa : 0,
-        total_orig: newStatus === 'inserido_empresa_e_cliente' ? targetItem.total_empresa : 0
+        valor_unitario_orig: newStatus === 'inserido_empresa_e_cliente' ? unitPrice : (originalStatus === 'ativo' ? targetItem.valor_unitario_orig : 0),
+        total_orig: newStatus === 'inserido_empresa_e_cliente' ? totalPrice : (originalStatus === 'ativo' ? targetItem.total_orig : 0)
       };
 
       const { error } = await supabase
@@ -1821,13 +2393,26 @@ export default function OrcamentoDeParaStudio() {
         total_empresa: 0
       };
 
-      const { error } = await supabase
-        .schema('engenharia')
-        .from('orcamento_importado_itens')
-        .update(payload)
-        .eq('id', editingCustomItem.id);
+      try {
+        const { error } = await supabase
+          .schema('engenharia')
+          .from('orcamento_importado_itens')
+          .update(payload)
+          .eq('id', editingCustomItem.id);
 
-      if (error) throw error;
+        if (error) {
+          console.warn('Tentando fallback para salvar texto customizado:', error);
+          const fallbackPayload = { ...payload };
+          delete fallbackPayload.texto_empresa;
+          await supabase
+            .schema('engenharia')
+            .from('orcamento_importado_itens')
+            .update(fallbackPayload)
+            .eq('id', editingCustomItem.id);
+        }
+      } catch (dbErr) {
+        console.warn('Erro DB ao salvar texto customizado:', dbErr);
+      }
 
       setItems(prev => prev.map(item => {
         if (item.id === editingCustomItem.id) {
@@ -1846,100 +2431,353 @@ export default function OrcamentoDeParaStudio() {
       setEditingCustomItem(null);
     } catch (err: any) {
       console.error(err);
-      alert('Erro ao salvar texto customizado: ' + err.message);
+      setEditingCustomItem(null);
     }
   };
 
-  const isMainClientItem = (item: ImportadoItem) => {
-    return item.status_linha !== 'inativo' && item.status_linha !== 'desdobrado';
+  const isItemInactiveInTree = (item: ImportadoItem, itemList: ImportadoItem[]) => {
+    if (!item) return true;
+    if (item.status_linha === 'inativo') return true;
+    const cleanEap = (item.item_eap || '').trim();
+    if (!cleanEap) return false;
+    const parts = cleanEap.split('.').filter(Boolean);
+    for (let len = 1; len < parts.length; len++) {
+      const ancestorEap = parts.slice(0, len).join('.');
+      const ancestor = itemList.find(i => (i.item_eap || '').trim() === ancestorEap);
+      if (ancestor && ancestor.status_linha === 'inativo') {
+        return true;
+      }
+    }
+    return false;
   };
 
-  const isItemLinked = (item: ImportadoItem) => {
-    if (item.status_linha === 'inativo' || item.status_linha === 'desdobrado') return true;
+  const isMainClientItem = (item: ImportadoItem) => {
+    return !isItemInactiveInTree(item, items) && item.status_linha !== 'desdobrado';
+  };
+
+  const isItemLinked = (item: ImportadoItem, itemList?: ImportadoItem[]) => {
+    if (isItemInactiveInTree(item, itemList || items) || item.status_linha === 'desdobrado') return true;
+
+    const role = getItemEapRole(item);
+    if (role === 'secao_texto') {
+      return true;
+    }
+
     const hasComp = !!(item.composicao_id || item.composicao);
     const hasInsumo = !!(item.insumo_id || item.insumo);
     const hasText = item.tipo_vinculo === 'texto' || !!(item.texto_empresa && String(item.texto_empresa).trim() !== '');
     const isInserted = item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente';
-    return hasComp || hasInsumo || hasText || isInserted;
+
+    const all = itemList || items;
+    const hasChildrenDesdobrados = all.some(child => 
+      child.status_linha === 'desdobrado' && 
+      (child.item_eap || '').startsWith(`${item.item_eap}.`)
+    );
+
+    return hasComp || hasInsumo || hasText || isInserted || hasChildrenDesdobrados;
   };
 
-  const updateImportStatus = async () => {
-    const mainClientItems = items.filter(isMainClientItem);
+  const updateImportStatus = async (customItems?: ImportadoItem[]) => {
+    const targetItems = customItems || items;
+    const mainClientItems = targetItems.filter(isMainClientItem);
     const total = mainClientItems.length;
-    const linkedCount = mainClientItems.filter(isItemLinked).length;
+    const linkedCount = mainClientItems.filter(i => isItemLinked(i, targetItems)).length;
 
     let newStatus = 'Aguardando De-Para';
     if (linkedCount === total && total > 0) newStatus = 'Concluído';
     else if (linkedCount > 0) newStatus = 'Em Vinculação';
 
-    await supabase
-      .schema('engenharia')
-      .from('orcamentos_importados')
-      .update({ status: newStatus })
-      .eq('id', importId);
+    try {
+      await supabase
+        .schema('engenharia')
+        .from('orcamentos_importados')
+        .update({ status: newStatus })
+        .eq('id', importId);
+    } catch {}
 
-    setImportHeader((prev: any) => ({ ...prev, status: newStatus }));
+    try {
+      await supabase
+        .from('orcamentos_importados')
+        .update({ status: newStatus })
+        .eq('id', importId);
+    } catch {}
+
+    setImportHeader((prev: any) => {
+      const updatedHeader = { ...prev, status: newStatus };
+      saveStudioState(targetItems, updatedHeader);
+      return updatedHeader;
+    });
   };
 
-  // Exportar Planilha De-Para Comparativa para Excel
-  const handleExportExcel = () => {
+  // Exportar Planilha do Cliente Completa Preenchida com os Valores da Empresa
+  const handleExportExcel = async () => {
     if (!items || items.length === 0) return;
 
-    const exportRows = items.map(i => {
-      const isHiddenOnClient = i.status_linha === 'inserido_empresa' || i.status_linha === 'desdobrado';
+    try {
+      await exportarPlanilhaClientePreenchida({
+        nome_arquivo: importHeader?.nome_arquivo,
+        cliente: importHeader?.cliente,
+        projeto: importHeader?.projeto,
+        items,
+        bdiFactor: exibirBdi ? bdiFactor : 1
+      });
+    } catch (err: any) {
+      console.error('Erro ao exportar planilha preenchida:', err);
+      alert('Erro ao gerar planilha Excel: ' + err.message);
+    }
+  };
+
+  // Sincroniza os itens atuais do Studio De-Para com a tabela orcamento_itens do orçamento criado
+  const syncOrcamentoEmpresaItens = async (orcamentoId: string, currentItems: ImportadoItem[]) => {
+    if (!orcamentoId || !currentItems || currentItems.length === 0) return;
+
+    const validItems = currentItems.filter(i => !isItemInactiveInTree(i, currentItems));
+
+    const itensPayload = validItems.map((item: any) => {
+      const role = getItemEapRole(item);
+      const linkedRef = item.composicao || item.insumo;
+      const hasChildrenDesdobrados = hasDirectDesdobrados(item.item_eap, currentItems);
+      const isHeader = role === 'secao_texto' && !item.texto_empresa && !hasChildrenDesdobrados && !linkedRef;
+
+      if (isHeader) {
+        return {
+          orcamento_id: orcamentoId,
+          item_eap: item.item_eap,
+          codigo: null,
+          banco_fonte: null,
+          descricao: item.texto_empresa || ((item.descricao && item.descricao.trim() !== '') ? item.descricao : 'SEÇÃO / TÍTULO'),
+          unidade: '',
+          quantidade: 0,
+          valor_unitario_mat: 0,
+          valor_unitario_mo: 0,
+          valor_unitario: 0,
+          valor_unitario_com_bdi: 0,
+          total_mat: 0,
+          total_mo: 0,
+          total: 0,
+          is_secao: true,
+          is_child_insumo: false,
+          parent_composition_id: null,
+          composicao_id: null,
+          insumo_id: null,
+          tipo_vinculo: 'secao'
+        };
+      }
+
+      if (item.status_linha === 'desdobrado') {
+        const parts = (item.item_eap || '').split('.');
+        const parentEap = parts.length > 1 ? parts.slice(0, -1).join('.') : '';
+        const isMo = item.insumo?.tipo === 'Mão de Obra';
+        const valUnit = parseFloat(item.valor_unitario_empresa || item.insumo?.valor || item.insumo?.valor_nao_desonerado || 0);
+        const matUnit = isMo ? 0 : valUnit;
+        const moUnit = isMo ? valUnit : 0;
+        const unitTotal = matUnit + moUnit;
+        const qty = parseFloat(item.quantidade || 0);
+        const matTotal = qty * matUnit;
+        const moTotal = qty * moUnit;
+
+        return {
+          orcamento_id: orcamentoId,
+          item_eap: item.item_eap,
+          codigo: item.codigo || linkedRef?.codigo || null,
+          banco_fonte: linkedRef?.fonte || linkedRef?.fonte_preco || 'Banco Próprio',
+          descricao: item.texto_empresa || linkedRef?.descricao || item.descricao || '',
+          unidade: item.unidade || linkedRef?.unidade || 'un',
+          quantidade: qty,
+          valor_unitario_mat: matUnit,
+          valor_unitario_mo: moUnit,
+          valor_unitario: unitTotal,
+          valor_unitario_com_bdi: unitTotal,
+          total_mat: matTotal,
+          total_mo: moTotal,
+          total: matTotal + moTotal,
+          composicao_id: item.composicao_id || item.composicao?.id || null,
+          insumo_id: item.insumo_id || item.insumo?.id || null,
+          tipo_vinculo: item.tipo_vinculo || (item.composicao_id ? 'composicao' : 'insumo'),
+          is_secao: false,
+          is_child_insumo: true,
+          parent_composition_id: parentEap
+        };
+      }
+
+      const compBreak = getCompanyBreakdown(item);
       return {
-        EAP: i.item_eap,
-        'Descrição Cliente': i.status_linha === 'inativo' ? `[INATIVADO / RISCADO] ${i.descricao}` : isHiddenOnClient ? '' : i.descricao,
-        Unidade: isHiddenOnClient ? '' : i.unidade,
-        Quantidade: isHiddenOnClient ? 0 : i.quantidade,
-        'Preço Cliente (R$)': (i.status_linha === 'inativo' || isHiddenOnClient) ? 0 : i.total_orig,
-        'Referência Empresa': i.composicao?.descricao || i.insumo?.descricao || (i.status_linha === 'inserido_empresa' ? '[ITEM INSERIDO APENAS NA EMPRESA]' : i.tipo_vinculo === 'texto' ? '[TÍTULO CUSTOMIZADO]' : '-'),
-        'Preço Empresa (R$)': i.status_linha === 'inativo' ? 0 : i.total_empresa,
-        Status: i.status_linha === 'inativo' ? 'INATIVADO' : i.status_linha === 'inserido_empresa' ? 'INSERIDO APENAS NA EMPRESA' : i.status_linha === 'inserido_empresa_e_cliente' ? 'INSERIDO NA PLANILHA DO CLIENTE' : 'VINCULADO'
+        orcamento_id: orcamentoId,
+        item_eap: item.item_eap,
+        codigo: linkedRef?.codigo || item.codigo || null,
+        banco_fonte: linkedRef?.fonte || linkedRef?.fonte_preco || 'Banco Próprio',
+        descricao: item.texto_empresa || linkedRef?.descricao || item.descricao,
+        unidade: item.unidade || linkedRef?.unidade || 'un',
+        quantidade: parseFloat(item.quantidade || 0),
+        valor_unitario_mat: compBreak.matUnit,
+        valor_unitario_mo: compBreak.moUnit,
+        valor_unitario: compBreak.unitTotal,
+        valor_unitario_com_bdi: compBreak.unitTotal,
+        total_mat: compBreak.matTotal,
+        total_mo: compBreak.moTotal,
+        total: compBreak.matTotal + compBreak.moTotal,
+        composicao_id: item.composicao_id || item.composicao?.id || null,
+        insumo_id: item.insumo_id || item.insumo?.id || null,
+        tipo_vinculo: item.tipo_vinculo || (item.composicao_id ? 'composicao' : (item.insumo_id ? 'insumo' : 'texto')),
+        is_secao: false,
+        is_child_insumo: false,
+        parent_composition_id: null
       };
     });
 
-    const ws = XLSX.utils.json_to_sheet(exportRows);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'De-Para Orçamento');
-    XLSX.writeFile(wb, `${importHeader?.projeto || 'Orcamento'}_DePara_Comparativo.xlsx`);
+    try {
+      localStorage.setItem(`brp_orcamento_itens_${orcamentoId}`, JSON.stringify(itensPayload));
+      localStorage.setItem(`orcamento_calculos_${orcamentoId}`, JSON.stringify(itensPayload));
+    } catch (e) {}
+
+    try {
+      await supabase.schema('engenharia').from('orcamento_itens').delete().eq('orcamento_id', orcamentoId);
+      await supabase.schema('engenharia').from('orcamento_itens').insert(itensPayload);
+    } catch (err) {
+      try {
+        await supabase.from('orcamento_itens').delete().eq('orcamento_id', orcamentoId);
+        await supabase.from('orcamento_itens').insert(itensPayload);
+      } catch (e) {}
+    }
   };
 
-  // Gerar Orçamento Nativo da Empresa a partir do De-Para
+  // Gerar Orçamento Nativo da Empresa a partir do De-Para - Abre Modal de Confirmação
   const handleGerarOrcamentoEmpresa = async () => {
     const mainClientItems = items.filter(isMainClientItem);
-    const unlinkedCount = mainClientItems.filter(i => !isItemLinked(i)).length;
+    const unlinkedCount = mainClientItems.filter(i => !isItemLinked(i, items)).length;
     if (unlinkedCount > 0) {
       alert(`⚠️ Por favor, vincule todos os itens (${unlinkedCount} itens pendentes) antes de gerar o orçamento empresa.`);
       return;
     }
 
-    setSaving(true);
     try {
+      setSaving(true);
       const codigo = await generateOfficialOrcamentoCode();
+      const users = usuariosCadastrados.length > 0 ? usuariosCadastrados : await getUsuariosCadastrados();
+      if (usuariosCadastrados.length === 0) setUsuariosCadastrados(users);
 
-      const { data: newOrc, error: orcError } = await supabase
+      const defaultResp = users.length > 0 ? users[0].nome : (importHeader.orcadopor || '');
+
+      setNewOrcamentoData({
+        codigo,
+        empresa: importHeader.empresa || 'BRP Soluções Metálicas',
+        projeto: importHeader.projeto || importHeader.nome_arquivo || '',
+        cliente: importHeader.cliente || '',
+        gestor_cliente: importHeader.gestor_cliente || '',
+        responsavel: defaultResp,
+        cidade: importHeader.cidade || '',
+        estado: importHeader.estado || importHeader.uf || 'GO'
+      });
+
+      setIsCreateModalOpen(true);
+    } catch (err: any) {
+      console.error(err);
+      alert('Erro ao preparar geração de orçamento: ' + err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleConfirmCreateOrcamento = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newOrcamentoData.cliente?.trim()) {
+      alert('Por favor, selecione um cliente.');
+      return;
+    }
+
+    setIsSubmittingModal(true);
+    try {
+      let codigoOrcamentoGerado = (newOrcamentoData.codigo || '').trim();
+      if (!codigoOrcamentoGerado) {
+        codigoOrcamentoGerado = await generateOfficialOrcamentoCode();
+      }
+
+      const cid = newOrcamentoData.cidade ? newOrcamentoData.cidade.trim().toUpperCase() : '';
+      const est = newOrcamentoData.estado || 'GO';
+      const localObra = [cid, est].filter(Boolean).join(' - ');
+      const parts = codigoOrcamentoGerado.split('.');
+      let revisao = '0';
+      if (parts.length >= 3) revisao = parts[2].split('-')[0] || '0';
+
+      const payload: any = {
+        codigo: codigoOrcamentoGerado,
+        nome: newOrcamentoData.projeto || importHeader.projeto || importHeader.nome_arquivo,
+        empresa: newOrcamentoData.empresa || 'BRP Soluções Metálicas',
+        cliente: newOrcamentoData.cliente,
+        projeto: newOrcamentoData.projeto,
+        gestor_cliente: newOrcamentoData.gestor_cliente,
+        responsavel: newOrcamentoData.responsavel,
+        local_obra: localObra,
+        cidade: cid,
+        estado: est,
+        revisao,
+        status: 'Em Elaboração',
+        data_base: new Date().toISOString().split('T')[0],
+        orcamento_importado_id: importId
+      };
+
+      let newOrc: any = null;
+      let orcError: any = null;
+
+      const optionalFields = ['cidade', 'estado', 'empresa', 'gestor_cliente', 'local_obra', 'orcamento_importado_id', 'revisao', 'data_base'];
+      const attemptPayload = { ...payload };
+
+      const firstTry = await supabase
         .schema('engenharia')
         .from('orcamentos')
-        .insert({
-          codigo,
-          nome: importHeader.projeto || importHeader.nome_arquivo,
-          cliente: importHeader.cliente,
-          status: 'Em Elaboração',
-          revisao: '0',
-          data_base: new Date().toISOString().split('T')[0],
-          orcamento_importado_id: importId
-        })
+        .insert(attemptPayload)
         .select('id')
         .single();
 
-      if (orcError) throw orcError;
+      newOrc = firstTry.data;
+      orcError = firstTry.error;
 
-      const validItems = items.filter(i => i.status_linha !== 'inativo' && i.status_linha !== 'desdobrado');
+      // Se falhou por causa de coluna não existente no schema cache do PostgREST, remove e tenta novamente
+      while (orcError && (orcError.message?.includes('Could not find the') || (orcError as any).code === 'PGRST204')) {
+        const match = orcError.message?.match(/Could not find the '([^']+)' column/);
+        if (match && match[1] && attemptPayload[match[1]] !== undefined) {
+          delete attemptPayload[match[1]];
+        } else {
+          const nextOptional = optionalFields.find(f => attemptPayload[f] !== undefined);
+          if (nextOptional) {
+            delete attemptPayload[nextOptional];
+          } else {
+            break;
+          }
+        }
+
+        const retry = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .insert(attemptPayload)
+          .select('id')
+          .single();
+
+        newOrc = retry.data;
+        orcError = retry.error;
+      }
+
+      if (orcError || !newOrc) {
+        const publicTry = await supabase
+          .from('orcamentos')
+          .insert(attemptPayload)
+          .select('id')
+          .single();
+
+        newOrc = publicTry.data;
+        orcError = publicTry.error;
+      }
+
+      if (orcError || !newOrc) throw orcError || new Error('Falha ao criar orçamento.');
+
+      const validItems = items.filter(i => i.status_linha !== 'inativo');
       const itensPayload = validItems.map((item: any) => {
         const role = getItemEapRole(item);
         const linkedRef = item.composicao || item.insumo;
-        const isHeader = role === 'secao_texto' || (!linkedRef && (item.quantidade === 0 || !item.quantidade));
+
+        const hasChildrenDesdobrados = hasDirectDesdobrados(item.item_eap, items);
+
+        const isHeader = role === 'secao_texto' && !item.texto_empresa && !hasChildrenDesdobrados && !linkedRef;
 
         if (isHeader) {
           return {
@@ -1947,7 +2785,7 @@ export default function OrcamentoDeParaStudio() {
             item_eap: item.item_eap,
             codigo: null,
             banco_fonte: null,
-            descricao: (item.descricao && item.descricao.trim() !== '') ? item.descricao : 'SEÇÃO / TÍTULO',
+            descricao: item.texto_empresa || ((item.descricao && item.descricao.trim() !== '') ? item.descricao : 'SEÇÃO / TÍTULO'),
             unidade: '',
             quantidade: 0,
             valor_unitario_mat: 0,
@@ -1956,7 +2794,49 @@ export default function OrcamentoDeParaStudio() {
             valor_unitario_com_bdi: 0,
             total_mat: 0,
             total_mo: 0,
-            total: 0
+            total: 0,
+            is_secao: true,
+            is_child_insumo: false,
+            parent_composition_id: null,
+            composicao_id: null,
+            insumo_id: null,
+            tipo_vinculo: 'secao'
+          };
+        }
+
+        if (item.status_linha === 'desdobrado') {
+          const parts = (item.item_eap || '').split('.');
+          const parentEap = parts.length > 1 ? parts.slice(0, -1).join('.') : '';
+          const isMo = item.insumo?.tipo === 'Mão de Obra';
+          const valUnit = parseFloat(item.valor_unitario_empresa || item.insumo?.valor || item.insumo?.valor_nao_desonerado || 0);
+          const matUnit = isMo ? 0 : valUnit;
+          const moUnit = isMo ? valUnit : 0;
+          const unitTotal = matUnit + moUnit;
+          const qty = parseFloat(item.quantidade || 0);
+          const matTotal = qty * matUnit;
+          const moTotal = qty * moUnit;
+
+          return {
+            orcamento_id: newOrc.id,
+            item_eap: item.item_eap,
+            codigo: item.codigo || linkedRef?.codigo || null,
+            banco_fonte: linkedRef?.fonte || linkedRef?.fonte_preco || 'Banco Próprio',
+            descricao: item.texto_empresa || linkedRef?.descricao || item.descricao || '',
+            unidade: item.unidade || linkedRef?.unidade || 'un',
+            quantidade: qty,
+            valor_unitario_mat: matUnit,
+            valor_unitario_mo: moUnit,
+            valor_unitario: unitTotal,
+            valor_unitario_com_bdi: unitTotal,
+            total_mat: matTotal,
+            total_mo: moTotal,
+            total: matTotal + moTotal,
+            composicao_id: item.composicao_id || item.composicao?.id || null,
+            insumo_id: item.insumo_id || item.insumo?.id || null,
+            tipo_vinculo: item.tipo_vinculo || (item.composicao_id ? 'composicao' : 'insumo'),
+            is_secao: false,
+            is_child_insumo: true,
+            parent_composition_id: parentEap
           };
         }
 
@@ -1964,56 +2844,162 @@ export default function OrcamentoDeParaStudio() {
         return {
           orcamento_id: newOrc.id,
           item_eap: item.item_eap,
-          codigo: linkedRef?.codigo || null,
-          banco_fonte: linkedRef?.fonte || 'Banco Próprio',
+          codigo: linkedRef?.codigo || item.codigo || null,
+          banco_fonte: linkedRef?.fonte || linkedRef?.fonte_preco || 'Banco Próprio',
           descricao: item.texto_empresa || linkedRef?.descricao || item.descricao,
           unidade: item.unidade || linkedRef?.unidade || 'un',
-          quantidade: item.quantidade || 1,
+          quantidade: parseFloat(item.quantidade || 0),
           valor_unitario_mat: compBreak.matUnit,
           valor_unitario_mo: compBreak.moUnit,
           valor_unitario: compBreak.unitTotal,
           valor_unitario_com_bdi: compBreak.unitTotal,
           total_mat: compBreak.matTotal,
           total_mo: compBreak.moTotal,
-          total: compBreak.matTotal + compBreak.moTotal
+          total: compBreak.matTotal + compBreak.moTotal,
+          composicao_id: item.composicao_id || item.composicao?.id || null,
+          insumo_id: item.insumo_id || item.insumo?.id || null,
+          tipo_vinculo: item.tipo_vinculo || (item.composicao_id ? 'composicao' : (item.insumo_id ? 'insumo' : 'texto')),
+          is_secao: false,
+          is_child_insumo: false,
+          parent_composition_id: null
         };
       });
+
+      // Persistência local imediata para sincronia com OrcamentoBuilder
+      try {
+        localStorage.setItem(`brp_orcamento_itens_${newOrc.id}`, JSON.stringify(itensPayload));
+        localStorage.setItem(`orcamento_calculos_${newOrc.id}`, JSON.stringify(itensPayload));
+      } catch (e) {}
 
       const { error: itemsError } = await supabase
         .schema('engenharia')
         .from('orcamento_itens')
         .insert(itensPayload);
 
-      if (itemsError) throw itemsError;
+      if (itemsError) {
+        console.warn('Erro ao inserir em engenharia.orcamento_itens, tentando fallback public:', itemsError);
+        try {
+          await supabase.from('orcamento_itens').insert(itensPayload);
+        } catch (e) {}
+      }
+
+      // Atualiza o nome do projeto e cliente na planilha importada se alterado no modal
+      if (newOrcamentoData.projeto && importId) {
+        const headerUpdate = {
+          projeto: newOrcamentoData.projeto.trim(),
+          cliente: (newOrcamentoData.cliente || importHeader?.cliente || '').trim(),
+          gestor_cliente: (newOrcamentoData.gestor_cliente || importHeader?.gestor_cliente || '').trim(),
+          cidade: (newOrcamentoData.cidade || importHeader?.cidade || '').trim(),
+          estado: (newOrcamentoData.estado || importHeader?.estado || 'GO').trim()
+        };
+
+        try {
+          await supabase
+            .schema('engenharia')
+            .from('orcamentos_importados')
+            .update(headerUpdate)
+            .eq('id', importId);
+        } catch (e) {}
+
+        try {
+          await supabase
+            .from('orcamentos_importados')
+            .update(headerUpdate)
+            .eq('id', importId);
+        } catch (e) {}
+
+        setImportHeader((prev: any) => {
+          const updated = { ...prev, ...headerUpdate };
+          saveStudioState(items, updated);
+          return updated;
+        });
+      }
 
       setExistingOrcamento({
         id: newOrc.id,
-        codigo,
-        nome: importHeader.projeto || importHeader.nome_arquivo,
+        codigo: codigoOrcamentoGerado,
+        nome: newOrcamentoData.projeto || importHeader.projeto || importHeader.nome_arquivo,
         status: 'Em Elaboração'
       });
 
-      alert(`✅ Orçamento Versão Empresa (${codigo}) criado com sucesso!`);
+      setIsCreateModalOpen(false);
+      alert(`✅ Orçamento Versão Empresa (${codigoOrcamentoGerado}) criado com sucesso!`);
       navigate(`/orcamentos/${newOrc.id}`);
     } catch (err: any) {
       console.error(err);
       alert('Erro ao gerar orçamento: ' + err.message);
     } finally {
-      setSaving(false);
+      setIsSubmittingModal(false);
     }
   };
 
   // Estatísticas de Custo e Progresso de Itens Principais do Cliente
-  const mainClientItems = items.filter(isMainClientItem);
-  const totalItemsCount = mainClientItems.length;
-  const linkedItemsCount = mainClientItems.filter(isItemLinked).length;
+  const progressStats = calculateImportadoProgressStats(items);
+  const totalItemsCount = progressStats.total;
+  const linkedItemsCount = progressStats.linked;
   const isAllLinked = totalItemsCount > 0 && linkedItemsCount === totalItemsCount;
-  const progressPercent = totalItemsCount > 0 ? Math.round((linkedItemsCount / totalItemsCount) * 100) : 100;
+  const progressPercent = progressStats.percent;
 
-  const totalCliente = items.filter(i => i.status_linha !== 'inativo').reduce((acc, i) => acc + (i.total_orig || 0), 0);
-  const totalEmpresa = items.filter(i => i.status_linha !== 'inativo').reduce((acc, i) => acc + (i.total_empresa || i.total_orig || 0), 0);
-  const deltaTotal = totalEmpresa - totalCliente;
-  const deltaPercent = totalCliente > 0 ? (deltaTotal / totalCliente) * 100 : 0;
+  const isMainOperationalClientItem = (item: ImportadoItem) => {
+    if (isItemInactiveInTree(item, items) || item.status_linha === 'desdobrado') return false;
+    const prefix = (item.item_eap || '').trim() + '.';
+    const hasMainClientChildren = items.some(child => 
+      !isItemInactiveInTree(child, items) && 
+      child.status_linha !== 'desdobrado' && 
+      (child.item_eap || '').trim().startsWith(prefix)
+    );
+    return !hasMainClientChildren;
+  };
+
+  const totalCliente = items
+    .filter(i => isMainOperationalClientItem(i) && getItemEapRole(i) === 'item_operacional')
+    .reduce((acc, i) => acc + (i.total_orig || 0), 0);
+
+  const studioCompanyTotals = (() => {
+    let matTotal = 0;
+    let moTotal = 0;
+
+    items.forEach(item => {
+      if (!isMainOperationalClientItem(item)) return;
+
+      const uMat = parseFloat((item.valor_unitario_mat_empresa || 0) as any);
+      const uMo = parseFloat((item.valor_unitario_mo_empresa || 0) as any);
+      const qty = parseFloat((item.quantidade || 1) as any);
+
+      if (uMat > 0 || uMo > 0) {
+        matTotal += uMat * qty;
+        moTotal += uMo * qty;
+        return;
+      }
+
+      const uPrice = parseFloat((item.valor_unitario_empresa || 0) as any);
+      if (uPrice > 0) {
+        matTotal += uPrice * qty;
+        return;
+      }
+
+      const tot = parseFloat((item.total_empresa || 0) as any);
+      if (tot > 0) {
+        matTotal += tot;
+        return;
+      }
+
+      const bd = getCompanyBreakdown(item);
+      const rawFactor = (exibirBdi && bdiFactor > 0) ? bdiFactor : 1;
+      matTotal += (bd.matTotal / rawFactor);
+      moTotal += (bd.moTotal / rawFactor);
+    });
+
+    const totalSemBdi = matTotal + moTotal;
+    const totalComBdi = totalSemBdi * (bdiFactor > 0 ? bdiFactor : 1);
+
+    return { matTotal, moTotal, totalSemBdi, totalComBdi };
+  })();
+
+  const custoTotalEmpresaSemBdi = studioCompanyTotals.totalSemBdi;
+  const valorTotalOrcamentoComBdi = studioCompanyTotals.totalComBdi;
+  const deltaTotalSemBdi = custoTotalEmpresaSemBdi - totalCliente;
+  const deltaPercentSemBdi = totalCliente > 0 ? (deltaTotalSemBdi / totalCliente) * 100 : 0;
 
   if (loading) {
     return (
@@ -2025,7 +3011,7 @@ export default function OrcamentoDeParaStudio() {
   }
 
   return (
-    <div className="space-y-4 relative pb-[250px] p-4 md:p-8" style={{ zoom: 0.8 }}>
+    <div className="space-y-4 relative pb-[600px] p-4 md:p-8" style={{ zoom: 0.8 }}>
       {/* Topbar Navigation */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="flex items-center gap-3">
@@ -2061,12 +3047,28 @@ export default function OrcamentoDeParaStudio() {
         </div>
 
         <div className="flex items-center gap-2">
+          {/* Botão de Toggle de BDI */}
+          <button
+            onClick={() => setExibirBdi(!exibirBdi)}
+            title={exibirBdi ? "Valores exibidos COM BDI (Clique para alternar para SEM BDI)" : "Valores exibidos SEM BDI (Clique para alternar para COM BDI)"}
+            className={clsx(
+              "px-3.5 py-2.5 font-bold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs border",
+              exibirBdi 
+                ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600 ring-2 ring-emerald-500/20" 
+                : "bg-white hover:bg-slate-50 text-slate-700 border-slate-200"
+            )}
+          >
+            <CheckCircle2 className={clsx("w-4 h-4", exibirBdi ? "text-white" : "text-slate-400")} />
+            <span>{exibirBdi ? 'COM BDI' : 'SEM BDI'}</span>
+          </button>
+
           <button
             onClick={handleExportExcel}
+            title="Exportar planilha do cliente completa preenchida com os valores do orçamento empresa vinculado"
             className="px-3.5 py-2.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs"
           >
             <Download className="w-4 h-4 text-emerald-600" />
-            <span>Exportar Excel Comparativo</span>
+            <span>Exportar Planilha Preenchida (Excel)</span>
           </button>
 
           {!existingOrcamento ? (
@@ -2083,20 +3085,28 @@ export default function OrcamentoDeParaStudio() {
             </button>
           ) : (
             <button
-              onClick={() => navigate(`/orcamentos/${existingOrcamento.id}`)}
-              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer transition-all hover:scale-[1.02]"
+              onClick={async () => {
+                if (existingOrcamento?.id) {
+                  setSyncingOrcamento(true);
+                  await syncOrcamentoEmpresaItens(existingOrcamento.id, items);
+                  setSyncingOrcamento(false);
+                  navigate(`/orcamentos/${existingOrcamento.id}`);
+                }
+              }}
+              disabled={syncingOrcamento}
+              className="px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs flex items-center gap-2 shadow-sm transition-all cursor-pointer hover:scale-[1.02] disabled:opacity-50"
             >
-              <CheckCircle2 className="w-4 h-4" />
-              <span>Acessar Orçamento Criado</span>
+              <CheckCircle2 className={clsx("w-4 h-4", syncingOrcamento && "animate-spin")} />
+              <span>{syncingOrcamento ? 'Sincronizando...' : 'Acessar Orçamento Criado'}</span>
             </button>
           )}
         </div>
       </div>
 
-      {/* Painel de Progresso & Comparativo Financeiro */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Card Progresso De-Para */}
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2">
+      {/* Painel de Progresso & Comparativo Financeiro com 4 Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Card 1: Progresso De-Para */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm space-y-2 flex flex-col justify-center">
           <div className="flex justify-between items-center text-xs font-bold text-slate-700">
             <span>Progresso de Vinculação (De-Para)</span>
             <span className={clsx(isAllLinked ? "text-emerald-600" : "text-blue-600")}>{linkedItemsCount} de {totalItemsCount} ({progressPercent}%)</span>
@@ -2106,7 +3116,7 @@ export default function OrcamentoDeParaStudio() {
           </div>
         </div>
 
-        {/* Card Custo Cliente */}
+        {/* Card 2: Custo Cliente */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
           <div>
             <span className="text-slate-400 text-xs font-semibold uppercase">Total Planilha</span>
@@ -2115,27 +3125,51 @@ export default function OrcamentoDeParaStudio() {
           <FileSpreadsheet className="w-7 h-7 text-slate-300" />
         </div>
 
-        {/* Card Custo Empresa & Delta */}
+        {/* Card 3: Custo Total Empresa (Sempre SEM BDI) */}
         <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
           <div>
-            <span className="text-slate-400 text-xs font-semibold uppercase">Total Orçamento Empresa</span>
             <div className="flex items-center gap-2">
-              <p className="text-base font-extrabold text-blue-600">{totalEmpresa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
-              {deltaTotal !== 0 && (
-                <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded", deltaTotal < 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
-                  {deltaTotal > 0 ? '+' : ''}{deltaPercent.toFixed(1)}%
+              <span className="text-slate-400 text-xs font-semibold uppercase">Custo Total Empresa</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                SEM BDI
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-base font-extrabold text-blue-600">{custoTotalEmpresaSemBdi.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+              {deltaTotalSemBdi !== 0 && (
+                <span className={clsx("text-[10px] font-bold px-1.5 py-0.5 rounded", deltaTotalSemBdi < 0 ? "bg-emerald-50 text-emerald-700" : "bg-amber-50 text-amber-700")}>
+                  {deltaTotalSemBdi > 0 ? '+' : ''}{deltaPercentSemBdi.toFixed(1)}%
                 </span>
               )}
             </div>
           </div>
           <Calculator className="w-7 h-7 text-blue-500" />
         </div>
+
+        {/* Card 4: Valor Total Orçamento (Sempre COM BDI) */}
+        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm flex justify-between items-center">
+          <div>
+            <div className="flex items-center gap-2">
+              <span className="text-slate-400 text-xs font-semibold uppercase">Valor Total Orçamento</span>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200">
+                COM BDI
+              </span>
+            </div>
+            <div className="flex items-center gap-2 mt-1">
+              <p className="text-base font-extrabold text-emerald-600">{valorTotalOrcamentoComBdi.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}</p>
+              <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-700 border border-emerald-200 font-mono">
+                +{((bdiFactor - 1) * 100).toFixed(2)}% BDI
+              </span>
+            </div>
+          </div>
+          <CheckCircle2 className="w-7 h-7 text-emerald-500" />
+        </div>
       </div>
 
       {/* Tabela De-Para Lado a Lado */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col">
-        {/* Barra de Ferramentas do Studio (Sempre no topo do Card) */}
-        <div className="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 rounded-t-2xl z-30">
+      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm flex flex-col h-[calc(100vh-60px)] min-h-[600px] overflow-hidden relative">
+        {/* Barra de Ferramentas do Studio (Congelada no topo ao rolar a tela) */}
+        <div ref={toolbarRef} className="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-3 rounded-t-2xl flex-none z-30 shadow-xs">
           {/* Título integrado */}
           <div className="text-left select-none">
             <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center gap-2">
@@ -2157,8 +3191,8 @@ export default function OrcamentoDeParaStudio() {
               <button
                 onClick={handleUndo}
                 disabled={historyStack.length === 0}
-                className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                title="Desfazer Última Ação [Ctrl + Z]"
+                className="p-1.5 hover:bg-slate-100 text-slate-600 font-bold rounded-lg text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Desfazer Ação (Ctrl + Z)"
               >
                 <Undo className="w-3.5 h-3.5 text-blue-600" />
                 <span>Desfazer</span>
@@ -2166,13 +3200,12 @@ export default function OrcamentoDeParaStudio() {
               <button
                 onClick={handleRedo}
                 disabled={redoStack.length === 0}
-                className="px-2 py-1 hover:bg-slate-100 text-slate-700 font-bold rounded-lg text-[11px] flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed transition-all"
-                title="Refazer Ação Desfeita [Ctrl + Y ou Ctrl + Shift + Z]"
+                className="p-1.5 hover:bg-slate-100 text-slate-600 font-bold rounded-lg text-xs flex items-center gap-1 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                title="Refazer Ação (Ctrl + Y)"
               >
                 <Redo className="w-3.5 h-3.5 text-blue-600" />
                 <span>Refazer</span>
               </button>
-
               <div className="w-px h-4 bg-slate-200 mx-1"></div>
 
               <button
@@ -2185,7 +3218,6 @@ export default function OrcamentoDeParaStudio() {
               </button>
 
               <div className="w-px h-4 bg-slate-200 mx-1"></div>
-
               <button
                 onClick={handleOutdentSelectedRow}
                 disabled={selectedRowIndex === null && selectedRowIndexes.size === 0}
@@ -2231,6 +3263,20 @@ export default function OrcamentoDeParaStudio() {
 
             <div className="flex items-center gap-1.5 bg-white border border-slate-200 p-1 rounded-xl shadow-2xs">
               <button
+                onClick={() => setShowEmpresaDetails(!showEmpresaDetails)}
+                className={clsx(
+                  "px-2.5 py-1.5 font-bold rounded-lg text-[11.5px] flex items-center gap-1.5 cursor-pointer border transition-all mr-1",
+                  showEmpresaDetails
+                    ? "bg-blue-50 text-blue-700 border-blue-200 shadow-2xs"
+                    : "bg-white hover:bg-slate-50 text-slate-600 border-slate-200"
+                )}
+                title="Alternar exibição das colunas detalhadas da empresa (Qtd, Mat. Unit, M.O. Unit, Valor Unit, Mat. Total, M.O. Total)"
+              >
+                <Layers className="w-3.5 h-3.5 text-blue-600" />
+                <span>Colunas Empresa: {showEmpresaDetails ? 'Detalhadas' : 'Compactas'}</span>
+              </button>
+
+              <button
                 onClick={expandAll}
                 className="px-2 py-1.5 hover:bg-slate-50 text-slate-600 font-bold rounded-lg text-[11.5px] flex items-center gap-1 cursor-pointer"
                 title="Expandir todos os tópicos (Tudo)"
@@ -2259,11 +3305,16 @@ export default function OrcamentoDeParaStudio() {
                 className="bg-slate-50 border border-slate-200 text-slate-700 text-[11px] font-bold rounded-lg px-2 py-1 focus:ring-1 focus:ring-blue-500 focus:border-blue-500 cursor-pointer outline-none"
               >
                 <option value="all">Ver Todos</option>
-                <option value="1">Nível 1 (Capítulos)</option>
-                <option value="2">Nível 2 (Sub-capítulos)</option>
-                <option value="3">Nível 3 (Composições)</option>
-                <option value="4">Nível 4 (Sub-composições)</option>
-                <option value="5">Nível 5 (Insumos)</option>
+                <option value="1">Nível 1</option>
+                <option value="2">Nível 2</option>
+                <option value="3">Nível 3</option>
+                <option value="4">Nível 4</option>
+                <option value="5">Nível 5</option>
+                <option value="6">Nível 6</option>
+                <option value="7">Nível 7</option>
+                <option value="8">Nível 8</option>
+                <option value="9">Nível 9</option>
+                <option value="10">Nível 10</option>
               </select>
             </div>
           </div>
@@ -2290,8 +3341,8 @@ export default function OrcamentoDeParaStudio() {
         `}</style>
 
         {/* Container da Tabela com Colunas com Larguras Exatas e Cabeçalho Sticky */}
-        <div ref={tableContainerRef} className="overflow-auto max-h-[calc(100vh-250px)] custom-horizontal-scrollbar bg-white rounded-b-2xl relative">
-          <table className="w-full min-w-[1300px] text-xs text-left border-collapse table-fixed relative">
+        <div ref={tableContainerRef} className="flex-1 overflow-auto custom-horizontal-scrollbar bg-white rounded-b-2xl relative">
+          <table className="text-xs text-left border-collapse table-fixed relative" style={{ width: `${calculatedTableWidth}px`, minWidth: `${calculatedTableWidth}px` }}>
             <colgroup>
               <col style={{ width: colWidths.eap }} />
               <col style={{ width: colWidths.item_cliente }} />
@@ -2303,18 +3354,44 @@ export default function OrcamentoDeParaStudio() {
               {showMatTotal && <col style={{ width: colWidths.mat_total }} />}
               {showMoTotal && <col style={{ width: colWidths.mo_total }} />}
               <col style={{ width: colWidths.preco_cliente }} />
+
+              {/* LADO EMPRESA (Referência Empresa) */}
               <col style={{ width: colWidths.ref_empresa }} />
-              {showMatUnit && <col style={{ width: colWidths.mat_unit_empresa }} />}
-              {showMoUnit && <col style={{ width: colWidths.mo_unit_empresa }} />}
-              {showUnitTotal && <col style={{ width: colWidths.unit_total_empresa }} />}
-              {showMatTotal && <col style={{ width: colWidths.mat_total_empresa }} />}
-              {showMoTotal && <col style={{ width: colWidths.mo_total_empresa }} />}
-              <col style={{ width: colWidths.preco_empresa }} />
               <col style={{ width: colWidths.acoes }} />
+              {showEmpresaDetails && <col style={{ width: colWidths.qtd_empresa || 60 }} />}
+              {showEmpresaDetails && <col style={{ width: colWidths.mat_unit_empresa || 100 }} />}
+              {showEmpresaDetails && <col style={{ width: colWidths.mo_unit_empresa || 100 }} />}
+              {showEmpresaDetails && <col style={{ width: colWidths.unit_total_empresa || 100 }} />}
+              {showEmpresaDetails && <col style={{ width: colWidths.mat_total_empresa || 100 }} />}
+              {showEmpresaDetails && <col style={{ width: colWidths.mo_total_empresa || 100 }} />}
+              <col style={{ width: colWidths.preco_empresa }} />
             </colgroup>
 
-            {/* Títulos das Colunas Congelados no Topo da Tabela */}
+            {/* Títulos das Colunas Congelados no Topo da Tabela com Super-Cabeçalhos */}
             <thead className="bg-slate-100 text-slate-700 font-bold border-b border-slate-300 sticky top-0 z-20 shadow-xs">
+              {/* Nível 1: Grupo Planilha do Cliente vs Referência Empresa */}
+              <tr className="border-b border-slate-300 text-xs font-extrabold text-center select-none uppercase tracking-wider">
+                <th 
+                  colSpan={5 + (showMatUnit ? 1 : 0) + (showMoUnit ? 1 : 0) + (showUnitTotal ? 1 : 0) + (showMatTotal ? 1 : 0) + (showMoTotal ? 1 : 0)} 
+                  className="py-1.5 px-3 bg-purple-100 text-purple-900 border-r-2 border-slate-300 border-b border-purple-200"
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <FileSpreadsheet className="w-4 h-4 text-purple-600" />
+                    <span>Planilha do Cliente</span>
+                  </div>
+                </th>
+                <th 
+                  colSpan={3 + (showEmpresaDetails ? 6 : 0)} 
+                  className="py-1.5 px-3 bg-blue-100 text-blue-900 border-b border-blue-200"
+                >
+                  <div className="flex items-center justify-center gap-2">
+                    <Layers className="w-4 h-4 text-blue-600" />
+                    <span>Referência &amp; Orçamento da Empresa</span>
+                  </div>
+                </th>
+              </tr>
+
+              {/* Nível 2: Nomes Individuais das Colunas */}
               <tr>
                 <th className="p-2 bg-slate-100 relative select-none">
                   <span>EAP</span>
@@ -2335,71 +3412,83 @@ export default function OrcamentoDeParaStudio() {
                 
                 {showMatUnit && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>Mat. Unit. (Cliente)</span>
+                    <span>Mat. Unit.</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_unit', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMoUnit && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>M.O. Unit. (Cliente)</span>
+                    <span>M.O. Unit.</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_unit', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showUnitTotal && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>Unit. Total (Cliente)</span>
+                    <span>Unit. Total</span>
                     <div onMouseDown={(e) => handleMouseDown('unit_total', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMatTotal && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>Mat. Total (Cliente)</span>
+                    <span>Mat. Total</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_total', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
                 {showMoTotal && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>M.O. Total (Cliente)</span>
+                    <span>M.O. Total</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_total', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
 
-                <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                <th className="p-2 text-right bg-slate-100 font-bold relative select-none border-r-2 border-slate-300">
                   <span>Preço Cliente</span>
                   <div onMouseDown={(e) => handleMouseDown('preco_cliente', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
+
+                {/* LADO EMPRESA */}
                 <th className="p-3 border-l border-slate-200 bg-slate-100 relative select-none">
                   <span>Referência Empresa</span>
                   <div onMouseDown={(e) => handleMouseDown('ref_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
+                <th className="p-2 text-center bg-slate-100 relative select-none">
+                  <span>Ações</span>
+                  <div onMouseDown={(e) => handleMouseDown('acoes', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
+                </th>
                 
-                {showMatUnit && (
+                {showEmpresaDetails && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>Mat. Unit. (Empresa)</span>
+                    <span>Qtd</span>
+                    <div onMouseDown={(e) => handleMouseDown('qtd_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
+                  </th>
+                )}
+                {showEmpresaDetails && (
+                  <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
+                    <span>Mat. Unit.</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_unit_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
-                {showMoUnit && (
+                {showEmpresaDetails && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>M.O. Unit. (Empresa)</span>
+                    <span>M.O. Unit.</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_unit_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
-                {showUnitTotal && (
+                {showEmpresaDetails && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>Unit. Total (Empresa)</span>
+                    <span>Valor Unit.</span>
                     <div onMouseDown={(e) => handleMouseDown('unit_total_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
-                {showMatTotal && (
+                {showEmpresaDetails && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>Mat. Total (Empresa)</span>
+                    <span>Mat. Total</span>
                     <div onMouseDown={(e) => handleMouseDown('mat_total_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
-                {showMoTotal && (
+                {showEmpresaDetails && (
                   <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
-                    <span>M.O. Total (Empresa)</span>
+                    <span>M.O. Total</span>
                     <div onMouseDown={(e) => handleMouseDown('mo_total_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                   </th>
                 )}
@@ -2407,10 +3496,6 @@ export default function OrcamentoDeParaStudio() {
                 <th className="p-2 text-right bg-slate-100 font-bold relative select-none">
                   <span>Preço Empresa</span>
                   <div onMouseDown={(e) => handleMouseDown('preco_empresa', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
-                </th>
-                <th className="p-2 text-center bg-slate-100 relative select-none">
-                  <span>Ações</span>
-                  <div onMouseDown={(e) => handleMouseDown('acoes', e)} className="absolute right-0 top-0 bottom-0 w-1 cursor-col-resize hover:bg-blue-400 active:bg-blue-600 bg-slate-200/50 transition-colors z-30" />
                 </th>
               </tr>
             </thead>
@@ -2425,10 +3510,12 @@ export default function OrcamentoDeParaStudio() {
                 const isCollapsed = collapsedEaps.has(item.item_eap);
 
                 const role = getItemEapRole(item);
-                const isSecaoTexto = role === 'secao_texto' || (hasChildrenBool && (!item.quantidade || item.quantidade === 0) && item.status_linha !== 'desdobrado' && item.status_linha !== 'inserido_empresa');
+                const isSecaoTexto = role === 'secao_texto';
 
                 const linked = isItemLinked(item);
                 const linkedRef = item.composicao || item.insumo;
+                const hasDesdobrados = hasDirectDesdobrados(item.item_eap, items);
+                const hasLinkedRef = Boolean(item.composicao_id || item.insumo_id || linkedRef || hasDesdobrados || (item.tipo_vinculo && item.tipo_vinculo !== 'secao'));
                 const isInactive = item.status_linha === 'inativo';
                 const isInsertedByEmpresa = item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente';
                 const isInsertedOrDesdobrado = isInsertedByEmpresa || item.status_linha === 'desdobrado';
@@ -2443,11 +3530,11 @@ export default function OrcamentoDeParaStudio() {
                 } else if (isInactive) {
                   rowStyle = "bg-slate-100/80 opacity-50 transition-colors";
                 } else if (item.status_linha === 'inserido_empresa_e_cliente') {
-                  rowStyle = "font-semibold text-amber-950 border-l-4 border-l-amber-500 shadow-2xs";
+                  rowStyle = "font-semibold text-amber-950 border-l-4 border-l-amber-500 shadow-2xs bg-amber-50/70";
                 } else if (item.status_linha === 'inserido_empresa') {
-                  rowStyle = "font-semibold text-slate-800 border-l-4 border-l-amber-500 shadow-2xs";
+                  rowStyle = "font-semibold text-slate-800 border-l-4 border-l-blue-500 shadow-2xs hover:bg-slate-50/80";
                 } else if (isSecaoTexto) {
-                  rowStyle = "bg-purple-50/40 font-extrabold text-purple-950 border-l-4 border-l-purple-600 shadow-2xs";
+                  rowStyle = "font-bold text-slate-800 hover:bg-slate-50/80 transition-colors cursor-pointer";
                 } else if (item.status_linha === 'desdobrado') {
                   rowStyle = "bg-slate-50/50 hover:bg-slate-100/70 text-slate-500 transition-colors";
                 } else if (linked) {
@@ -2456,8 +3543,29 @@ export default function OrcamentoDeParaStudio() {
 
                 const isRowHiddenOnClient = item.status_linha === 'inserido_empresa' || item.status_linha === 'desdobrado' || (item.status_linha === 'inativo' && (isDesdobradoEap(item.item_eap, items) || !item.descricao));
                 const clientBg = item.status_linha === 'inserido_empresa_e_cliente' ? 'bg-amber-100/90' : '';
-                const companyBg = (item.status_linha === 'inserido_empresa' || item.status_linha === 'inserido_empresa_e_cliente') ? 'bg-amber-100/90' : '';
+                const companyBg = item.status_linha === 'inserido_empresa_e_cliente' ? 'bg-amber-100/90' : (item.status_linha === 'inserido_empresa' ? 'bg-blue-50/30' : '');
                 const breakdown = getCompanyBreakdown(item);
+
+                const compDisplayCode = (() => {
+                  if (item.composicao?.codigo) return item.composicao.codigo;
+                  if (item.insumo?.codigo) return item.insumo.codigo;
+
+                  const childComp = items.find(c => c.status_linha === 'desdobrado' && (c.item_eap || '').startsWith(`${item.item_eap}.`) && c.composicao?.codigo);
+                  if (childComp?.composicao?.codigo) return childComp.composicao.codigo;
+
+                  const compItems = items.filter(i => {
+                    if (i.status_linha === 'inativo' || i.status_linha === 'desdobrado') return false;
+                    const hasChild = getDirectChildren(i.item_eap).length > 0;
+                    const isSec = getItemEapRole(i) === 'secao_texto' || (hasChild && (!i.quantidade || i.quantidade === 0) && i.status_linha !== 'inserido_empresa');
+                    return i.composicao_id || i.composicao || (hasChild && !isSec);
+                  });
+
+                  const idx = compItems.findIndex(i => i.id === item.id);
+                  if (idx >= 0) {
+                    return `COMP.${String(idx + 1).padStart(4, '0')}`;
+                  }
+                  return 'COMP.0001';
+                })();
 
                 return (
                   <tr
@@ -2470,8 +3578,11 @@ export default function OrcamentoDeParaStudio() {
                     <td
                       onDoubleClick={(e) => {
                         e.stopPropagation();
-                        setEditingCustomItem(item);
-                        setCustomText(item.descricao || linkedRef?.descricao || '');
+                        if (!linkedRef) {
+                          setInlineEditingRowId(item.id);
+                          const companyText = getCompanyText(item);
+                          setInlineTextValue(companyText || '');
+                        }
                       }}
                       className={clsx("p-2 font-medium text-slate-800 text-[11px] cursor-pointer", clientBg)}
                       title="Clique duas vezes para editar o texto desta linha"
@@ -2490,7 +3601,7 @@ export default function OrcamentoDeParaStudio() {
                         ) : (
                           <span className="w-3 inline-block" />
                         )}
-                        <span className={clsx("truncate flex-1 min-w-0", isInactive ? "line-through text-slate-400" : hasChildrenBool ? "font-bold" : "font-normal")}>
+                        <span className={clsx("truncate flex-1 min-w-0 select-text cursor-text", isInactive ? "line-through text-slate-400" : hasChildrenBool ? "font-bold" : "font-normal")} onDoubleClick={(e) => handleSelectAllText(e)}>
                           {isRowHiddenOnClient ? '' : (item.descricao || linkedRef?.descricao || '')}
                         </span>
                       </div>
@@ -2536,6 +3647,7 @@ export default function OrcamentoDeParaStudio() {
                       draggable
                       onDragStart={e => handleRightDragStart(e, index)}
                       onDragOver={e => handleRightDragOver(e)}
+                      onDragEnd={handleRightDragEnd}
                       onDrop={e => handleRightDrop(e, index)}
                       onDoubleClick={(e) => {
                         e.stopPropagation();
@@ -2547,7 +3659,7 @@ export default function OrcamentoDeParaStudio() {
                       }}
                       className={clsx(
                         "p-2 border-l border-slate-200 text-[11px] transition-all",
-                        !linkedRef && "cursor-pointer hover:bg-purple-50/50",
+                        !linkedRef && "cursor-pointer hover:bg-slate-100/50",
                         companyBg ? companyBg : "bg-slate-50/40",
                         draggedRightIndex === index ? "opacity-30 border-2 border-dashed border-blue-500 bg-blue-100" : "hover:bg-blue-50/60"
                       )}
@@ -2571,10 +3683,19 @@ export default function OrcamentoDeParaStudio() {
                               value={inlineTextValue}
                               onChange={e => setInlineTextValue(e.target.value)}
                               onKeyDown={async (e) => {
+                                e.stopPropagation();
                                 if (e.key === 'Enter') {
                                   e.preventDefault();
+                                  const currentIdx = items.findIndex(i => i.id === item.id);
                                   await handleSaveInlineText(item, inlineTextValue);
+                                  if (currentIdx !== -1 && currentIdx < items.length - 1) {
+                                    const nextIdx = currentIdx + 1;
+                                    setSelectedRowIndex(nextIdx);
+                                    setSelectedRowIndexes(new Set([nextIdx]));
+                                    setLastClickedRowIndex(nextIdx);
+                                  }
                                 } else if (e.key === 'Escape') {
+                                  e.preventDefault();
                                   setInlineEditingRowId(null);
                                 }
                               }}
@@ -2583,7 +3704,7 @@ export default function OrcamentoDeParaStudio() {
                               }}
                               autoFocus
                               placeholder="Digite um texto ou vincule a um item do banco..."
-                              className="w-full bg-white border-2 border-purple-500 rounded-lg px-2 py-0.5 text-[11px] font-semibold text-slate-800 focus:outline-none shadow-xs"
+                              className="w-full bg-white border-2 border-blue-500 rounded-lg px-2 py-0.5 text-[11px] font-semibold text-slate-800 focus:outline-none shadow-xs"
                             />
                           </div>
                         ) : isInsertedByEmpresa && linkedRef ? (
@@ -2603,7 +3724,7 @@ export default function OrcamentoDeParaStudio() {
                             <span className="text-[9px] bg-amber-200/80 text-amber-900 font-bold font-mono px-1 py-0.5 rounded">
                               {linkedRef?.codigo || 'INSERIDO'}
                             </span>
-                            <span className="font-semibold text-amber-950 truncate flex-1 min-w-0">{linkedRef?.descricao}</span>
+                            <span className="font-semibold text-amber-950 truncate flex-1 min-w-0 select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>{linkedRef?.descricao}</span>
                           </div>
                         ) : item.status_linha === 'desdobrado' && linkedRef ? (
                           <div className="flex items-center gap-1 flex-1 min-w-0">
@@ -2623,7 +3744,7 @@ export default function OrcamentoDeParaStudio() {
                             <span className="text-[9px] bg-slate-200/90 text-slate-600 font-bold font-mono px-1 py-0.5 rounded">
                               {linkedRef?.codigo}
                             </span>
-                            <span className="text-slate-500 truncate flex-1 min-w-0 font-normal text-[10.5px]">{linkedRef?.descricao}</span>
+                            <span className="text-slate-500 truncate flex-1 min-w-0 font-normal text-[10.5px] select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>{linkedRef?.descricao}</span>
                           </div>
                         ) : linkedRef ? (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
@@ -2640,13 +3761,54 @@ export default function OrcamentoDeParaStudio() {
                               </button>
                             )}
                             <span className="text-[9px] bg-blue-100 text-blue-800 font-bold font-mono px-1 py-0.5 rounded">
-                              {linkedRef?.codigo || 'VINCULADO'}
+                              {linkedRef?.codigo || compDisplayCode}
                             </span>
-                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{linkedRef?.descricao}</span>
+                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0 select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>{linkedRef?.descricao}</span>
+                          </div>
+                        ) : isSecaoTexto ? (
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                            {hasChildrenBool && (
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  toggleCollapse(item.item_eap);
+                                }}
+                                className="p-0.5 hover:bg-slate-200 rounded text-slate-500 cursor-pointer mr-0.5"
+                                title={isCollapsed ? "Expandir sub-itens" : "Recolher sub-itens"}
+                              >
+                                {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-slate-600" /> : <ChevronDown className="w-3.5 h-3.5 text-slate-600" />}
+                              </button>
+                            )}
+                            {item.texto_empresa && String(item.texto_empresa).trim() !== '' ? (
+                              <span className="font-bold text-slate-900 truncate flex-1 min-w-0 select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>
+                                {item.texto_empresa}
+                              </span>
+                            ) : (
+                              <span className="font-bold text-slate-800 truncate flex-1 min-w-0 select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>
+                                {item.descricao}
+                              </span>
+                            )}
+                          </div>
+                        ) : hasChildrenBool && hasDirectDesdobrados(item.item_eap, items) ? (
+                          <div className="flex items-center gap-1.5 flex-1 min-w-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                toggleCollapse(item.item_eap);
+                              }}
+                              className="p-0.5 hover:bg-slate-200 rounded text-slate-500 cursor-pointer mr-0.5"
+                              title={isCollapsed ? "Expandir sub-itens da composição" : "Recolher sub-itens da composição"}
+                            >
+                              {isCollapsed ? <ChevronRight className="w-3.5 h-3.5 text-blue-600" /> : <ChevronDown className="w-3.5 h-3.5 text-blue-600" />}
+                            </button>
+                            <span className="text-[9px] bg-blue-100 text-blue-800 font-bold font-mono px-1 py-0.5 rounded">
+                              {compDisplayCode}
+                            </span>
+                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0 select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>{item.composicao?.descricao || item.descricao || 'Composição Desdobrada'}</span>
                           </div>
                         ) : getCompanyText(item) ? (
                           <div className="flex items-center gap-1.5 flex-1 min-w-0">
-                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0">{getCompanyText(item)}</span>
+                            <span className="font-semibold text-slate-800 truncate flex-1 min-w-0 select-text cursor-text" onDoubleClick={(e) => handleSelectAllText(e)}>{getCompanyText(item)}</span>
                           </div>
                         ) : (
                           <span className="text-slate-400 italic text-[11px] cursor-pointer hover:text-slate-600">
@@ -2656,74 +3818,42 @@ export default function OrcamentoDeParaStudio() {
                       </div>
                     </td>
 
-                    {showMatUnit && (
-                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
-                        {isInactive ? '-' : breakdown.matUnit > 0 ? breakdown.matUnit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                      </td>
-                    )}
-                    {showMoUnit && (
-                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
-                        {isInactive ? '-' : breakdown.moUnit > 0 ? breakdown.moUnit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                      </td>
-                    )}
-                    {showUnitTotal && (
-                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
-                        {isInactive ? '-' : breakdown.unitTotal > 0 ? breakdown.unitTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                      </td>
-                    )}
-                    {showMatTotal && (
-                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
-                        {isInactive ? '-' : breakdown.matTotal > 0 ? breakdown.matTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                      </td>
-                    )}
-                    {showMoTotal && (
-                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
-                        {isInactive ? '-' : breakdown.moTotal > 0 ? breakdown.moTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                      </td>
-                    )}
-
-                     <td className={clsx("p-2 text-right font-bold text-slate-800 text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
-                      {isInactive ? '-' : item.total_empresa > 0 ? item.total_empresa.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
-                    </td>
-
                     {/* Ações completas para todos os itens operacionais */}
                     <td className={clsx("p-2 text-center", companyBg)} onClick={e => e.stopPropagation()}>
                        <div className="flex items-center justify-center gap-1 flex-wrap">
                           {/* Inativar / Reativar Linha */}
-                          {!linkedRef && (
-                            <button
-                              onClick={() => handleToggleInativar(item)}
-                              title={item.status_linha === 'inativo' ? "Reativar Linha" : "Inativar Linha"}
-                              className={clsx(
-                                "p-1 rounded-lg cursor-pointer transition-all",
-                                item.status_linha === 'inativo'
-                                  ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
-                                  : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
-                              )}
-                            >
-                              <Strikethrough className="w-3.5 h-3.5" />
-                            </button>
-                          )}
+                          <button
+                            onClick={() => handleToggleInativar(item)}
+                            title={item.status_linha === 'inativo' ? "Reativar Linha" : "Inativar Linha"}
+                            className={clsx(
+                              "p-1 rounded-lg cursor-pointer transition-all",
+                              item.status_linha === 'inativo'
+                                ? "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200 shadow-2xs"
+                                : "text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                            )}
+                          >
+                            <Strikethrough className={clsx("w-3.5 h-3.5", item.status_linha === 'inativo' ? "text-emerald-700" : "text-slate-400")} />
+                          </button>
 
-                          {!isInactive && (!isSecaoTexto || linkedRef) && (
+                          {!isInactive && (!isSecaoTexto || hasLinkedRef) && (
                             <button
                               onClick={() => {
                                 setSelectedItemForLink(item);
                                 setShowLinkDrawer(true);
                               }}
-                              title={linkedRef ? "Trocar Vínculo (Banco Próprio)" : "Vincular do Banco Próprio"}
+                              title={hasLinkedRef ? "Trocar Vínculo (Banco Próprio)" : "Vincular do Banco Próprio"}
                               className={clsx(
                                 "p-1 rounded-lg cursor-pointer transition-all",
-                                linkedRef
+                                hasLinkedRef
                                   ? "text-blue-600 hover:text-blue-800 hover:bg-blue-50/60"
                                   : "text-amber-600 hover:text-amber-700 hover:bg-amber-50 bg-amber-50/80 font-bold border border-amber-200"
                               )}
                             >
-                              {linkedRef ? <RefreshCw className="w-3.5 h-3.5" /> : <PlusCircle className="w-3.5 h-3.5" />}
+                              {hasLinkedRef ? <RefreshCw className="w-3.5 h-3.5" /> : <PlusCircle className="w-3.5 h-3.5" />}
                             </button>
                           )}
  
-                          {!isInactive && linkedRef && (
+                          {hasLinkedRef && (
                             <button
                               onClick={() => handleUnlinkItem(item)}
                               title="Desvincular Composição ou Insumo (Desfazer De-Para)"
@@ -2734,23 +3864,44 @@ export default function OrcamentoDeParaStudio() {
                           )}
 
                         {/* Confirmar Inserção / Desinserção na Planilha do Cliente */}
-                        {isInsertedOrDesdobrado && (
-                          <button
-                            onClick={() => handleToggleInserirCliente(item)}
-                            title={item.status_linha === 'inserido_empresa_e_cliente' ? "Desinserir da Planilha do Cliente (Manter apenas na Referência Empresa)" : "Inserir na Planilha do Cliente (Exibir e Exportar na Proposta do Cliente)"}
-                            className={clsx(
-                              "p-1 rounded cursor-pointer transition-all",
-                              item.status_linha === 'inserido_empresa_e_cliente'
-                                ? "bg-amber-100 hover:bg-rose-100 text-amber-900 hover:text-rose-700 border border-amber-300"
-                                : "hover:bg-blue-100 text-slate-400 hover:text-blue-700"
-                            )}
-                          >
-                            {item.status_linha === 'inserido_empresa_e_cliente' ? <FileMinus className="w-3.5 h-3.5" /> : <FilePlus className="w-3.5 h-3.5" />}
-                          </button>
-                        )}
+                        {(() => {
+                          const childDesdobrados = getChildDesdobradosOf(item, items);
+                          const isMainWithChildren = childDesdobrados.length > 0 && item.status_linha !== 'desdobrado';
+                          const isChildOrInserted = item.status_linha === 'desdobrado' || isInsertedByEmpresa;
 
-                        {/* Excluir Linha Inserida */}
-                        {isInsertedOrDesdobrado && (
+                          if (isInactive) return null;
+                          if (!isMainWithChildren && !isChildOrInserted) return null;
+
+                          const isAllInserted = isMainWithChildren 
+                            ? childDesdobrados.every(c => c.status_linha === 'inserido_empresa_e_cliente')
+                            : item.status_linha === 'inserido_empresa_e_cliente';
+
+                          const titleText = isMainWithChildren
+                            ? (isAllInserted 
+                                ? "Desinserir todos os sub-itens filhas da Planilha do Cliente" 
+                                : "Inserir todos os sub-itens filhas da composição na Planilha do Cliente")
+                            : (isAllInserted 
+                                ? "Desinserir esta subcomposição/insumo da Planilha do Cliente" 
+                                : "Inserir esta subcomposição/insumo na Planilha do Cliente");
+
+                          return (
+                            <button
+                              onClick={() => handleToggleInserirCliente(item)}
+                              title={titleText}
+                              className={clsx(
+                                "p-1 rounded cursor-pointer transition-all",
+                                isAllInserted
+                                  ? "bg-amber-100 hover:bg-rose-100 text-amber-900 hover:text-rose-700 border border-amber-300"
+                                  : "hover:bg-blue-100 text-slate-400 hover:text-blue-700"
+                              )}
+                            >
+                              {isAllInserted ? <FileMinus className="w-3.5 h-3.5" /> : <FilePlus className="w-3.5 h-3.5" />}
+                            </button>
+                          );
+                        })()}
+
+                        {/* Excluir Linha Inserida pela Empresa */}
+                        {isInsertedByEmpresa && (
                           <button
                             onClick={() => handleDeleteRow(item)}
                             title="Excluir Linha Inserida"
@@ -2760,6 +3911,41 @@ export default function OrcamentoDeParaStudio() {
                           </button>
                         )}
                       </div>
+                    </td>
+
+                    {showEmpresaDetails && (
+                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                        {isInactive || isSecaoTexto ? '' : (item.quantidade > 0 ? item.quantidade.toLocaleString('pt-BR', { maximumFractionDigits: 4 }) : '')}
+                      </td>
+                    )}
+                    {showEmpresaDetails && (
+                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                        {isInactive || isSecaoTexto ? '-' : breakdown.matUnit > 0 ? breakdown.matUnit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                      </td>
+                    )}
+                    {showEmpresaDetails && (
+                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                        {isInactive || isSecaoTexto ? '-' : breakdown.moUnit > 0 ? breakdown.moUnit.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                      </td>
+                    )}
+                    {showEmpresaDetails && (
+                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                        {isInactive || isSecaoTexto ? '-' : breakdown.unitTotal > 0 ? breakdown.unitTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                      </td>
+                    )}
+                    {showEmpresaDetails && (
+                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                        {isInactive ? '-' : breakdown.matTotal > 0 ? breakdown.matTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                      </td>
+                    )}
+                    {showEmpresaDetails && (
+                      <td className={clsx("p-2 text-right text-slate-600 font-semibold text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                        {isInactive ? '-' : breakdown.moTotal > 0 ? breakdown.moTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
+                      </td>
+                    )}
+
+                    <td className={clsx("p-2 text-right font-bold text-slate-800 text-[11px]", companyBg ? companyBg : "bg-slate-50/40")}>
+                      {isInactive ? '-' : breakdown.total > 0 ? breakdown.total.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : '-'}
                     </td>
                   </tr>
                 );
@@ -2874,8 +4060,13 @@ export default function OrcamentoDeParaStudio() {
                 searchResults.map(item => (
                   <div
                     key={item.id}
-                    onClick={() => handleLinkItem(item)}
-                    className="p-3 border border-slate-200 hover:border-blue-500 hover:bg-blue-50/40 rounded-xl cursor-pointer transition-all space-y-1 group shadow-xs"
+                    onClick={() => {
+                      if (!isLinking) handleLinkItem(item);
+                    }}
+                    className={clsx(
+                      "p-3 border border-slate-200 hover:border-blue-500 hover:bg-blue-50/40 rounded-xl cursor-pointer transition-all space-y-1 group shadow-xs",
+                      isLinking && "opacity-50 pointer-events-none"
+                    )}
                   >
                     <div className="flex justify-between items-center">
                       <span className="text-[10px] font-bold font-mono bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">
@@ -2890,6 +4081,133 @@ export default function OrcamentoDeParaStudio() {
                 ))
               )}
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NOVO ORÇAMENTO DA EMPRESA */}
+      {isCreateModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4 z-50 animate-in fade-in duration-200">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-lg p-6 space-y-6">
+            <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+              <h3 className="text-base font-bold text-slate-800">Novo Orçamento da Empresa</h3>
+              <button 
+                type="button" 
+                onClick={() => setIsCreateModalOpen(false)} 
+                className="text-slate-400 hover:text-slate-600 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <form onSubmit={handleConfirmCreateOrcamento} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Código do Orçamento</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={newOrcamentoData.codigo} 
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, codigo: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl font-mono font-bold text-blue-600 outline-none focus:border-blue-500 bg-slate-50" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Empresa Responsável</label>
+                <select 
+                  value={newOrcamentoData.empresa} 
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, empresa: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white cursor-pointer"
+                >
+                  <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
+                  <option value="BRP Engenharia">BRP Engenharia</option>
+                </select>
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Nome do Projeto / Obra</label>
+                <input 
+                  type="text" 
+                  required 
+                  value={newOrcamentoData.projeto} 
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, projeto: e.target.value})} 
+                  placeholder="Ex: Construção de Galpão Industrial" 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 focus:bg-white bg-white" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Cliente *</label>
+                <ClienteSelect
+                  value={newOrcamentoData.cliente}
+                  onSelectClient={(c) => {
+                    setNewOrcamentoData({
+                      ...newOrcamentoData,
+                      cliente: c.nome_fantasia || c.razao_social,
+                      gestor_cliente: c.responsavel || '',
+                      cidade: c.cidade || '',
+                      estado: c.uf || 'GO'
+                    });
+                  }}
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Gestor do Cliente</label>
+                <input 
+                  type="text" 
+                  disabled 
+                  value={newOrcamentoData.gestor_cliente || ''} 
+                  placeholder="Preenchido automaticamente ao selecionar o cliente..." 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed" 
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Responsável Técnico / Orçamentista</label>
+                <select 
+                  value={newOrcamentoData.responsavel} 
+                  onChange={(e) => setNewOrcamentoData({...newOrcamentoData, responsavel: e.target.value})} 
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-900 font-semibold outline-none focus:border-blue-500 bg-white cursor-pointer"
+                >
+                  <option value="">Selecione o Responsável...</option>
+                  {usuariosCadastrados.map((u: any) => (
+                    <option key={u.id} value={u.nome}>{u.nome}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="grid grid-cols-3 gap-3">
+                <div className="col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">Cidade da Obra</label>
+                  <input 
+                    type="text" 
+                    disabled 
+                    value={newOrcamentoData.cidade || ''} 
+                    placeholder="Preenchido automaticamente..." 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-semibold bg-slate-100 cursor-not-allowed" 
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">UF</label>
+                  <input 
+                    type="text" 
+                    disabled 
+                    value={newOrcamentoData.estado || ''} 
+                    className="w-full px-3 py-2 border border-slate-200 rounded-xl text-slate-700 font-bold bg-slate-100 cursor-not-allowed uppercase text-center" 
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-3 pt-4 border-t border-slate-100">
+                <button 
+                  type="button" 
+                  onClick={() => setIsCreateModalOpen(false)} 
+                  className="px-4 py-2 border border-slate-200 rounded-xl text-slate-600 font-bold hover:bg-slate-50 cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button 
+                  type="submit" 
+                  disabled={isSubmittingModal} 
+                  className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50"
+                >
+                  {isSubmittingModal ? 'Criando Orçamento...' : 'Criar Orçamento'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -169,13 +169,7 @@ export const TabelaMemoriaisCalculo: React.FC<Props> = ({
     return result;
   }, [memoriaisFiltrados]);
 
-  // Expandir automaticamente todos os grupos quando houver busca ativa
-  useEffect(() => {
-    if (searchTerm.trim()) {
-      const allKeys = new Set(groupedMemoriais.map(g => g.baseKey));
-      setExpandedGroups(allKeys);
-    }
-  }, [searchTerm, groupedMemoriais]);
+  // Ao pesquisar ou listar, mantém os grupos recolhidos por padrão para exibir apenas a última revisão
 
   const toggleGroup = (baseKey: string, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
