@@ -3412,8 +3412,8 @@ export default function OrcamentoBuilder() {
         </div>
       )}
 
-      {/* Barra Superior Enxuta e Elegante */}
-      <div className="shrink-0 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 bg-white py-2 px-3.5 rounded-2xl border border-slate-200 shadow-2xs">
+      {/* Barra Superior Enxuta e Elegante (Oculta ao imprimir) */}
+      <div className="shrink-0 flex flex-col lg:flex-row justify-between items-start lg:items-center gap-2 bg-white py-2 px-3.5 rounded-2xl border border-slate-200 shadow-2xs print:hidden">
         
         {/* ── Esquerda: Título, Código, REV, Status e Metadados ── */}
         <div className="flex items-center gap-2 min-w-0">
@@ -4550,7 +4550,7 @@ export default function OrcamentoBuilder() {
         />
         </div>
       ) : activeSubTab === 'lista_materiais' ? (
-        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm print:p-0 print:border-0 print:bg-transparent print:shadow-none print:overflow-visible print:rounded-none">
           <ListaMateriaisTab 
             orcamentoId={id} 
             itens={computedItens}

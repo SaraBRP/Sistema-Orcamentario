@@ -550,7 +550,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
   // ─────────────────────────────────────────────────────────────
   if (showSolicitacaoView) {
     return (
-      <div className="flex flex-col h-full bg-slate-100 overflow-auto">
+      <div className="flex flex-col h-full bg-slate-100 overflow-auto print:bg-white print:p-0 print:m-0 print:overflow-visible print:h-auto print:block">
         {/* Barra de Ferramentas Superior (Invisível na impressão) */}
         <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-xs sticky top-0 z-30 print:hidden">
           <div className="flex items-center gap-3">
@@ -587,7 +587,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
         </div>
 
         {/* ── DOCUMENTO DA SOLICITAÇÃO (MODELO CLEAN FIDEDIGNO AO PDF) ── */}
-        <div className="p-4 md:p-8 flex justify-center">
+        <div className="p-4 md:p-8 flex justify-center print:p-0 print:m-0 print:block print:w-full">
           <div 
             id="solicitacao-cotacao-pdf"
             className="w-full max-w-[1000px] bg-white border border-slate-400 p-6 shadow-md text-slate-900 font-sans print:border-0 print:p-0 print:shadow-none print:w-full print:max-w-none text-[11px] leading-tight"
