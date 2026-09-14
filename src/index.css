@@ -56,7 +56,7 @@ input[type=number] {
   button,
   .no-print,
   [role="dialog"],
-  .fixed:not(#brp-official-print-report),
+  .fixed:not(#brp-official-print-report):not(#solicitacao-cotacao-pdf),
   .shadow-2xl,
   .z-50,
   #root > div > div:first-child,
@@ -66,8 +66,16 @@ input[type=number] {
     display: none !important;
   }
 
-  #brp-official-print-report,
-  #solicitacao-cotacao-pdf {
+  /* Se o documento de solicitação de cotação estiver presente, oculta o relatório geral de proposta */
+  body:has(#solicitacao-cotacao-pdf) #brp-official-print-report {
+    display: none !important;
+  }
+
+  body:has(#solicitacao-cotacao-pdf) div {
+    box-shadow: none !important;
+  }
+
+  #brp-official-print-report {
     display: block !important;
     position: static !important;
     width: 100% !important;
@@ -76,6 +84,20 @@ input[type=number] {
     background: #ffffff !important;
     color: #0f172a !important;
     visibility: visible !important;
+  }
+
+  #solicitacao-cotacao-pdf {
+    display: block !important;
+    position: static !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    visibility: visible !important;
+    box-shadow: none !important;
+    border: none !important;
   }
 
   /* 3. Limpa o container raiz para ocupação total de página */
@@ -90,10 +112,10 @@ input[type=number] {
     overflow: visible !important;
   }
 
-  /* 4. Configuração de página A4 Paisagem com margens padrão de engenharia */
+  /* 4. Configuração de página A4 */
   @page {
-    size: A4 landscape;
-    margin: 8mm 10mm 10mm 10mm;
+    size: A4 portrait;
+    margin: 8mm 8mm 8mm 8mm;
   }
 
   /* 5. Regras de quebra de página de alta qualidade para tabelas */

@@ -5849,9 +5849,10 @@ export default function OrcamentoBuilder() {
       )}
 
       {/* ==========================================================================
-          DOCUMENTO OFICIAL DE IMPRESSÃO / EXPORTAÇÃO EM PDF (EXIBIDO APENAS AO IMPRIMIR)
+          DOCUMENTO OFICIAL DE IMPRESSÃO / EXPORTAÇÃO EM PDF (EXIBIDO APENAS AO IMPRIMIR O ORÇAMENTO GERAL)
           ========================================================================== */}
-      <div id="brp-official-print-report" className="hidden print:block w-full text-slate-900 font-sans p-2 bg-white">
+      {activeSubTab !== 'lista_materiais' && (
+        <div id="brp-official-print-report" className="hidden print:block w-full text-slate-900 font-sans p-2 bg-white">
         {/* Cabeçalho do Documento */}
         <div className="border-b-2 border-slate-900 pb-3 mb-4">
           <div className="flex items-center justify-between">
@@ -6109,6 +6110,7 @@ export default function OrcamentoBuilder() {
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }
