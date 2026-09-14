@@ -621,19 +621,19 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <tbody>
                 {/* Linha 1 */}
                 <tr className="border-b border-slate-400">
-                  <td className="p-1.5 border-r border-slate-400 w-[50%]">
+                  <td className="p-1.5 border-r border-slate-400 w-[38%]">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">EMPRESA:</span>
                       <span className="font-semibold text-slate-900 truncate">{solicitacaoForm.empresa || 'BRP ENGENHARIA'}</span>
                     </div>
                   </td>
-                  <td className="p-1.5 border-r border-slate-400 w-[20%]">
+                  <td className="p-1.5 border-r border-slate-400 w-[17%]">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">CIDADE:</span>
                       <span className="font-semibold text-slate-900 truncate">{solicitacaoForm.cidade || '-'}</span>
                     </div>
                   </td>
-                  <td className="p-1.5 w-[30%]">
+                  <td className="p-1.5 w-[45%]">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0 text-[10px]">PRAZO RETORNO (DATA/HORA):</span>
                       <input
@@ -667,7 +667,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                       <select
                         value={solicitacaoForm.unidadeContratacao}
                         onChange={e => setSolicitacaoForm(prev => ({ ...prev, unidadeContratacao: e.target.value }))}
-                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-semibold text-slate-900 focus:outline-none cursor-pointer"
+                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-semibold text-slate-900 focus:outline-none cursor-pointer appearance-none print:appearance-none"
                       >
                         <option value="">Selecione...</option>
                         <option value="EMPREITADA GLOBAL">EMPREITADA GLOBAL</option>
@@ -705,7 +705,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <table className="w-full border-collapse text-[11px] bg-white">
                 <tbody>
                   <tr className="border-b border-slate-400">
-                    <td className="p-1.5 border-r border-slate-400 w-[65%]">
+                    <td className="p-1.5 border-r border-slate-400 w-[55%]">
                       <div className="flex items-center gap-1.5 w-full">
                         <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">RAZÃO SOCIAL:</span>
                         {(Boolean(orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome) || minhasEmpresas.length > 0 || clientesList.length > 0) && (
@@ -746,7 +746,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         />
                       </div>
                     </td>
-                    <td className="p-1.5 w-[35%]">
+                    <td className="p-1.5 w-[45%]">
                       <div className="flex items-center gap-1.5 w-full">
                         <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">TELEFONE:</span>
                         <input
@@ -876,17 +876,17 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                       </div>
 
                       {/* Tabela de Itens */}
-                      <table className="w-full border-collapse text-[10px]">
+                      <table className="w-full border-collapse text-[10px] table-fixed">
                         <thead>
                           <tr className="border-b border-slate-400 bg-slate-50 font-bold text-slate-700 text-left">
-                            <th className="p-1.5 border-r border-slate-400 w-24">CÓDIGO</th>
-                            <th className="p-1.5 border-r border-slate-400">DESCRIÇÃO</th>
-                            <th className="p-1.5 border-r border-slate-400 w-24 text-right">QUANTIDADE</th>
-                            <th className="p-1.5 border-r border-slate-400 w-16 text-center">UNIDADE</th>
-                            <th className="p-1.5 border-r border-slate-400 w-20 text-right">UNIT. MAT.</th>
-                            <th className="p-1.5 border-r border-slate-400 w-20 text-right">UNIT. M.O.</th>
-                            <th className="p-1.5 border-r border-slate-400 w-24 text-right">VALOR UNIT.</th>
-                            <th className="p-1.5 w-24 text-right">VALOR TOTAL</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[11%]">CÓDIGO</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[29%]">DESCRIÇÃO</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[10%] text-right">QUANTIDADE</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[8%] text-center">UNIDADE</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[10%] text-right">UNIT. MAT.</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[10%] text-right">UNIT. M.O.</th>
+                            <th className="p-1.5 border-r border-slate-400 w-[11%] text-right">VALOR UNIT.</th>
+                            <th className="p-1.5 w-[11%] text-right">VALOR TOTAL</th>
                           </tr>
                         </thead>
                         <tbody>
