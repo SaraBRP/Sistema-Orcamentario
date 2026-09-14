@@ -6,6 +6,7 @@ import {
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
 import { resolveCidadeEstadoFromCliente } from '../../lib/clientes';
+import { getEmpresasCadastradas, EmpresaData } from '../../lib/empresas';
 
 type OrcamentoItem = {
   id: string;
@@ -92,6 +93,48 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     anexos: '',
     observacoes: ''
   });
+
+  // Lista de empresas cadastradas ("Minha Empresa")
+  const [minhasEmpresas, setMinhasEmpresas] = useState<EmpresaData[]>([]);
+  const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>('');
+  const [customLogoUrl, setCustomLogoUrl] = useState<string>('');
+
+  useEffect(() => {
+    getEmpresasCadastradas().then(data => {
+      if (data) setMinhasEmpresas(data);
+    });
+  }, [showSolicitacaoView]);
+
+  const handleSelectEmpresa = (empresaId: string) => {
+    setSelectedEmpresaId(empresaId);
+    if (!empresaId) return;
+
+    const emp = minhasEmpresas.find(e => e.id === empresaId);
+    if (!emp) return;
+
+    const addressParts = [
+      emp.logradouro,
+      emp.numero ? `Nº ${emp.numero}` : '',
+      emp.bairro
+    ].filter(Boolean);
+
+    setSolicitacaoForm(prev => ({
+      ...prev,
+      empresa: emp.razao_social,
+      razaoSocial: emp.razao_social,
+      cnpj: emp.cnpj || '',
+      ie: emp.inscricao_estadual || '',
+      cep: emp.cep || '',
+      telefone: emp.telefone || '',
+      cidadeFornecedor: emp.cidade || '',
+      estadoFornecedor: emp.uf || '',
+      enderecoFornecedor: addressParts.join(', ')
+    }));
+
+    if (emp.logo_url) {
+      setCustomLogoUrl(emp.logo_url);
+    }
+  };
 
   // Lista de itens da Solicitação de Cotação
   const [solicitacaoItems, setSolicitacaoItems] = useState<SolicitacaoItem[]>([]);
@@ -458,7 +501,13 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
             {/* Header: Logo BRP da Empresa + Emissão */}
             <div className="flex justify-between items-center border-b border-slate-400 pb-3 mb-3">
               <div className="flex items-center">
-                {isSolucoesMetalicas ? (
+                {customLogoUrl ? (
+                  <img 
+                    src={customLogoUrl} 
+                    alt="Logo Empresa" 
+                    className="h-12 max-h-14 w-auto object-contain"
+                  />
+                ) : isSolucoesMetalicas ? (
                   <img 
                     src="/logo_brp_metalica_cinza.png" 
                     alt="Logo BRP Soluções Metálicas" 
@@ -571,11 +620,30 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                     <td className="p-1.5 border-r border-slate-400 w-[65%]">
                       <div className="flex items-center gap-1.5 w-full">
                         <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">RAZÃO SOCIAL:</span>
+                        {minhasEmpresas.length > 0 && (
+                          <select
+                            value={selectedEmpresaId}
+                            onChange={e => handleSelectEmpresa(e.target.value)}
+                            className="bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded text-[10px] px-1.5 py-0.5 font-medium text-slate-700 outline-none cursor-pointer print:hidden shrink-0"
+                            title="Selecione uma empresa para preenchimento automático"
+                          >
+                            <option value="">-- Minhas Empresas --</option>
+                            {minhasEmpresas.map(emp => (
+                              <option key={emp.id} value={emp.id}>
+                                {emp.razao_social}
+                              </option>
+                            ))}
+                          </select>
+                        )}
                         <input
                           type="text"
+                          placeholder="Digite ou selecione a empresa..."
                           value={solicitacaoForm.razaoSocial}
-                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }))}
-                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
+                          onChange={e => {
+                            setSelectedEmpresaId('');
+                            setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }));
+                          }}
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
