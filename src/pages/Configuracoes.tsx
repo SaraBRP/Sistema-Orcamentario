@@ -49,6 +49,7 @@ import {
   formatCNPJ as formatEmpresaCNPJ,
   formatCEP as formatEmpresaCEP,
   formatTelefone as formatEmpresaTel,
+  formatInscricaoEstadual,
   type EmpresaData
 } from '../lib/empresas';
 
@@ -180,12 +181,12 @@ export default function Configuracoes() {
   const [empLogradouro, setEmpLogradouro] = useState('');
   const [empNumero, setEmpNumero] = useState('');
   const [empBairro, setEmpBairro] = useState('');
-  const [empCidade, setEmpCidade] = useState('Goiânia');
-  const [empUf, setEmpUf] = useState('GO');
+  const [empCidade, setEmpCidade] = useState('');
+  const [empUf, setEmpUf] = useState('');
   const [empCep, setEmpCep] = useState('');
   const [empTelefone, setEmpTelefone] = useState('');
   const [empEmail, setEmpEmail] = useState('');
-  const [empLogoUrl, setEmpLogoUrl] = useState('/logo_brp_metalica_cinza.png');
+  const [empLogoUrl, setEmpLogoUrl] = useState('');
   const [empStatus, setEmpStatus] = useState<'ativo' | 'inativo'>('ativo');
   const [savingEmpresa, setSavingEmpresa] = useState(false);
 
@@ -768,12 +769,12 @@ export default function Configuracoes() {
     setEmpLogradouro('');
     setEmpNumero('');
     setEmpBairro('');
-    setEmpCidade('Goiânia');
-    setEmpUf('GO');
+    setEmpCidade('');
+    setEmpUf('');
     setEmpCep('');
     setEmpTelefone('');
     setEmpEmail('');
-    setEmpLogoUrl('/logo_brp_metalica_cinza.png');
+    setEmpLogoUrl('');
     setEmpStatus('ativo');
     setIsEmpresaModalOpen(true);
   };
@@ -1909,7 +1910,7 @@ export default function Configuracoes() {
                   <input
                     type="text"
                     required
-                    placeholder="Ex: BRP Soluções Metálicas Ltda"
+                    placeholder=""
                     value={empRazaoSocial}
                     onChange={(e) => setEmpRazaoSocial(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-bold"
@@ -1920,7 +1921,7 @@ export default function Configuracoes() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">Nome Fantasia</label>
                   <input
                     type="text"
-                    placeholder="Ex: BRP Soluções Metálicas"
+                    placeholder=""
                     value={empNomeFantasia}
                     onChange={(e) => setEmpNomeFantasia(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -1931,7 +1932,7 @@ export default function Configuracoes() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">CNPJ</label>
                   <input
                     type="text"
-                    placeholder="00.000.000/0001-00"
+                    placeholder=""
                     value={empCnpj}
                     onChange={(e) => setEmpCnpj(formatEmpresaCNPJ(e.target.value))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
@@ -1942,9 +1943,9 @@ export default function Configuracoes() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">Inscrição Estadual</label>
                   <input
                     type="text"
-                    placeholder="Ex: 10.589.412-0"
+                    placeholder=""
                     value={empInscricaoEstadual}
-                    onChange={(e) => setEmpInscricaoEstadual(e.target.value)}
+                    onChange={(e) => setEmpInscricaoEstadual(formatInscricaoEstadual(e.target.value))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
                   />
                 </div>
@@ -1953,7 +1954,7 @@ export default function Configuracoes() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">Telefone de Contato</label>
                   <input
                     type="text"
-                    placeholder="(62) 3200-0000"
+                    placeholder=""
                     value={empTelefone}
                     onChange={(e) => setEmpTelefone(formatEmpresaTel(e.target.value))}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -1964,7 +1965,7 @@ export default function Configuracoes() {
                   <label className="block text-xs font-bold text-slate-700 mb-1">E-mail Corporativo</label>
                   <input
                     type="email"
-                    placeholder="contato@brpmetalica.com.br"
+                    placeholder=""
                     value={empEmail}
                     onChange={(e) => setEmpEmail(e.target.value)}
                     className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
@@ -1977,7 +1978,7 @@ export default function Configuracoes() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Logradouro / Rua</label>
                     <input
                       type="text"
-                      placeholder="Ex: Av. Industrial"
+                      placeholder=""
                       value={empLogradouro}
                       onChange={(e) => setEmpLogradouro(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -1988,7 +1989,7 @@ export default function Configuracoes() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Número</label>
                     <input
                       type="text"
-                      placeholder="Ex: 1200"
+                      placeholder=""
                       value={empNumero}
                       onChange={(e) => setEmpNumero(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -1999,7 +2000,7 @@ export default function Configuracoes() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Bairro</label>
                     <input
                       type="text"
-                      placeholder="Ex: Distrito Industrial"
+                      placeholder=""
                       value={empBairro}
                       onChange={(e) => setEmpBairro(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
@@ -2010,7 +2011,7 @@ export default function Configuracoes() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">CEP</label>
                     <input
                       type="text"
-                      placeholder="74000-000"
+                      placeholder=""
                       value={empCep}
                       onChange={(e) => setEmpCep(formatEmpresaCEP(e.target.value))}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
@@ -2021,7 +2022,7 @@ export default function Configuracoes() {
                     <label className="block text-xs font-bold text-slate-700 mb-1">Cidade</label>
                     <input
                       type="text"
-                      placeholder="Goiânia"
+                      placeholder=""
                       value={empCidade}
                       onChange={(e) => setEmpCidade(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold"
@@ -2035,6 +2036,7 @@ export default function Configuracoes() {
                       onChange={(e) => setEmpUf(e.target.value)}
                       className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-bold"
                     >
+                      <option value="">Selecione a UF</option>
                       {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(uf => (
                         <option key={uf} value={uf}>{uf}</option>
                       ))}
@@ -2090,7 +2092,7 @@ export default function Configuracoes() {
                     <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Ou informe uma URL de Logo Personalizada</span>
                     <input
                       type="text"
-                      placeholder="https://..."
+                      placeholder=""
                       value={empLogoUrl}
                       onChange={(e) => setEmpLogoUrl(e.target.value)}
                       className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"

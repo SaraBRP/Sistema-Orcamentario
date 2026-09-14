@@ -89,6 +89,15 @@ export function formatTelefone(value: string): string {
     .replace(/(\d{5})(\d)/, '$1-$2');
 }
 
+export function formatInscricaoEstadual(value: string): string {
+  const digits = value.replace(/\D/g, '').slice(0, 9);
+  if (!digits) return value.slice(0, 15);
+  if (digits.length <= 8) {
+    return digits.replace(/^(\d{2})(\d{3})(\d{3})/, '$1.$2.$3');
+  }
+  return digits.replace(/^(\d{2})(\d{3})(\d{3})(\d)/, '$1.$2.$3-$4');
+}
+
 export async function getEmpresasCadastradas(): Promise<EmpresaData[]> {
   let localEmpresas: EmpresaData[] = [];
   try {
