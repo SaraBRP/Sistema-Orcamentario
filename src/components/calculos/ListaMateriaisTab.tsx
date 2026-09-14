@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Package, ChevronDown, ChevronRight, Search, CheckSquare, Square, 
-  FileSpreadsheet, Check, ArrowLeft, Printer, Download, Plus, Trash2, FileText
+  FileSpreadsheet, Check, ArrowLeft, Printer
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
@@ -399,6 +399,10 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     window.print();
   };
 
+  // Identificação dinâmica da logo da empresa selecionada/preenchida
+  const currentEmpresaName = (solicitacaoForm.empresa || orcamentoInfo?.empresa || '').toLowerCase();
+  const isSolucoesMetalicas = currentEmpresaName.includes('soluç') || currentEmpresaName.includes('metálic') || currentEmpresaName.includes('metalic') || currentEmpresaName.includes('soluc');
+
   // ─────────────────────────────────────────────────────────────
   // RENDERING: VISTA DA SOLICITAÇÃO DE COTAÇÃO (MODO DOCUMENTO/PDF)
   // ─────────────────────────────────────────────────────────────
@@ -446,19 +450,36 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
             id="solicitacao-cotacao-pdf"
             className="w-full max-w-[1000px] bg-white border border-slate-400 p-6 shadow-md text-slate-900 font-sans print:border-0 print:p-0 print:shadow-none print:w-full print:max-w-none text-[11px] leading-tight"
           >
-            {/* Header: Logo BRP + Emissão */}
+            {/* Header: Logo BRP da Empresa + Emissão */}
             <div className="flex justify-between items-center border-b border-slate-400 pb-3 mb-3">
-              <div className="flex items-center gap-2">
-                {/* Logo BRP SVG Fidedigno */}
-                <div className="flex items-center gap-2">
-                  <div className="flex items-end">
-                    <span className="text-2xl font-black text-amber-500 tracking-tighter leading-none">M</span>
-                    <span className="text-2xl font-black text-blue-900 tracking-tighter leading-none -ml-1">BRP</span>
+              <div className="flex items-center gap-3">
+                {isSolucoesMetalicas ? (
+                  <div className="flex items-center gap-2">
+                    <img 
+                      src="/logo_brp_metalica.png" 
+                      alt="Logo BRP Soluções Metálicas" 
+                      className="h-10 w-auto object-contain drop-shadow-xs"
+                      onError={e => { e.currentTarget.style.display = 'none'; }}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-black text-slate-800 tracking-tight leading-tight">BRP SOLUÇÕES METÁLICAS</span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Engenharia & Estruturas</span>
+                    </div>
                   </div>
-                  <span className="text-[9px] font-bold tracking-widest text-slate-500 uppercase border-l border-slate-300 pl-2 py-0.5">
-                    ENGENHARIA
-                  </span>
-                </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <img 
+                      src="/logo_brp.png" 
+                      alt="Logo BRP Engenharia" 
+                      className="h-10 w-auto object-contain drop-shadow-xs"
+                      onError={e => { e.currentTarget.style.display = 'none'; }}
+                    />
+                    <div className="flex flex-col">
+                      <span className="text-sm font-black text-slate-800 tracking-tight leading-tight">BRP ENGENHARIA</span>
+                      <span className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">Orçamentos & Gestão</span>
+                    </div>
+                  </div>
+                )}
               </div>
 
               <div className="flex items-center gap-2 font-bold text-slate-700">
@@ -472,163 +493,211 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               </div>
             </div>
 
-            {/* Cabeçalho de Informações do Orçamento */}
-            <div className="grid grid-cols-12 border border-slate-400 mb-3 bg-white">
-              {/* Linha 1 */}
-              <div className="col-span-6 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                <span className="font-bold text-slate-700 min-w-20">EMPRESA:</span>
-                <input
-                  type="text"
-                  value={solicitacaoForm.empresa}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, empresa: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 font-medium"
-                />
-              </div>
-              <div className="col-span-3 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                <span className="font-bold text-slate-700 min-w-14">CIDADE:</span>
-                <input
-                  type="text"
-                  value={solicitacaoForm.cidade}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidade: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                />
-              </div>
-              <div className="col-span-3 p-1.5 border-b border-slate-400 flex items-center gap-2">
-                <span className="font-bold text-slate-700 text-[10px] min-w-32">PRAZO RETORNO (DATA/HORA):</span>
-                <input
-                  type="text"
-                  placeholder="Ex: 20/09/2026 17:00"
-                  value={solicitacaoForm.prazoRetorno}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, prazoRetorno: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                />
-              </div>
+            {/* Cabeçalho de Informações do Orçamento (Tabela Alinhada com 100% Contenção) */}
+            <table className="w-full border-collapse border border-slate-400 mb-3 text-[11px] bg-white">
+              <tbody>
+                {/* Linha 1 */}
+                <tr className="border-b border-slate-400">
+                  <td className="p-1.5 border-r border-slate-400 w-[50%]">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">EMPRESA:</span>
+                      <input
+                        type="text"
+                        value={solicitacaoForm.empresa}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, empresa: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] font-medium focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                  <td className="p-1.5 border-r border-slate-400 w-[20%]">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">CIDADE:</span>
+                      <input
+                        type="text"
+                        value={solicitacaoForm.cidade}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidade: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                  <td className="p-1.5 w-[30%]">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0 text-[10px]">PRAZO RETORNO (DATA/HORA):</span>
+                      <input
+                        type="text"
+                        placeholder="Ex: 20/09/2026 17:00"
+                        value={solicitacaoForm.prazoRetorno}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, prazoRetorno: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                </tr>
 
-              {/* Linha 2 */}
-              <div className="col-span-6 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                <span className="font-bold text-slate-700 min-w-20">ORÇAMENTO:</span>
-                <input
-                  type="text"
-                  value={solicitacaoForm.orcamento}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, orcamento: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 font-medium"
-                />
-              </div>
-              <div className="col-span-3 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                <span className="font-bold text-slate-700 min-w-14">ESTADO:</span>
-                <input
-                  type="text"
-                  value={solicitacaoForm.estado}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, estado: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                />
-              </div>
-              <div className="col-span-3 p-1.5 border-b border-slate-400 flex items-center gap-2">
-                <span className="font-bold text-slate-700 text-[10px] min-w-32">UNIDADE DE CONTRATAÇÃO:</span>
-                <input
-                  type="text"
-                  placeholder="Ex: Matriz / Obra X"
-                  value={solicitacaoForm.unidadeContratacao}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, unidadeContratacao: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                />
-              </div>
+                {/* Linha 2 */}
+                <tr className="border-b border-slate-400">
+                  <td className="p-1.5 border-r border-slate-400">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ORÇAMENTO:</span>
+                      <input
+                        type="text"
+                        value={solicitacaoForm.orcamento}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, orcamento: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] font-medium focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                  <td className="p-1.5 border-r border-slate-400">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ESTADO:</span>
+                      <input
+                        type="text"
+                        value={solicitacaoForm.estado}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, estado: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                  <td className="p-1.5">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0 text-[10px]">UNIDADE DE CONTRATAÇÃO:</span>
+                      <input
+                        type="text"
+                        placeholder="Ex: Matriz / Obra X"
+                        value={solicitacaoForm.unidadeContratacao}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, unidadeContratacao: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                </tr>
 
-              {/* Linha 3 */}
-              <div className="col-span-12 p-1.5 flex items-center gap-2">
-                <span className="font-bold text-slate-700 min-w-36">ENDEREÇO DE ENTREGA:</span>
-                <input
-                  type="text"
-                  placeholder="Rua, número, bairro, cidade - UF"
-                  value={solicitacaoForm.enderecoEntrega}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoEntrega: e.target.value }))}
-                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                />
-              </div>
-            </div>
+                {/* Linha 3 */}
+                <tr>
+                  <td colSpan={3} className="p-1.5">
+                    <div className="flex items-center gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ENDEREÇO DE ENTREGA:</span>
+                      <input
+                        type="text"
+                        placeholder="Rua, número, bairro, cidade - UF"
+                        value={solicitacaoForm.enderecoEntrega}
+                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoEntrega: e.target.value }))}
+                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                      />
+                    </div>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
 
-            {/* Seção DADOS CADASTRAIS (Fornecedor) */}
+            {/* Seção DADOS CADASTRAIS (Fornecedor) - Tabela Perfeitamente Alinhada */}
             <div className="border border-slate-400 mb-3">
               <div className="bg-slate-200 text-center font-extrabold uppercase py-1 text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
                 DADOS CADASTRAIS
               </div>
-              <div className="grid grid-cols-12 bg-white">
-                <div className="col-span-8 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-24">RAZÃO SOCIAL:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.razaoSocial}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
-                <div className="col-span-4 p-1.5 border-b border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-20">TELEFONE:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.telefone}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, telefone: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
+              <table className="w-full border-collapse text-[11px] bg-white">
+                <tbody>
+                  <tr className="border-b border-slate-400">
+                    <td className="p-1.5 border-r border-slate-400 w-[65%]">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">RAZÃO SOCIAL:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.razaoSocial}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                    <td className="p-1.5 w-[35%]">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">TELEFONE:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.telefone}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, telefone: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                  </tr>
 
-                <div className="col-span-8 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-24">CNPJ:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.cnpj}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, cnpj: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
-                <div className="col-span-4 p-1.5 border-b border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-20">CIDADE:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.cidadeFornecedor}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidadeFornecedor: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
+                  <tr className="border-b border-slate-400">
+                    <td className="p-1.5 border-r border-slate-400">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">CNPJ:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.cnpj}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cnpj: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                    <td className="p-1.5">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">CIDADE:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.cidadeFornecedor}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidadeFornecedor: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                  </tr>
 
-                <div className="col-span-8 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-24">IE:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.ie}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, ie: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
-                <div className="col-span-4 p-1.5 border-b border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-20">ESTADO:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.estadoFornecedor}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, estadoFornecedor: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
+                  <tr className="border-b border-slate-400">
+                    <td className="p-1.5 border-r border-slate-400">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">IE:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.ie}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, ie: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                    <td className="p-1.5">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ESTADO:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.estadoFornecedor}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, estadoFornecedor: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                  </tr>
 
-                <div className="col-span-4 p-1.5 border-r border-slate-400 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-12">CEP:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.cep}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, cep: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
-                <div className="col-span-8 p-1.5 flex items-center gap-2">
-                  <span className="font-bold text-slate-700 min-w-20">ENDEREÇO:</span>
-                  <input
-                    type="text"
-                    value={solicitacaoForm.enderecoFornecedor}
-                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoFornecedor: e.target.value }))}
-                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                  />
-                </div>
-              </div>
+                  <tr>
+                    <td className="p-1.5 border-r border-slate-400">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">CEP:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.cep}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cep: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                    <td className="p-1.5">
+                      <div className="flex items-center gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ENDEREÇO:</span>
+                        <input
+                          type="text"
+                          value={solicitacaoForm.enderecoFornecedor}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoFornecedor: e.target.value }))}
+                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        />
+                      </div>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
             </div>
 
             {/* Seção ANEXOS */}
