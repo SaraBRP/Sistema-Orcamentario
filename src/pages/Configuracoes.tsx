@@ -186,7 +186,6 @@ export default function Configuracoes() {
   const [empTelefone, setEmpTelefone] = useState('');
   const [empEmail, setEmpEmail] = useState('');
   const [empLogoUrl, setEmpLogoUrl] = useState('/logo_brp_metalica_cinza.png');
-  const [empIsPadrao, setEmpIsPadrao] = useState(false);
   const [empStatus, setEmpStatus] = useState<'ativo' | 'inativo'>('ativo');
   const [savingEmpresa, setSavingEmpresa] = useState(false);
 
@@ -775,7 +774,6 @@ export default function Configuracoes() {
     setEmpTelefone('');
     setEmpEmail('');
     setEmpLogoUrl('/logo_brp_metalica_cinza.png');
-    setEmpIsPadrao(empresasList.length === 0);
     setEmpStatus('ativo');
     setIsEmpresaModalOpen(true);
   };
@@ -795,7 +793,6 @@ export default function Configuracoes() {
     setEmpTelefone(emp.telefone || '');
     setEmpEmail(emp.email || '');
     setEmpLogoUrl(emp.logo_url || '/logo_brp_metalica_cinza.png');
-    setEmpIsPadrao(!!emp.is_padrao);
     setEmpStatus(emp.status || 'ativo');
     setIsEmpresaModalOpen(true);
   };
@@ -822,7 +819,6 @@ export default function Configuracoes() {
       telefone: formatEmpresaTel(empTelefone),
       email: empEmail,
       logo_url: empLogoUrl,
-      is_padrao: empIsPadrao,
       status: empStatus
     });
     await fetchEmpresasList();
@@ -835,11 +831,6 @@ export default function Configuracoes() {
       await deleteEmpresa(id);
       await fetchEmpresasList();
     }
-  };
-
-  const handleSetPadraoEmpresa = async (emp: EmpresaData) => {
-    await saveEmpresa({ ...emp, is_padrao: true });
-    await fetchEmpresasList();
   };
 
   const filteredEmpresas = useMemo(() => {
@@ -1350,10 +1341,7 @@ export default function Configuracoes() {
               filteredEmpresas.map((emp) => (
                 <div 
                   key={emp.id}
-                  className={clsx(
-                    "bg-white rounded-2xl p-5 border transition-all flex flex-col justify-between gap-4 relative overflow-hidden shadow-xs",
-                    emp.is_padrao ? "border-blue-300 ring-2 ring-blue-500/20" : "border-slate-200 hover:border-slate-300"
-                  )}
+                  className="bg-white rounded-2xl p-5 border border-slate-200 hover:border-slate-300 transition-all flex flex-col justify-between gap-4 relative overflow-hidden shadow-xs"
                 >
                   {/* Top Badge & Header */}
                   <div className="flex items-start justify-between gap-3">
@@ -1366,14 +1354,7 @@ export default function Configuracoes() {
                         )}
                       </div>
                       <div>
-                        <div className="flex items-center gap-2">
-                          <h3 className="font-extrabold text-slate-900 text-sm leading-snug">{emp.razao_social}</h3>
-                          {emp.is_padrao && (
-                            <span className="bg-blue-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-2xs">
-                              PADRÃO
-                            </span>
-                          )}
-                        </div>
+                        <h3 className="font-extrabold text-slate-900 text-sm leading-snug">{emp.razao_social}</h3>
                         {emp.nome_fantasia && (
                           <p className="text-xs text-slate-500 font-medium">Fantasia: {emp.nome_fantasia}</p>
                         )}
@@ -1426,36 +1407,23 @@ export default function Configuracoes() {
                   </div>
 
                   {/* Ações */}
-                  <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                    {!emp.is_padrao ? (
-                      <button
-                        onClick={() => handleSetPadraoEmpresa(emp)}
-                        className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 hover:underline cursor-pointer"
-                      >
-                        <Check className="w-3.5 h-3.5" />
-                        <span>Definir como Padrão</span>
-                      </button>
-                    ) : (
-                      <span className="text-xs text-emerald-700 font-bold flex items-center gap-1">
-                        <Check className="w-3.5 h-3.5 text-emerald-600" />
-                        Empresa Selecionada para Orçamentos
-                      </span>
-                    )}
-
+                  <div className="flex items-center justify-end pt-1 border-t border-slate-100">
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => handleOpenEditEmpresaModal(emp)}
-                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold px-2.5"
                         title="Editar Empresa"
                       >
-                        <Edit2 className="w-4 h-4" />
+                        <Edit2 className="w-3.5 h-3.5" />
+                        <span>Editar</span>
                       </button>
                       <button
                         onClick={() => handleDeleteEmpresaClick(emp.id, emp.razao_social)}
-                        className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer flex items-center gap-1 text-xs font-bold px-2.5"
                         title="Excluir Empresa"
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Excluir</span>
                       </button>
                     </div>
                   </div>
@@ -2115,17 +2083,7 @@ export default function Configuracoes() {
                   </div>
                 </div>
 
-                <div className="sm:col-span-2 flex items-center justify-between pt-2">
-                  <label className="flex items-center gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={empIsPadrao}
-                      onChange={(e) => setEmpIsPadrao(e.target.checked)}
-                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
-                    />
-                    <span className="text-xs font-bold text-slate-800">Definir como Empresa Padrão nos Orçamentos</span>
-                  </label>
-
+                <div className="sm:col-span-2 flex items-center justify-end pt-2">
                   <div className="flex items-center gap-2">
                     <label className="text-xs font-bold text-slate-700">Status:</label>
                     <select

@@ -15,7 +15,6 @@ export interface EmpresaData {
   telefone?: string;
   email?: string;
   logo_url?: string;
-  is_padrao?: boolean;
   status: 'ativo' | 'inativo';
   created_at?: string;
 }
@@ -38,7 +37,6 @@ export const EMPRESAS_BASE_INICIAL: EmpresaData[] = [
     telefone: '(62) 3200-0000',
     email: 'contato@brpmetalica.com.br',
     logo_url: '/logo_brp_metalica_cinza.png',
-    is_padrao: true,
     status: 'ativo',
     created_at: '2026-01-01T00:00:00.000Z'
   },
@@ -57,7 +55,6 @@ export const EMPRESAS_BASE_INICIAL: EmpresaData[] = [
     telefone: '(62) 3211-1111',
     email: 'contato@brp.eng.br',
     logo_url: '/logo_brp_color.png',
-    is_padrao: false,
     status: 'ativo',
     created_at: '2026-01-01T00:00:00.000Z'
   }
@@ -139,7 +136,6 @@ export async function getEmpresasCadastradas(): Promise<EmpresaData[]> {
           telefone: e.telefone || '',
           email: e.email || '',
           logo_url: e.logo_url || '',
-          is_padrao: !!e.is_padrao,
           status: e.status || 'ativo',
           created_at: e.created_at || new Date().toISOString()
         }));
@@ -178,9 +174,6 @@ export async function saveEmpresa(data: Partial<EmpresaData> & { id?: string }):
   const id = data.id || `emp_${Date.now()}`;
   const now = new Date().toISOString();
 
-  let isPadrao = !!data.is_padrao;
-  if (empresas.length === 0) isPadrao = true;
-
   const newEmpresa: EmpresaData = {
     id,
     razao_social: (data.razao_social || 'Nova Empresa').trim(),
@@ -196,18 +189,11 @@ export async function saveEmpresa(data: Partial<EmpresaData> & { id?: string }):
     telefone: (data.telefone || '').trim(),
     email: (data.email || '').trim(),
     logo_url: (data.logo_url || '/logo_brp_metalica_cinza.png').trim(),
-    is_padrao: isPadrao,
     status: data.status || 'ativo',
     created_at: data.created_at || now
   };
 
-  const updatedList = empresas.map(e => {
-    if (isPadrao) {
-      return { ...e, is_padrao: e.id === id };
-    }
-    return e;
-  });
-
+  const updatedList = [...empresas];
   const existingIdx = updatedList.findIndex(e => e.id === id);
   if (existingIdx >= 0) {
     updatedList[existingIdx] = newEmpresa;
@@ -238,7 +224,6 @@ export async function saveEmpresa(data: Partial<EmpresaData> & { id?: string }):
         telefone: newEmpresa.telefone,
         email: newEmpresa.email,
         logo_url: newEmpresa.logo_url,
-        is_padrao: newEmpresa.is_padrao,
         status: newEmpresa.status,
         updated_at: now
       });
@@ -252,10 +237,6 @@ export async function saveEmpresa(data: Partial<EmpresaData> & { id?: string }):
 export async function deleteEmpresa(id: string): Promise<boolean> {
   let empresas = await getEmpresasCadastradas();
   empresas = empresas.filter(e => e.id !== id);
-
-  if (empresas.length > 0 && !empresas.some(e => e.is_padrao)) {
-    empresas[0].is_padrao = true;
-  }
 
   try {
     localStorage.setItem(LOCAL_STORAGE_EMPRESAS_KEY, JSON.stringify(empresas));
