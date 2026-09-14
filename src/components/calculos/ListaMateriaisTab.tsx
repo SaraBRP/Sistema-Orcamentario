@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Package, ChevronDown, ChevronRight, Search, CheckSquare, Square, 
-  FileSpreadsheet, Check
+  FileSpreadsheet, Check, ArrowLeft, Printer, Download, Plus, Trash2, FileText
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
@@ -33,6 +33,7 @@ type OrcamentoItem = {
 interface ListaMateriaisTabProps {
   orcamentoId?: string;
   itens: OrcamentoItem[];
+  orcamentoInfo?: any;
 }
 
 export type TipoInsumoGroup = 'MATERIAL' | 'EQUIPAMENTOS' | 'MÃO DE OBRA' | 'OUTROS';
@@ -46,20 +47,58 @@ export interface AggregatedInsumo {
   tipoGroup: TipoInsumoGroup;
   bancoFonte?: string;
   itemCount: number;
+  unitMat?: number;
+  unitMo?: number;
 }
 
-export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriaisTabProps) {
+export interface SolicitacaoItem extends AggregatedInsumo {
+  unitMatInput: string;
+  unitMoInput: string;
+  valorUnitInput: string;
+  valorTotalInput: string;
+}
+
+export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }: ListaMateriaisTabProps) {
   const [searchFilter, setSearchFilter] = useState<string>('');
   const [collapsedGroups, setCollapsedGroups] = useState<Set<TipoInsumoGroup>>(new Set());
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [dbTiposMap, setDbTiposMap] = useState<Record<string, string>>({});
   const [loadingDbTipos, setLoadingDbTipos] = useState<boolean>(false);
 
+  // Estado para controlar a visualização da Solicitação de Cotação
+  const [showSolicitacaoView, setShowSolicitacaoView] = useState<boolean>(false);
+
+  // Dados do formulário de Solicitação de Cotação
+  const [solicitacaoForm, setSolicitacaoForm] = useState({
+    emissao: '',
+    empresa: '',
+    orcamento: '',
+    enderecoEntrega: '',
+    cidade: '',
+    estado: '',
+    prazoRetorno: '',
+    unidadeContratacao: '',
+    // Dados Cadastrais Fornecedor
+    razaoSocial: '',
+    cnpj: '',
+    ie: '',
+    cep: '',
+    telefone: '',
+    cidadeFornecedor: '',
+    estadoFornecedor: '',
+    enderecoFornecedor: '',
+    // Seções de texto
+    anexos: '',
+    observacoes: ''
+  });
+
+  // Lista de itens da Solicitação de Cotação
+  const [solicitacaoItems, setSolicitacaoItems] = useState<SolicitacaoItem[]>([]);
+
   // 1. Extração dos insumos (folhas / sem filhos) e agregação de quantidades
   const rawInsumos = useMemo(() => {
     if (!itens || itens.length === 0) return [];
 
-    // Identifica EAPs que possuem filhos na hierarquia
     const eapSet = new Set(itens.map(i => (i.item_eap || '').trim()).filter(Boolean));
     const parentEaps = new Set<string>();
     eapSet.forEach(eap => {
@@ -69,7 +108,6 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
       }
     });
 
-    // Filtra apenas itens folha (que possuem código ou descrição preenchidos)
     return itens.filter(item => {
       const eap = (item.item_eap || '').trim();
       const isSecao = item.isSecao || item.is_secao || (!item.codigo && (!item.quantidade || item.quantidade === 0) && !item.unidade);
@@ -80,7 +118,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
     });
   }, [itens]);
 
-  // Carrega mapeamento de tipos da tabela `insumos` no Supabase para os códigos encontrados
+  // Carrega mapeamento de tipos do banco
   useEffect(() => {
     let isMounted = true;
     const fetchTiposFromDb = async () => {
@@ -115,12 +153,11 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
     return () => { isMounted = false; };
   }, [rawInsumos]);
 
-  // Função auxiliar para classificar tipo do insumo
+  // Classificador de tipo
   const classifyTipoInsumo = (codigo?: string | null, descricao?: string | null): TipoInsumoGroup => {
     const codUpper = (codigo || '').trim().toUpperCase();
     const descUpper = (descricao || '').trim().toUpperCase();
 
-    // 1. Consulta no mapa vindo do banco de dados
     if (codUpper && dbTiposMap[codUpper]) {
       const dbTipo = dbTiposMap[codUpper].toUpperCase();
       if (dbTipo.includes('EQUIP') || dbTipo.includes('MÁQUINA') || dbTipo.includes('MAQUINA')) return 'EQUIPAMENTOS';
@@ -129,13 +166,11 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
       if (dbTipo.includes('SERV') || dbTipo.includes('TERCEIR') || dbTipo.includes('OUTRO')) return 'OUTROS';
     }
 
-    // 2. Prefixo de código
     if (codUpper.startsWith('MAT') || codUpper.startsWith('MAT.')) return 'MATERIAL';
     if (codUpper.startsWith('EQP') || codUpper.startsWith('EQP.') || codUpper.startsWith('EQ')) return 'EQUIPAMENTOS';
     if (codUpper.startsWith('MO') || codUpper.startsWith('MO.') || codUpper.startsWith('MOD')) return 'MÃO DE OBRA';
     if (codUpper.startsWith('SERV') || codUpper.startsWith('OUT')) return 'OUTROS';
 
-    // 3. Palavras-chave na descrição
     if (descUpper.includes('EQUIPAMENTO') || descUpper.includes('MAQUINA') || descUpper.includes('VEICULO') || descUpper.includes('CAMINHAO') || descUpper.includes('BETONEIRA')) {
       return 'EQUIPAMENTOS';
     }
@@ -146,11 +181,10 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
       return 'OUTROS';
     }
 
-    // Padrão: Material
     return 'MATERIAL';
   };
 
-  // 2. Agrupa os insumos repetidos e soma suas quantidades
+  // 2. Agrupa os insumos repetidos
   const aggregatedInsumos = useMemo<AggregatedInsumo[]>(() => {
     const map = new Map<string, AggregatedInsumo>();
 
@@ -176,7 +210,9 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
           quantidadeTotal: qty,
           tipoGroup,
           bancoFonte: item.banco_fonte || undefined,
-          itemCount: 1
+          itemCount: 1,
+          unitMat: item.valor_unitario_mat || 0,
+          unitMo: item.valor_unitario_mo || 0
         });
       }
     });
@@ -184,14 +220,14 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
     return Array.from(map.values()).sort((a, b) => a.codigo.localeCompare(b.codigo));
   }, [rawInsumos, dbTiposMap]);
 
-  // Inicializa a seleção de todos os itens por padrão quando a lista é carregada pela primeira vez
+  // Inicializa seleção
   useEffect(() => {
     if (aggregatedInsumos.length > 0 && selectedKeys.size === 0) {
       setSelectedKeys(new Set(aggregatedInsumos.map(i => i.key)));
     }
   }, [aggregatedInsumos]);
 
-  // Filtra por termo de busca
+  // Filtro de busca
   const filteredInsumos = useMemo(() => {
     if (!searchFilter.trim()) return aggregatedInsumos;
     const term = searchFilter.toLowerCase();
@@ -202,7 +238,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
     );
   }, [aggregatedInsumos, searchFilter]);
 
-  // Agrupa por Tipo Insumo (MATERIAL, EQUIPAMENTOS, MÃO DE OBRA, OUTROS)
+  // Agrupamento por tipo
   const groupedByTipo = useMemo(() => {
     const groups: Record<TipoInsumoGroup, AggregatedInsumo[]> = {
       'MATERIAL': [],
@@ -220,20 +256,16 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
 
   const groupOrder: TipoInsumoGroup[] = ['MATERIAL', 'EQUIPAMENTOS', 'MÃO DE OBRA', 'OUTROS'];
 
-  // Handler de seleção individual
+  // Handlers de seleção
   const toggleSelect = (key: string) => {
     setSelectedKeys(prev => {
       const next = new Set(prev);
-      if (next.has(key)) {
-        next.delete(key);
-      } else {
-        next.add(key);
-      }
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
       return next;
     });
   };
 
-  // Handler de seleção do grupo mãe
   const toggleGroupSelect = (tipo: TipoInsumoGroup) => {
     const groupItems = groupedByTipo[tipo];
     if (groupItems.length === 0) return;
@@ -250,7 +282,6 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
     });
   };
 
-  // Handler de seleção global (Selecionar Todos / Desmarcar Todos)
   const toggleSelectAllGlobal = () => {
     if (selectedKeys.size === filteredInsumos.length && filteredInsumos.length > 0) {
       setSelectedKeys(new Set());
@@ -259,15 +290,11 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
     }
   };
 
-  // Handler de colapso de grupo
   const toggleGroupCollapse = (tipo: TipoInsumoGroup) => {
     setCollapsedGroups(prev => {
       const next = new Set(prev);
-      if (next.has(tipo)) {
-        next.delete(tipo);
-      } else {
-        next.add(tipo);
-      }
+      if (next.has(tipo)) next.delete(tipo);
+      else next.add(tipo);
       return next;
     });
   };
@@ -275,6 +302,469 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
   const totalSelected = selectedKeys.size;
   const isAllGlobalSelected = filteredInsumos.length > 0 && totalSelected === filteredInsumos.length;
 
+  // ── AÇÃO DE GERAR A SOLICITAÇÃO DE COTAÇÃO ──────────────────
+  const handleGerarSolicitacao = () => {
+    const selected = aggregatedInsumos.filter(i => selectedKeys.has(i.key));
+    if (selected.length === 0) return;
+
+    const now = new Date();
+    const formattedDate = `${now.getDate().toString().padStart(2, '0')}/${(now.getMonth() + 1).toString().padStart(2, '0')}/${now.getFullYear()} ${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}`;
+
+    const defaultOrcamentoName = orcamentoInfo 
+      ? `${orcamentoInfo.codigo ? `${orcamentoInfo.codigo} - ` : ''}${orcamentoInfo.nome || 'Orçamento'}`
+      : 'Orçamento';
+
+    setSolicitacaoForm({
+      emissao: formattedDate,
+      empresa: orcamentoInfo?.empresa || 'BRP ENGENHARIA',
+      orcamento: defaultOrcamentoName,
+      enderecoEntrega: orcamentoInfo?.dadosComplementares?.enderecoEntrega || '',
+      cidade: orcamentoInfo?.cidade || '',
+      estado: orcamentoInfo?.estado || '',
+      prazoRetorno: '',
+      unidadeContratacao: '',
+      razaoSocial: '',
+      cnpj: '',
+      ie: '',
+      cep: '',
+      telefone: '',
+      cidadeFornecedor: '',
+      estadoFornecedor: '',
+      enderecoFornecedor: '',
+      anexos: '',
+      observacoes: ''
+    });
+
+    const itemsForForm: SolicitacaoItem[] = selected.map(item => {
+      const mat = item.unitMat || 0;
+      const mo = item.unitMo || 0;
+      const unitVal = mat + mo;
+      const totalVal = unitVal > 0 ? item.quantidadeTotal * unitVal : 0;
+
+      return {
+        ...item,
+        unitMatInput: mat > 0 ? mat.toFixed(2) : '',
+        unitMoInput: mo > 0 ? mo.toFixed(2) : '',
+        valorUnitInput: unitVal > 0 ? unitVal.toFixed(2) : '',
+        valorTotalInput: totalVal > 0 ? totalVal.toFixed(2) : ''
+      };
+    });
+
+    setSolicitacaoItems(itemsForForm);
+    setShowSolicitacaoView(true);
+  };
+
+  // Recalcula totais na tabela da Solicitação
+  const handleUpdateItemValue = (key: string, field: 'unitMatInput' | 'unitMoInput' | 'valorUnitInput' | 'valorTotalInput', val: string) => {
+    setSolicitacaoItems(prev => prev.map(item => {
+      if (item.key !== key) return item;
+
+      const updated = { ...item, [field]: val };
+
+      if (field === 'unitMatInput' || field === 'unitMoInput') {
+        const matNum = parseFloat(updated.unitMatInput.replace(',', '.')) || 0;
+        const moNum = parseFloat(updated.unitMoInput.replace(',', '.')) || 0;
+        const sumUnit = matNum + moNum;
+        if (sumUnit > 0) {
+          updated.valorUnitInput = sumUnit.toFixed(2);
+          updated.valorTotalInput = (updated.quantidadeTotal * sumUnit).toFixed(2);
+        }
+      } else if (field === 'valorUnitInput') {
+        const unitNum = parseFloat(updated.valorUnitInput.replace(',', '.')) || 0;
+        if (unitNum > 0) {
+          updated.valorTotalInput = (updated.quantidadeTotal * unitNum).toFixed(2);
+        }
+      }
+
+      return updated;
+    }));
+  };
+
+  // Agrupamento dos itens da Solicitação por Tipo
+  const solicitacaoGrouped = useMemo(() => {
+    const groups: Record<TipoInsumoGroup, SolicitacaoItem[]> = {
+      'MATERIAL': [],
+      'EQUIPAMENTOS': [],
+      'MÃO DE OBRA': [],
+      'OUTROS': []
+    };
+    solicitacaoItems.forEach(item => {
+      groups[item.tipoGroup].push(item);
+    });
+    return groups;
+  }, [solicitacaoItems]);
+
+  // Handler de impressão / salvar PDF
+  const handlePrintPdf = () => {
+    window.print();
+  };
+
+  // ─────────────────────────────────────────────────────────────
+  // RENDERING: VISTA DA SOLICITAÇÃO DE COTAÇÃO (MODO DOCUMENTO/PDF)
+  // ─────────────────────────────────────────────────────────────
+  if (showSolicitacaoView) {
+    return (
+      <div className="flex flex-col h-full bg-slate-100 overflow-auto">
+        {/* Barra de Ferramentas Superior (Invisível na impressão) */}
+        <div className="bg-white border-b border-slate-200 px-6 py-4 flex items-center justify-between shadow-xs sticky top-0 z-30 print:hidden">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => setShowSolicitacaoView(false)}
+              className="p-2 text-slate-600 hover:bg-slate-100 rounded-xl transition-colors flex items-center gap-2 cursor-pointer border border-slate-200 text-xs font-semibold"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Voltar para Seleção
+            </button>
+            <div className="h-6 w-px bg-slate-200" />
+            <div>
+              <h2 className="text-base font-bold text-slate-800 flex items-center gap-2">
+                Solicitação de Cotação
+                <span className="px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-50 text-blue-700 border border-blue-200">
+                  {solicitacaoItems.length} itens selecionados
+                </span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                Preencha os campos da solicitação e clique em Exportar PDF para gerar o documento oficial
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handlePrintPdf}
+              className="px-5 py-2 text-xs font-bold text-white bg-blue-600 rounded-xl hover:bg-blue-700 transition-all flex items-center gap-2 shadow-sm shadow-blue-500/20 cursor-pointer"
+            >
+              <Printer className="w-4 h-4" />
+              Exportar PDF / Imprimir
+            </button>
+          </div>
+        </div>
+
+        {/* ── DOCUMENTO DA SOLICITAÇÃO (MODELO FIDEDIGNO AO PDF) ── */}
+        <div className="p-4 md:p-8 flex justify-center">
+          <div 
+            id="solicitacao-cotacao-pdf"
+            className="w-full max-w-[1000px] bg-white border border-slate-400 p-6 shadow-md text-slate-900 font-sans print:border-0 print:p-0 print:shadow-none print:w-full print:max-w-none text-[11px] leading-tight"
+          >
+            {/* Header: Logo BRP + Emissão */}
+            <div className="flex justify-between items-center border-b border-slate-400 pb-3 mb-3">
+              <div className="flex items-center gap-2">
+                {/* Logo BRP SVG Fidedigno */}
+                <div className="flex items-center gap-2">
+                  <div className="flex items-end">
+                    <span className="text-2xl font-black text-amber-500 tracking-tighter leading-none">M</span>
+                    <span className="text-2xl font-black text-blue-900 tracking-tighter leading-none -ml-1">BRP</span>
+                  </div>
+                  <span className="text-[9px] font-bold tracking-widest text-slate-500 uppercase border-l border-slate-300 pl-2 py-0.5">
+                    ENGENHARIA
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 font-bold text-slate-700">
+                <span>EMISSÃO:</span>
+                <input
+                  type="text"
+                  value={solicitacaoForm.emissao}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, emissao: e.target.value }))}
+                  className="w-36 px-1.5 py-0.5 border border-slate-300 rounded text-center text-[11px] font-semibold print:border-0 print:px-0"
+                />
+              </div>
+            </div>
+
+            {/* Cabeçalho de Informações do Orçamento */}
+            <div className="grid grid-cols-12 border border-slate-400 mb-3 bg-white">
+              {/* Linha 1 */}
+              <div className="col-span-6 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                <span className="font-bold text-slate-700 min-w-20">EMPRESA:</span>
+                <input
+                  type="text"
+                  value={solicitacaoForm.empresa}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, empresa: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 font-medium"
+                />
+              </div>
+              <div className="col-span-3 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                <span className="font-bold text-slate-700 min-w-14">CIDADE:</span>
+                <input
+                  type="text"
+                  value={solicitacaoForm.cidade}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidade: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                />
+              </div>
+              <div className="col-span-3 p-1.5 border-b border-slate-400 flex items-center gap-2">
+                <span className="font-bold text-slate-700 text-[10px] min-w-32">PRAZO RETORNO (DATA/HORA):</span>
+                <input
+                  type="text"
+                  placeholder="Ex: 20/09/2026 17:00"
+                  value={solicitacaoForm.prazoRetorno}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, prazoRetorno: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                />
+              </div>
+
+              {/* Linha 2 */}
+              <div className="col-span-6 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                <span className="font-bold text-slate-700 min-w-20">ORÇAMENTO:</span>
+                <input
+                  type="text"
+                  value={solicitacaoForm.orcamento}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, orcamento: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 font-medium"
+                />
+              </div>
+              <div className="col-span-3 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                <span className="font-bold text-slate-700 min-w-14">ESTADO:</span>
+                <input
+                  type="text"
+                  value={solicitacaoForm.estado}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, estado: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                />
+              </div>
+              <div className="col-span-3 p-1.5 border-b border-slate-400 flex items-center gap-2">
+                <span className="font-bold text-slate-700 text-[10px] min-w-32">UNIDADE DE CONTRATAÇÃO:</span>
+                <input
+                  type="text"
+                  placeholder="Ex: Matriz / Obra X"
+                  value={solicitacaoForm.unidadeContratacao}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, unidadeContratacao: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                />
+              </div>
+
+              {/* Linha 3 */}
+              <div className="col-span-12 p-1.5 flex items-center gap-2">
+                <span className="font-bold text-slate-700 min-w-36">ENDEREÇO DE ENTREGA:</span>
+                <input
+                  type="text"
+                  placeholder="Rua, número, bairro, cidade - UF"
+                  value={solicitacaoForm.enderecoEntrega}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoEntrega: e.target.value }))}
+                  className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                />
+              </div>
+            </div>
+
+            {/* Seção DADOS CADASTRAIS (Fornecedor) */}
+            <div className="border border-slate-400 mb-3">
+              <div className="bg-slate-200 text-center font-extrabold uppercase py-1 text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
+                DADOS CADASTRAIS
+              </div>
+              <div className="grid grid-cols-12 bg-white">
+                <div className="col-span-8 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-24">RAZÃO SOCIAL:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.razaoSocial}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+                <div className="col-span-4 p-1.5 border-b border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-20">TELEFONE:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.telefone}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, telefone: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+
+                <div className="col-span-8 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-24">CNPJ:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.cnpj}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, cnpj: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+                <div className="col-span-4 p-1.5 border-b border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-20">CIDADE:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.cidadeFornecedor}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidadeFornecedor: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+
+                <div className="col-span-8 p-1.5 border-r border-b border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-24">IE:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.ie}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, ie: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+                <div className="col-span-4 p-1.5 border-b border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-20">ESTADO:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.estadoFornecedor}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, estadoFornecedor: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+
+                <div className="col-span-4 p-1.5 border-r border-slate-400 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-12">CEP:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.cep}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, cep: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+                <div className="col-span-8 p-1.5 flex items-center gap-2">
+                  <span className="font-bold text-slate-700 min-w-20">ENDEREÇO:</span>
+                  <input
+                    type="text"
+                    value={solicitacaoForm.enderecoFornecedor}
+                    onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoFornecedor: e.target.value }))}
+                    className="flex-1 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Seção ANEXOS */}
+            <div className="border border-slate-400 mb-3">
+              <div className="bg-slate-200 text-center font-extrabold uppercase py-1 text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
+                ANEXOS
+              </div>
+              <div className="p-2 min-h-[50px] bg-white">
+                <textarea
+                  rows={2}
+                  placeholder="Descreva anexos, links de projetos, memoriais ou especificações técnicas..."
+                  value={solicitacaoForm.anexos}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, anexos: e.target.value }))}
+                  className="w-full p-1.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 print:resize-none"
+                />
+              </div>
+            </div>
+
+            {/* Seção LISTA DE MATERIAIS */}
+            <div className="border border-slate-400 mb-3">
+              <div className="bg-slate-200 text-center font-extrabold uppercase py-1 text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
+                LISTA DE MATERIAIS
+              </div>
+
+              <div className="bg-white">
+                {groupOrder.map(tipo => {
+                  const groupItems = solicitacaoGrouped[tipo];
+                  if (groupItems.length === 0) return null;
+
+                  return (
+                    <div key={tipo} className="border-b border-slate-400 last:border-b-0">
+                      {/* Linha de Subcabeçalho de Tipo */}
+                      <div className="bg-slate-100 border-b border-slate-400 px-3 py-1 font-extrabold text-[11px] text-slate-800 flex gap-4">
+                        <span className="text-slate-500">TIPO</span>
+                        <span>{tipo}</span>
+                      </div>
+
+                      {/* Tabela de Itens */}
+                      <table className="w-full border-collapse text-[10px]">
+                        <thead>
+                          <tr className="border-b border-slate-400 bg-slate-50 font-bold text-slate-700 text-left">
+                            <th className="p-1.5 border-r border-slate-400 w-24">CÓDIGO</th>
+                            <th className="p-1.5 border-r border-slate-400">DESCRIÇÃO</th>
+                            <th className="p-1.5 border-r border-slate-400 w-24 text-right">QUANTIDADE</th>
+                            <th className="p-1.5 border-r border-slate-400 w-16 text-center">UNIDADE</th>
+                            <th className="p-1.5 border-r border-slate-400 w-20 text-right">UNIT. MAT.</th>
+                            <th className="p-1.5 border-r border-slate-400 w-20 text-right">UNIT. M.O.</th>
+                            <th className="p-1.5 border-r border-slate-400 w-24 text-right">VALOR UNIT.</th>
+                            <th className="p-1.5 w-24 text-right">VALOR TOTAL</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {groupItems.map(item => (
+                            <tr key={item.key} className="border-b border-slate-300 last:border-b-0">
+                              <td className="p-1.5 border-r border-slate-300 font-mono font-semibold text-slate-800">
+                                {item.codigo}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 text-slate-800 font-medium">
+                                {item.descricao}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 text-right font-semibold tabular-nums text-slate-800">
+                                {item.quantidadeTotal.toLocaleString('pt-BR', { minimumFractionDigits: 0, maximumFractionDigits: 4 })}
+                              </td>
+                              <td className="p-1.5 border-r border-slate-300 text-center font-medium text-slate-700">
+                                {item.unidade}
+                              </td>
+                              <td className="p-1 border-r border-slate-300 text-right">
+                                <input
+                                  type="text"
+                                  placeholder="0,00"
+                                  value={item.unitMatInput}
+                                  onChange={e => handleUpdateItemValue(item.key, 'unitMatInput', e.target.value)}
+                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                />
+                              </td>
+                              <td className="p-1 border-r border-slate-300 text-right">
+                                <input
+                                  type="text"
+                                  placeholder="0,00"
+                                  value={item.unitMoInput}
+                                  onChange={e => handleUpdateItemValue(item.key, 'unitMoInput', e.target.value)}
+                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                />
+                              </td>
+                              <td className="p-1 border-r border-slate-300 text-right">
+                                <input
+                                  type="text"
+                                  placeholder="0,00"
+                                  value={item.valorUnitInput}
+                                  onChange={e => handleUpdateItemValue(item.key, 'valorUnitInput', e.target.value)}
+                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded font-medium focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                />
+                              </td>
+                              <td className="p-1 text-right">
+                                <input
+                                  type="text"
+                                  placeholder="0,00"
+                                  value={item.valorTotalInput}
+                                  onChange={e => handleUpdateItemValue(item.key, 'valorTotalInput', e.target.value)}
+                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded font-semibold focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                />
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Seção OBSERVAÇÕES */}
+            <div className="border border-slate-400">
+              <div className="bg-slate-200 px-3 py-1 font-extrabold uppercase text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
+                OBSERVAÇÕES:
+              </div>
+              <div className="p-2 min-h-[70px] bg-white">
+                <textarea
+                  rows={3}
+                  placeholder="Condições de pagamento, frete, prazo de entrega ou observações gerais para a cotação..."
+                  value={solicitacaoForm.observacoes}
+                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, observacoes: e.target.value }))}
+                  className="w-full p-1.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 print:resize-none"
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // RENDERING: VISTA PADRÃO DA TABELA DE SELEÇÃO DE MATERIAIS
+  // ─────────────────────────────────────────────────────────────
   return (
     <div className="flex flex-col h-full bg-slate-50 rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
       {/* ── Top Bar Header ────────────────────────────────────────── */}
@@ -328,9 +818,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
 
           <button
             disabled={totalSelected === 0}
-            onClick={() => {
-              alert(`Lista de Materiais com ${totalSelected} itens selecionados.`);
-            }}
+            onClick={handleGerarSolicitacao}
             className={clsx(
               "px-4 py-1.5 text-xs font-bold rounded-xl transition-all flex items-center gap-2 shadow-sm cursor-pointer",
               totalSelected > 0
@@ -344,10 +832,9 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
         </div>
       </div>
 
-      {/* ── Conteúdo da Tabela ────────────────────────────────────────── */}
+      {/* ── Conteúdo da Tabela DE SELEÇÃO ───────────────────────────── */}
       <div className="flex-1 overflow-auto min-h-0 bg-white">
         <table className="w-full border-collapse text-left">
-          {/* Header da Tabela */}
           <thead className="sticky top-0 z-20 bg-slate-100 border-b border-slate-300">
             <tr className="text-xs font-bold text-slate-700 uppercase tracking-wider select-none">
               <th className="py-3 px-4 border-r border-slate-300 w-28 text-center bg-slate-100">
@@ -389,9 +876,8 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
 
                 return (
                   <React.Fragment key={tipo}>
-                    {/* Linha Mãe do Grupo (TIPO MATERIAL / EQUIPAMENTOS / MÃO DE OBRA) */}
+                    {/* Linha Mãe do Grupo */}
                     <tr className="bg-slate-200/90 font-bold border-t border-b border-slate-300 text-slate-800 hover:bg-slate-200 transition-colors select-none">
-                      {/* Coluna SELEÇÃO: mostra "TIPO" + Checkbox de grupo + Toggle colapso */}
                       <td className="py-2.5 px-4 border-r border-slate-300 text-center">
                         <div className="flex items-center justify-center gap-2">
                           <button
@@ -431,12 +917,10 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
                         </div>
                       </td>
 
-                      {/* Coluna CÓDIGO: Nome do Tipo */}
                       <td className="py-2.5 px-4 border-r border-slate-300 font-extrabold uppercase text-slate-800 tracking-wider">
                         {tipo}
                       </td>
 
-                      {/* Coluna DESCRIÇÃO */}
                       <td className="py-2.5 px-4 border-r border-slate-300 font-semibold text-slate-600">
                         <span className="text-[11px] bg-slate-300/60 px-2 py-0.5 rounded-full font-bold text-slate-700">
                           {groupItems.length} {groupItems.length === 1 ? 'item' : 'itens'}
@@ -448,15 +932,8 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
                         )}
                       </td>
 
-                      {/* Coluna QUANTIDADE */}
-                      <td className="py-2.5 px-4 border-r border-slate-300 text-right">
-                        {/* Vazio na mãe como no layout de referência */}
-                      </td>
-
-                      {/* Coluna UNIDADE */}
-                      <td className="py-2.5 px-4 text-center">
-                        {/* Vazio na mãe como no layout de referência */}
-                      </td>
+                      <td className="py-2.5 px-4 border-r border-slate-300 text-right" />
+                      <td className="py-2.5 px-4 text-center" />
                     </tr>
 
                     {/* Linhas Filhas do Grupo */}
@@ -472,7 +949,6 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
                             isSelected ? "bg-white" : "bg-slate-50/50 opacity-75"
                           )}
                         >
-                          {/* Coluna SELEÇÃO */}
                           <td className="py-2 px-4 border-r border-slate-200 text-center">
                             <div className="flex items-center justify-center">
                               <input
@@ -485,17 +961,14 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
                             </div>
                           </td>
 
-                          {/* Coluna CÓDIGO */}
                           <td className="py-2 px-4 border-r border-slate-200 font-mono font-semibold text-slate-800">
                             {item.codigo}
                           </td>
 
-                          {/* Coluna DESCRIÇÃO */}
                           <td className="py-2 px-4 border-r border-slate-200 text-slate-800 font-medium">
                             {item.descricao}
                           </td>
 
-                          {/* Coluna QUANTIDADE */}
                           <td className="py-2 px-4 border-r border-slate-200 text-right font-semibold text-slate-800 tabular-nums">
                             {item.quantidadeTotal.toLocaleString('pt-BR', { 
                               minimumFractionDigits: 0, 
@@ -503,7 +976,6 @@ export default function ListaMateriaisTab({ orcamentoId, itens }: ListaMateriais
                             })}
                           </td>
 
-                          {/* Coluna UNIDADE */}
                           <td className="py-2 px-4 text-center text-slate-700 font-medium">
                             {item.unidade}
                           </td>

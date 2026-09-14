@@ -4543,7 +4543,8 @@ export default function OrcamentoBuilder() {
         <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
           <ListaMateriaisTab 
             orcamentoId={id} 
-            itens={computedItens} 
+            itens={computedItens}
+            orcamentoInfo={orcamento} 
           />
         </div>
       ) : (

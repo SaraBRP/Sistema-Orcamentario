@@ -66,8 +66,8 @@ input[type=number] {
     display: none !important;
   }
 
-  /* 2. Força a exibição do documento de relatório oficial de impressão */
-  #brp-official-print-report {
+  #brp-official-print-report,
+  #solicitacao-cotacao-pdf {
     display: block !important;
     position: static !important;
     width: 100% !important;
