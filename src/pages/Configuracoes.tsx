@@ -788,7 +788,7 @@ export default function Configuracoes() {
         </div>
       </div>
 
-      {/* Navegação por Abas Principais */}
+      {/* Navegação por Abas Principais (Subabas de Configurações) */}
       <div className="flex border-b border-slate-200 bg-white rounded-xl p-1.5 border shadow-2xs gap-1">
         <button
           onClick={() => setActiveTab('usuarios')}
@@ -800,7 +800,7 @@ export default function Configuracoes() {
           )}
         >
           <Users className="w-4 h-4" />
-          <span>Área de Usuários</span>
+          <span>Usuários</span>
           {pendingProfiles.length > 0 && (
             <span className="bg-amber-400 text-slate-900 text-[10px] font-black px-2 py-0.5 rounded-full animate-pulse">
               {pendingProfiles.length}
@@ -818,7 +818,7 @@ export default function Configuracoes() {
           )}
         >
           <ShieldCheck className="w-4 h-4" />
-          <span>Liberação & Matriz de Acessos</span>
+          <span>Acessos</span>
         </button>
 
         <button
@@ -831,7 +831,7 @@ export default function Configuracoes() {
           )}
         >
           <Briefcase className="w-4 h-4" />
-          <span>Cadastro de Clientes</span>
+          <span>Clientes</span>
           {clientesList.length > 0 && (
             <span className="bg-slate-100 text-slate-700 border border-slate-200 text-[10px] font-bold px-2 py-0.5 rounded-full">
               {clientesList.length}

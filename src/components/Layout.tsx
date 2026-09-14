@@ -25,7 +25,9 @@ import {
   Bell,
   LayoutGrid,
   User,
-  ShieldCheck
+  ShieldCheck,
+  Users,
+  Briefcase
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -90,7 +92,17 @@ const navSections: NavSection[] = [
   { id: 'padroes-tecnicos', name: 'Padrões Técnicos', path: '/padroes-tecnicos', icon: BookOpen },
   { id: 'relatorios', name: 'Relatórios', path: '/relatorios', icon: FileText },
   { id: 'aprendizado', name: 'Aprendizado', path: '/aprendizado', icon: GraduationCap },
-  { id: 'configuracoes', name: 'Configurações', path: '/configuracoes', icon: Settings },
+  { 
+    id: 'configuracoes', 
+    name: 'Configurações', 
+    path: '/configuracoes', 
+    icon: Settings,
+    children: [
+      { name: 'Usuários', path: '/configuracoes?tab=usuarios', icon: Users },
+      { name: 'Acessos', path: '/configuracoes?tab=permissoes', icon: ShieldCheck },
+      { name: 'Clientes', path: '/configuracoes?tab=clientes', icon: Briefcase },
+    ]
+  },
 ];
 
 const isSystemAdminEmail = (email?: string | null) => {
@@ -378,7 +390,7 @@ export default function Layout() {
     });
   };
 
-  const [expandedSections, setExpandedSections] = useState<string[]>(['Orçamentos', 'Banco Próprio', 'Banco do Sistema']);
+  const [expandedSections, setExpandedSections] = useState<string[]>(['Orçamentos', 'Banco Próprio', 'Banco do Sistema', 'Configurações']);
 
   const toggleSection = (name: string) => {
     setExpandedSections(prev =>
@@ -389,6 +401,13 @@ export default function Layout() {
   const isPathActive = (path?: string) => {
     if (!path) return false;
     if (path === '/') return location.pathname === '/';
+    if (path.includes('?')) {
+      const [basePath, queryString] = path.split('?');
+      const params = new URLSearchParams(queryString);
+      const expectedTab = params.get('tab');
+      const currentTab = new URLSearchParams(location.search).get('tab') || 'usuarios';
+      return location.pathname === basePath && currentTab === expectedTab;
+    }
     return location.pathname.startsWith(path);
   };
 
