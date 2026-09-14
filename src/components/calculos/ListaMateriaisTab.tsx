@@ -672,16 +672,6 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                                 ))}
                               </optgroup>
                             )}
-
-                            {clientesList.length > 0 && (
-                              <optgroup label="Clientes Cadastrados">
-                                {clientesList.map(cli => (
-                                  <option key={cli.id} value={`cli_${cli.id}`}>
-                                    {cli.razao_social}
-                                  </option>
-                                ))}
-                              </optgroup>
-                            )}
                           </select>
                         )}
                         <input
