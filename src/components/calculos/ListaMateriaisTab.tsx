@@ -459,7 +459,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <div className="flex items-center">
                 {isSolucoesMetalicas ? (
                   <img 
-                    src="/logo_brp_metalica.png" 
+                    src="/logo_brp_metalica_cinza.png" 
                     alt="Logo BRP Soluções Metálicas" 
                     className="h-12 max-h-14 w-auto object-contain"
                   />
