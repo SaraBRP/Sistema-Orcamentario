@@ -170,6 +170,66 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     }
   };
 
+  const handleAnexosChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    let val = e.target.value;
+    if (val && !val.startsWith('• ') && !val.startsWith('•')) {
+      val = '• ' + val;
+    } else if (val === '•') {
+      val = '• ';
+    }
+    setSolicitacaoForm(prev => ({ ...prev, anexos: val }));
+  };
+
+  const handleAnexosKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const selectionStart = target.selectionStart;
+      const selectionEnd = target.selectionEnd;
+      const val = target.value;
+
+      const before = val.substring(0, selectionStart);
+      const after = val.substring(selectionEnd);
+
+      const newVal = before + '\n• ' + after;
+      setSolicitacaoForm(prev => ({ ...prev, anexos: newVal }));
+
+      setTimeout(() => {
+        target.selectionStart = target.selectionEnd = selectionStart + 3;
+      }, 0);
+    } else if (e.key === 'Backspace') {
+      const selectionStart = target.selectionStart;
+      const val = target.value;
+      if (selectionStart > 0 && val.substring(selectionStart - 2, selectionStart) === '• ') {
+        e.preventDefault();
+        const before = val.substring(0, selectionStart - 2);
+        const after = val.substring(selectionStart);
+        const newVal = before + after;
+        setSolicitacaoForm(prev => ({ ...prev, anexos: newVal }));
+        setTimeout(() => {
+          target.selectionStart = target.selectionEnd = selectionStart - 2;
+        }, 0);
+      }
+    }
+  };
+
+  const handleAnexosFocus = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    if (!e.target.value) {
+      setSolicitacaoForm(prev => ({ ...prev, anexos: '• ' }));
+    }
+  };
+
+  // Ajusta dinamicamente a altura dos campos de texto (endereços, anexos, observações)
+  useEffect(() => {
+    if (showSolicitacaoView) {
+      const textareas = document.querySelectorAll<HTMLTextAreaElement>('#solicitacao-cotacao-pdf textarea');
+      textareas.forEach(ta => {
+        ta.style.height = 'auto';
+        ta.style.height = `${ta.scrollHeight}px`;
+      });
+    }
+  }, [solicitacaoForm, showSolicitacaoView]);
+
   // Lista de itens da Solicitação de Cotação
   const [solicitacaoItems, setSolicitacaoItems] = useState<SolicitacaoItem[]>([]);
 
@@ -622,14 +682,14 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                 {/* Linha 3 */}
                 <tr>
                   <td colSpan={3} className="p-1.5">
-                    <div className="flex items-center gap-1.5 w-full">
-                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ENDEREÇO DE ENTREGA:</span>
-                      <input
-                        type="text"
+                    <div className="flex items-start gap-1.5 w-full">
+                      <span className="font-bold text-slate-700 whitespace-nowrap shrink-0 mt-0.5">ENDEREÇO DE ENTREGA:</span>
+                      <textarea
+                        rows={1}
                         placeholder="Rua, número, bairro, cidade - UF"
                         value={solicitacaoForm.enderecoEntrega}
                         onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoEntrega: e.target.value }))}
-                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none placeholder-slate-400"
+                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none placeholder-slate-400 resize-none overflow-hidden leading-snug"
                       />
                     </div>
                   </td>
@@ -762,13 +822,14 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                       </div>
                     </td>
                     <td className="p-1.5">
-                      <div className="flex items-center gap-1.5 w-full">
-                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ENDEREÇO:</span>
-                        <input
-                          type="text"
+                      <div className="flex items-start gap-1.5 w-full">
+                        <span className="font-bold text-slate-700 whitespace-nowrap shrink-0 mt-0.5">ENDEREÇO:</span>
+                        <textarea
+                          rows={1}
+                          placeholder="Rua, número, bairro..."
                           value={solicitacaoForm.enderecoFornecedor}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoFornecedor: e.target.value }))}
-                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none resize-none overflow-hidden leading-snug"
                         />
                       </div>
                     </td>
@@ -785,10 +846,12 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <div className="p-1.5 min-h-[45px] bg-white">
                 <textarea
                   rows={2}
-                  placeholder="Descreva anexos, links de projetos, memoriais ou especificações técnicas..."
+                  placeholder="• Descreva anexos, links de projetos, memoriais ou especificações técnicas..."
                   value={solicitacaoForm.anexos}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, anexos: e.target.value }))}
-                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none placeholder-slate-400"
+                  onFocus={handleAnexosFocus}
+                  onChange={handleAnexosChange}
+                  onKeyDown={handleAnexosKeyDown}
+                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none overflow-hidden leading-relaxed placeholder-slate-400 font-normal"
                 />
               </div>
             </div>
