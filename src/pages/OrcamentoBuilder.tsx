@@ -4348,7 +4348,7 @@ export default function OrcamentoBuilder() {
           )}
         >
           <Package className="w-4 h-4" />
-          LISTA DE MATERIAIS
+          Lista de Materiais
         </button>
       </div>
 
