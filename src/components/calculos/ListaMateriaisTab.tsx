@@ -6,7 +6,7 @@ import {
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
 import { resolveCidadeEstadoFromCliente, getClientesCadastrados, type ClienteData } from '../../lib/clientes';
-import { getEmpresasCadastradas, type EmpresaData } from '../../lib/empresas';
+import { getEmpresasCadastradas, formatCNPJ, formatCEP, formatTelefone, formatInscricaoEstadual, type EmpresaData } from '../../lib/empresas';
 
 type OrcamentoItem = {
   id: string;
@@ -126,10 +126,10 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
       setSolicitacaoForm(prev => ({
         ...prev,
         razaoSocial: emp.razao_social,
-        cnpj: emp.cnpj || '',
-        ie: emp.inscricao_estadual || '',
-        cep: emp.cep || '',
-        telefone: emp.telefone || '',
+        cnpj: formatCNPJ(emp.cnpj || ''),
+        ie: formatInscricaoEstadual(emp.inscricao_estadual || ''),
+        cep: formatCEP(emp.cep || ''),
+        telefone: formatTelefone(emp.telefone || ''),
         cidadeFornecedor: emp.cidade || '',
         estadoFornecedor: emp.uf || '',
         enderecoFornecedor: addressParts.join(', ')
@@ -159,10 +159,10 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
       setSolicitacaoForm(prev => ({
         ...prev,
         razaoSocial: cli?.razao_social || clientName,
-        cnpj: cli?.cnpj || '',
-        ie: cli?.inscricao_estadual || cli?.ie || '',
-        cep: cli?.cep || '',
-        telefone: cli?.telefone || '',
+        cnpj: formatCNPJ(cli?.cnpj || ''),
+        ie: formatInscricaoEstadual(cli?.inscricao_estadual || cli?.ie || ''),
+        cep: formatCEP(cli?.cep || ''),
+        telefone: formatTelefone(cli?.telefone || ''),
         cidadeFornecedor: resolvedLoc.cidade || cli?.cidade || '',
         estadoFornecedor: resolvedLoc.estado || cli?.uf || '',
         enderecoFornecedor: addressParts.join(', ')
@@ -752,7 +752,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         <input
                           type="text"
                           value={solicitacaoForm.telefone}
-                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, telefone: e.target.value }))}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, telefone: formatTelefone(e.target.value) }))}
                           className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
@@ -766,7 +766,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         <input
                           type="text"
                           value={solicitacaoForm.cnpj}
-                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cnpj: e.target.value }))}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cnpj: formatCNPJ(e.target.value) }))}
                           className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
@@ -791,7 +791,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         <input
                           type="text"
                           value={solicitacaoForm.ie}
-                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, ie: e.target.value }))}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, ie: formatInscricaoEstadual(e.target.value) }))}
                           className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
@@ -816,7 +816,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         <input
                           type="text"
                           value={solicitacaoForm.cep}
-                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cep: e.target.value }))}
+                          onChange={e => setSolicitacaoForm(prev => ({ ...prev, cep: formatCEP(e.target.value) }))}
                           className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
