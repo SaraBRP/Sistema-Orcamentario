@@ -332,7 +332,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
       cidade: city,
       estado: state,
       prazoRetorno: '',
-      unidadeContratacao: '',
+      unidadeContratacao: 'EMPREITADA GLOBAL',
       razaoSocial: '',
       cnpj: '',
       ie: '',
@@ -527,13 +527,17 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                   <td className="p-1.5">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0 text-[10px]">UNIDADE DE CONTRATAÇÃO:</span>
-                      <input
-                        type="text"
-                        placeholder="Ex: Matriz / Obra X"
+                      <select
                         value={solicitacaoForm.unidadeContratacao}
                         onChange={e => setSolicitacaoForm(prev => ({ ...prev, unidadeContratacao: e.target.value }))}
-                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none placeholder-slate-400"
-                      />
+                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-semibold text-slate-900 focus:outline-none cursor-pointer"
+                      >
+                        <option value="">Selecione...</option>
+                        <option value="EMPREITADA GLOBAL">EMPREITADA GLOBAL</option>
+                        <option value="PREÇO UNITÁRIO">PREÇO UNITÁRIO</option>
+                        <option value="SERVIÇO APENAS">SERVIÇO APENAS</option>
+                        <option value="M.O. APENAS">M.O. APENAS</option>
+                      </select>
                     </div>
                   </td>
                 </tr>
