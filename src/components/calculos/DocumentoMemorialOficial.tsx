@@ -284,12 +284,19 @@ export function recalcularEAPsMemoria(list: ItemMemoriaOficial[]): ItemMemoriaOf
     const itemEapClean = (item.item_eap || '').replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
     const isTopLevelEapByPattern = itemEapClean.length > 0 && !itemEapClean.includes('.');
 
+    const hasCodeOrBank = Boolean(
+      (item as any).codigo || 
+      (item as any).banco_fonte || 
+      (item as any).composicao_id || 
+      (item as any).insumo_id
+    );
+
     let isSecaoClean = false;
-    if (isExplicitChild) {
+    if (hasCodeOrBank || isExplicitChild) {
       isSecaoClean = false;
     } else if (item.isSecao === true || (item as any).is_secao === true || Boolean((item as any).isTextLine) || isSecaoByTipo) {
       isSecaoClean = true;
-    } else if (isTopLevelEapByPattern) {
+    } else if (!hasCodeOrBank && !(item.unidade && item.unidade.trim() !== '') && isTopLevelEapByPattern) {
       isSecaoClean = true;
     } else if (!(item as any).codigo && !(item as any).banco_fonte && !(item as any).composicao_id) {
       isSecaoClean = true;
@@ -1850,22 +1857,28 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     let parentCompId: string | undefined = undefined;
 
     const targetRow = targetIndex < itens.length ? itens[targetIndex] : null;
-    const prevRow = targetIndex > 0 ? itens[targetIndex - 1] : null;
-    const refRow = targetRow || prevRow;
+    const isTargetBlank = !targetRow || Boolean(
+      !targetRow.descricao && 
+      !(targetRow as any).codigo && 
+      !(targetRow as any).banco_fonte && 
+      !targetRow.isSecao
+    );
 
-    if (refRow) {
-      if (refRow.level !== undefined && refRow.level > 0) {
-        baseLevel = refRow.level;
-      }
-      if (refRow.isChildInsumoOfComposition || refRow.parentCompositionId) {
-        isChild = true;
-        parentCompId = refRow.parentCompositionId;
-      } else if (!refRow.isSecao && refRow.level === 1 && targetRow === null) {
-        // Se a linha de referência anterior for uma Composição e inserimos ao final dela
-        baseLevel = 2;
-        isChild = true;
-        parentCompId = refRow.id;
-      }
+    let baseLevel = 1;
+    let isChild = false;
+    let parentCompId: string | undefined = undefined;
+
+    if (!isTargetBlank && targetRow && (targetRow.isChildInsumoOfComposition || (targetRow as any).parentCompositionId)) {
+      // Se o usuário selecionou EXPLICITAMENTE um insumo filho existente para inserir ao lado dele
+      baseLevel = targetRow.level !== undefined ? targetRow.level : 2;
+      isChild = true;
+      parentCompId = (targetRow as any).parentCompositionId;
+    } else {
+      // Ao inserir em linha em branco ou no final da tabela/seção:
+      // O novo item do banco entra como um NOVO Serviço/Família no nível 1 (fora de composições anteriores)
+      baseLevel = 1;
+      isChild = false;
+      parentCompId = undefined;
     }
 
     const itemMae: ItemMemoriaOficial = {
