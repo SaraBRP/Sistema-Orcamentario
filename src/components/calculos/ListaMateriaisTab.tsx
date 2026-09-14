@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
-import { resolveCidadeEstadoFromCliente } from '../../lib/clientes';
+import { resolveCidadeEstadoFromCliente, getClientesCadastrados, type ClienteData } from '../../lib/clientes';
 import { getEmpresasCadastradas, type EmpresaData } from '../../lib/empresas';
 
 type OrcamentoItem = {
@@ -94,45 +94,79 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     observacoes: ''
   });
 
-  // Lista de empresas cadastradas ("Minha Empresa")
+  // Lista de empresas e clientes cadastrados
   const [minhasEmpresas, setMinhasEmpresas] = useState<EmpresaData[]>([]);
-  const [selectedEmpresaId, setSelectedEmpresaId] = useState<string>('');
-  const [customLogoUrl, setCustomLogoUrl] = useState<string>('');
+  const [clientesList, setClientesList] = useState<ClienteData[]>([]);
+  const [selectedRazaoSocialOption, setSelectedRazaoSocialOption] = useState<string>('');
 
   useEffect(() => {
     getEmpresasCadastradas().then(data => {
       if (data) setMinhasEmpresas(data);
     });
+    getClientesCadastrados().then(data => {
+      if (data) setClientesList(data);
+    });
   }, [showSolicitacaoView]);
 
-  const handleSelectEmpresa = (empresaId: string) => {
-    setSelectedEmpresaId(empresaId);
-    if (!empresaId) return;
+  const handleSelectRazaoSocial = (selectedVal: string) => {
+    setSelectedRazaoSocialOption(selectedVal);
+    if (!selectedVal) return;
 
-    const emp = minhasEmpresas.find(e => e.id === empresaId);
-    if (!emp) return;
+    if (selectedVal.startsWith('emp_')) {
+      const empId = selectedVal.replace('emp_', '');
+      const emp = minhasEmpresas.find(e => e.id === empId);
+      if (!emp) return;
 
-    const addressParts = [
-      emp.logradouro,
-      emp.numero ? `Nº ${emp.numero}` : '',
-      emp.bairro
-    ].filter(Boolean);
+      const addressParts = [
+        emp.logradouro,
+        emp.numero ? `Nº ${emp.numero}` : '',
+        emp.bairro
+      ].filter(Boolean);
 
-    setSolicitacaoForm(prev => ({
-      ...prev,
-      empresa: emp.razao_social,
-      razaoSocial: emp.razao_social,
-      cnpj: emp.cnpj || '',
-      ie: emp.inscricao_estadual || '',
-      cep: emp.cep || '',
-      telefone: emp.telefone || '',
-      cidadeFornecedor: emp.cidade || '',
-      estadoFornecedor: emp.uf || '',
-      enderecoFornecedor: addressParts.join(', ')
-    }));
+      setSolicitacaoForm(prev => ({
+        ...prev,
+        razaoSocial: emp.razao_social,
+        cnpj: emp.cnpj || '',
+        ie: emp.inscricao_estadual || '',
+        cep: emp.cep || '',
+        telefone: emp.telefone || '',
+        cidadeFornecedor: emp.cidade || '',
+        estadoFornecedor: emp.uf || '',
+        enderecoFornecedor: addressParts.join(', ')
+      }));
+    } else if (selectedVal.startsWith('cli_') || selectedVal.startsWith('client_orcamento')) {
+      const clientName = orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome || '';
+      let cli: any = null;
 
-    if (emp.logo_url) {
-      setCustomLogoUrl(emp.logo_url);
+      if (selectedVal.startsWith('cli_')) {
+        const cliId = selectedVal.replace('cli_', '');
+        cli = clientesList.find(c => c.id === cliId);
+      } else {
+        const targetName = clientName.toLowerCase().trim();
+        cli = clientesList.find(c => (c.razao_social || '').toLowerCase().trim() === targetName || (c.nome_fantasia || '').toLowerCase().trim() === targetName);
+      }
+
+      const rawCity = cli?.cidade || orcamentoInfo?.cidade || orcamentoInfo?.dadosComplementares?.cidade || '';
+      const rawState = cli?.uf || orcamentoInfo?.estado || orcamentoInfo?.dadosComplementares?.estado || '';
+      const resolvedLoc = resolveCidadeEstadoFromCliente(cli?.razao_social || clientName, rawCity, rawState);
+
+      const addressParts = [
+        cli?.logradouro || cli?.endereco || '',
+        cli?.numero ? `Nº ${cli.numero}` : '',
+        cli?.bairro || ''
+      ].filter(Boolean);
+
+      setSolicitacaoForm(prev => ({
+        ...prev,
+        razaoSocial: cli?.razao_social || clientName,
+        cnpj: cli?.cnpj || '',
+        ie: cli?.inscricao_estadual || cli?.ie || '',
+        cep: cli?.cep || '',
+        telefone: cli?.telefone || '',
+        cidadeFornecedor: resolvedLoc.cidade || cli?.cidade || '',
+        estadoFornecedor: resolvedLoc.estado || cli?.uf || '',
+        enderecoFornecedor: addressParts.join(', ')
+      }));
     }
   };
 
@@ -501,13 +535,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
             {/* Header: Logo BRP da Empresa + Emissão */}
             <div className="flex justify-between items-center border-b border-slate-400 pb-3 mb-3">
               <div className="flex items-center">
-                {customLogoUrl ? (
-                  <img 
-                    src={customLogoUrl} 
-                    alt="Logo Empresa" 
-                    className="h-12 max-h-14 w-auto object-contain"
-                  />
-                ) : isSolucoesMetalicas ? (
+                {isSolucoesMetalicas ? (
                   <img 
                     src="/logo_brp_metalica_cinza.png" 
                     alt="Logo BRP Soluções Metálicas" 
@@ -620,27 +648,48 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                     <td className="p-1.5 border-r border-slate-400 w-[65%]">
                       <div className="flex items-center gap-1.5 w-full">
                         <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">RAZÃO SOCIAL:</span>
-                        {minhasEmpresas.length > 0 && (
+                        {(Boolean(orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome) || minhasEmpresas.length > 0 || clientesList.length > 0) && (
                           <select
-                            value={selectedEmpresaId}
-                            onChange={e => handleSelectEmpresa(e.target.value)}
-                            className="bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded text-[10px] px-1.5 py-0.5 font-medium text-slate-700 outline-none cursor-pointer print:hidden shrink-0"
-                            title="Selecione uma empresa para preenchimento automático"
+                            value={selectedRazaoSocialOption}
+                            onChange={e => handleSelectRazaoSocial(e.target.value)}
+                            className="bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded text-[10px] px-1.5 py-0.5 font-medium text-slate-700 outline-none cursor-pointer print:hidden shrink-0 max-w-[180px] truncate"
+                            title="Selecione uma empresa ou cliente para preencher os dados automaticamente"
                           >
-                            <option value="">-- Minhas Empresas --</option>
-                            {minhasEmpresas.map(emp => (
-                              <option key={emp.id} value={emp.id}>
-                                {emp.razao_social}
+                            <option value="">-- Selecionar Opção --</option>
+
+                            {(orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome) && (
+                              <option value={`client_orcamento_${orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome}`}>
+                                ⭐ Cliente: {orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome}
                               </option>
-                            ))}
+                            )}
+
+                            {minhasEmpresas.length > 0 && (
+                              <optgroup label="Minhas Empresas">
+                                {minhasEmpresas.map(emp => (
+                                  <option key={emp.id} value={`emp_${emp.id}`}>
+                                    {emp.razao_social}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
+
+                            {clientesList.length > 0 && (
+                              <optgroup label="Clientes Cadastrados">
+                                {clientesList.map(cli => (
+                                  <option key={cli.id} value={`cli_${cli.id}`}>
+                                    {cli.razao_social}
+                                  </option>
+                                ))}
+                              </optgroup>
+                            )}
                           </select>
                         )}
                         <input
                           type="text"
-                          placeholder="Digite ou selecione a empresa..."
+                          placeholder="Digite ou selecione a razão social..."
                           value={solicitacaoForm.razaoSocial}
                           onChange={e => {
-                            setSelectedEmpresaId('');
+                            setSelectedRazaoSocialOption('');
                             setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }));
                           }}
                           className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none"
