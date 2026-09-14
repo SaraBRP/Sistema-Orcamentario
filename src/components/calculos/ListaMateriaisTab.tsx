@@ -6,7 +6,7 @@ import {
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
 import { resolveCidadeEstadoFromCliente } from '../../lib/clientes';
-import { getEmpresasCadastradas, EmpresaData } from '../../lib/empresas';
+import { getEmpresasCadastradas, type EmpresaData } from '../../lib/empresas';
 
 type OrcamentoItem = {
   id: string;
