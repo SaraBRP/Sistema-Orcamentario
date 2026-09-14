@@ -854,7 +854,7 @@ export default function OrcamentoBuilder() {
     const prev = undoStackRef.current.pop()!;
     isUndoRedoActionRef.current = true;
 
-    setItens(rebuildEapCodes(prev.itens));
+    setItens(ensureSingleTrailingBlankRow(rebuildEapCodes(prev.itens), id!));
     setEquipeDuracoesMap(prev.equipeDuracoesMap || {});
     setEquipeJornadasMap(prev.equipeJornadasMap || {});
     if (prev.configData) setConfigData(prev.configData);
@@ -881,7 +881,7 @@ export default function OrcamentoBuilder() {
     const next = redoStackRef.current.pop()!;
     isUndoRedoActionRef.current = true;
 
-    setItens(rebuildEapCodes(next.itens));
+    setItens(ensureSingleTrailingBlankRow(rebuildEapCodes(next.itens), id!));
     setEquipeDuracoesMap(next.equipeDuracoesMap || {});
     setEquipeJornadasMap(next.equipeJornadasMap || {});
     if (next.configData) setConfigData(next.configData);
@@ -1295,7 +1295,8 @@ export default function OrcamentoBuilder() {
       }
 
       copy.splice(index, 0, newRow);
-      return rebuildEapCodes(copy);
+      const rebuilt = rebuildEapCodes(copy);
+      return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
     setSelectedRowIndex(index);
     setHasUnsavedChanges(true);
@@ -1586,10 +1587,12 @@ export default function OrcamentoBuilder() {
 
   const ensureSingleTrailingBlankRow = (list: OrcamentoItem[], orcamentoId: string): OrcamentoItem[] => {
     const copy = [...list];
-    while (copy.length > 0 && isBlankRow(copy[copy.length - 1])) {
+    while (copy.length >= 2 && isBlankRow(copy[copy.length - 1]) && isBlankRow(copy[copy.length - 2])) {
       copy.pop();
     }
-    copy.push(createBlankRow(orcamentoId, copy.length + 1));
+    if (copy.length === 0 || !isBlankRow(copy[copy.length - 1])) {
+      copy.push(createBlankRow(orcamentoId, copy.length + 1));
+    }
     return copy;
   };
 
@@ -1810,7 +1813,8 @@ export default function OrcamentoBuilder() {
       }
 
       if (!altered) return prev;
-      return rebuildEapCodes(copy);
+      const rebuilt = rebuildEapCodes(copy);
+      return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
     setHasUnsavedChanges(true);
   };
@@ -1888,8 +1892,10 @@ export default function OrcamentoBuilder() {
       }
 
       if (!altered) return prev;
-      return rebuildEapCodes(copy);
+      const rebuilt = rebuildEapCodes(copy);
+      return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
+
     setHasUnsavedChanges(true);
   };
 
@@ -3303,7 +3309,8 @@ export default function OrcamentoBuilder() {
       } else {
         copy.push(newItem, ...children);
       }
-      return rebuildEapCodes(copy);
+      const rebuilt = rebuildEapCodes(copy);
+      return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
 
     // Mantém o drawer de importação aberto para consecutivas inserções e avança o target index
@@ -4497,6 +4504,8 @@ export default function OrcamentoBuilder() {
                 };
                 return novoItem;
               });
+              const rebuilt = rebuildEapCodes(updated);
+              return ensureSingleTrailingBlankRow(rebuilt, id!);
             });
             setHasUnsavedChanges(true);
           }}
