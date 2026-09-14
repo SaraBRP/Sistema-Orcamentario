@@ -42,8 +42,17 @@ import {
   formatCNPJ, 
   type ClienteData 
 } from '../lib/clientes';
+import {
+  getEmpresasCadastradas,
+  saveEmpresa,
+  deleteEmpresa,
+  formatCNPJ as formatEmpresaCNPJ,
+  formatCEP as formatEmpresaCEP,
+  formatTelefone as formatEmpresaTel,
+  type EmpresaData
+} from '../lib/empresas';
 
-type Tab = 'usuarios' | 'permissoes' | 'clientes';
+type Tab = 'usuarios' | 'permissoes' | 'empresas' | 'clientes';
 type SubTabUsuarios = 'lista' | 'pendentes';
 
 interface Profile {
@@ -95,6 +104,9 @@ export default function Configuracoes() {
     if (tabFromUrl === 'clientes') {
       return 'clientes';
     }
+    if (tabFromUrl === 'empresas' || tabFromUrl === 'minha-empresa') {
+      return 'empresas';
+    }
     return 'usuarios';
   }, [searchParams]);
 
@@ -107,6 +119,8 @@ export default function Configuracoes() {
     const tabFromUrl = searchParams.get('tab');
     if (tabFromUrl === 'clientes') {
       setActiveTabState('clientes');
+    } else if (tabFromUrl === 'empresas' || tabFromUrl === 'minha-empresa') {
+      setActiveTabState('empresas');
     } else if (tabFromUrl === 'permissoes') {
       setActiveTabState('usuarios');
       setSubTabUsuarios('permissoes');
@@ -151,6 +165,31 @@ export default function Configuracoes() {
   const [newEmail, setNewEmail] = useState('');
   const [newCargo, setNewCargo] = useState('orcamentista');
 
+  // Estado para Cadastro de Minha Empresa
+  const [empresasList, setEmpresasList] = useState<EmpresaData[]>([]);
+  const [loadingEmpresas, setLoadingEmpresas] = useState(false);
+  const [searchEmpresaTerm, setSearchEmpresaTerm] = useState('');
+  const [isEmpresaModalOpen, setIsEmpresaModalOpen] = useState(false);
+  const [editingEmpresa, setEditingEmpresa] = useState<EmpresaData | null>(null);
+
+  // Formulário de Minha Empresa
+  const [empRazaoSocial, setEmpRazaoSocial] = useState('');
+  const [empNomeFantasia, setEmpNomeFantasia] = useState('');
+  const [empCnpj, setEmpCnpj] = useState('');
+  const [empInscricaoEstadual, setEmpInscricaoEstadual] = useState('');
+  const [empLogradouro, setEmpLogradouro] = useState('');
+  const [empNumero, setEmpNumero] = useState('');
+  const [empBairro, setEmpBairro] = useState('');
+  const [empCidade, setEmpCidade] = useState('Goiânia');
+  const [empUf, setEmpUf] = useState('GO');
+  const [empCep, setEmpCep] = useState('');
+  const [empTelefone, setEmpTelefone] = useState('');
+  const [empEmail, setEmpEmail] = useState('');
+  const [empLogoUrl, setEmpLogoUrl] = useState('/logo_brp_metalica_cinza.png');
+  const [empIsPadrao, setEmpIsPadrao] = useState(false);
+  const [empStatus, setEmpStatus] = useState<'ativo' | 'inativo'>('ativo');
+  const [savingEmpresa, setSavingEmpresa] = useState(false);
+
   // Estado para Cadastro de Clientes
   const [clientesList, setClientesList] = useState<ClienteData[]>([]);
   const [loadingClientes, setLoadingClientes] = useState(false);
@@ -177,7 +216,15 @@ export default function Configuracoes() {
   useEffect(() => {
     fetchProfiles();
     fetchClientesList();
+    fetchEmpresasList();
   }, []);
+
+  const fetchEmpresasList = async () => {
+    setLoadingEmpresas(true);
+    const data = await getEmpresasCadastradas();
+    setEmpresasList(data);
+    setLoadingEmpresas(false);
+  };
 
   const fetchClientesList = async () => {
     setLoadingClientes(true);
@@ -712,6 +759,100 @@ export default function Configuracoes() {
     );
   }, [clientesList, searchClienteTerm]);
 
+  // Handlers para Minha Empresa
+  const handleOpenNewEmpresaModal = () => {
+    setEditingEmpresa(null);
+    setEmpRazaoSocial('');
+    setEmpNomeFantasia('');
+    setEmpCnpj('');
+    setEmpInscricaoEstadual('');
+    setEmpLogradouro('');
+    setEmpNumero('');
+    setEmpBairro('');
+    setEmpCidade('Goiânia');
+    setEmpUf('GO');
+    setEmpCep('');
+    setEmpTelefone('');
+    setEmpEmail('');
+    setEmpLogoUrl('/logo_brp_metalica_cinza.png');
+    setEmpIsPadrao(empresasList.length === 0);
+    setEmpStatus('ativo');
+    setIsEmpresaModalOpen(true);
+  };
+
+  const handleOpenEditEmpresaModal = (emp: EmpresaData) => {
+    setEditingEmpresa(emp);
+    setEmpRazaoSocial(emp.razao_social || '');
+    setEmpNomeFantasia(emp.nome_fantasia || '');
+    setEmpCnpj(emp.cnpj || '');
+    setEmpInscricaoEstadual(emp.inscricao_estadual || '');
+    setEmpLogradouro(emp.logradouro || '');
+    setEmpNumero(emp.numero || '');
+    setEmpBairro(emp.bairro || '');
+    setEmpCidade(emp.cidade || '');
+    setEmpUf(emp.uf || 'GO');
+    setEmpCep(emp.cep || '');
+    setEmpTelefone(emp.telefone || '');
+    setEmpEmail(emp.email || '');
+    setEmpLogoUrl(emp.logo_url || '/logo_brp_metalica_cinza.png');
+    setEmpIsPadrao(!!emp.is_padrao);
+    setEmpStatus(emp.status || 'ativo');
+    setIsEmpresaModalOpen(true);
+  };
+
+  const handleSaveEmpresaSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!empRazaoSocial.trim()) {
+      alert('Por favor, informe a Razão Social da empresa.');
+      return;
+    }
+    setSavingEmpresa(true);
+    await saveEmpresa({
+      id: editingEmpresa ? editingEmpresa.id : undefined,
+      razao_social: empRazaoSocial,
+      nome_fantasia: empNomeFantasia,
+      cnpj: formatEmpresaCNPJ(empCnpj),
+      inscricao_estadual: empInscricaoEstadual,
+      logradouro: empLogradouro,
+      numero: empNumero,
+      bairro: empBairro,
+      cidade: empCidade,
+      uf: empUf,
+      cep: formatEmpresaCEP(empCep),
+      telefone: formatEmpresaTel(empTelefone),
+      email: empEmail,
+      logo_url: empLogoUrl,
+      is_padrao: empIsPadrao,
+      status: empStatus
+    });
+    await fetchEmpresasList();
+    setSavingEmpresa(false);
+    setIsEmpresaModalOpen(false);
+  };
+
+  const handleDeleteEmpresaClick = async (id: string, name: string) => {
+    if (confirm(`Tem certeza de que deseja excluir a empresa "${name}"?`)) {
+      await deleteEmpresa(id);
+      await fetchEmpresasList();
+    }
+  };
+
+  const handleSetPadraoEmpresa = async (emp: EmpresaData) => {
+    await saveEmpresa({ ...emp, is_padrao: true });
+    await fetchEmpresasList();
+  };
+
+  const filteredEmpresas = useMemo(() => {
+    if (!searchEmpresaTerm.trim()) return empresasList;
+    const term = searchEmpresaTerm.toLowerCase().trim();
+    return empresasList.filter(e =>
+      (e.razao_social && e.razao_social.toLowerCase().includes(term)) ||
+      (e.nome_fantasia && e.nome_fantasia.toLowerCase().includes(term)) ||
+      (e.cnpj && e.cnpj.includes(term)) ||
+      (e.cidade && e.cidade.toLowerCase().includes(term))
+    );
+  }, [empresasList, searchEmpresaTerm]);
+
   const renderHeaderCell = (field: string, label: string, align: 'left' | 'center' | 'right' = 'center') => {
     const isSorted = sortField === field;
     return (
@@ -747,10 +888,12 @@ export default function Configuracoes() {
           </div>
           <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">
             {activeTab === 'usuarios' && 'Gestão de Usuários & Controle de Acessos'}
+            {activeTab === 'empresas' && 'Cadastro & Gestão de Minhas Empresas'}
             {activeTab === 'clientes' && 'Cadastro & Gestão de Clientes'}
           </h2>
           <p className="text-slate-500 text-xs">
             {activeTab === 'usuarios' && 'Gerencie os colaboradores da BRP Engenharia, permissões aos módulos do sistema e solicitações de acesso'}
+            {activeTab === 'empresas' && 'Cadastre as empresas do grupo (BRP Soluções Metálicas, BRP Engenharia, etc.) com logos e dados fiscais para utilização na geração de relatórios e listas de materiais'}
             {activeTab === 'clientes' && 'Cadastre empresas, CNPJs, locais e contatos dos clientes vinculados aos orçamentos'}
           </p>
         </div>
@@ -759,15 +902,24 @@ export default function Configuracoes() {
           <button
             onClick={() => {
               if (activeTab === 'clientes') fetchClientesList();
+              else if (activeTab === 'empresas') fetchEmpresasList();
               else fetchProfiles();
             }}
             className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl border border-slate-200 transition-colors cursor-pointer"
             title="Atualizar lista"
           >
-            <RefreshCw className={clsx("w-4 h-4", (loading || loadingClientes) && "animate-spin")} />
+            <RefreshCw className={clsx("w-4 h-4", (loading || loadingClientes || loadingEmpresas) && "animate-spin")} />
           </button>
 
-          {activeTab === 'clientes' ? (
+          {activeTab === 'empresas' ? (
+            <button
+              onClick={handleOpenNewEmpresaModal}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
+            >
+              <Plus className="w-4 h-4" />
+              <span>+ Nova Empresa</span>
+            </button>
+          ) : activeTab === 'clientes' ? (
             <button
               onClick={handleOpenNewClienteModal}
               className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
@@ -1159,6 +1311,158 @@ export default function Configuracoes() {
               </div>
             </div>
           )}
+        </div>
+      )}
+
+      {/* ABA: CADASTRO DE MINHAS EMPRESAS */}
+      {activeTab === 'empresas' && (
+        <div className="space-y-4">
+          <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 bg-white p-3 rounded-xl border border-slate-200">
+            <div className="relative flex-1 w-full sm:max-w-md">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Buscar empresa por razão social, nome fantasia, CNPJ ou cidade..."
+                value={searchEmpresaTerm}
+                onChange={(e) => setSearchEmpresaTerm(e.target.value)}
+                className="w-full pl-9 pr-3 py-2 border border-slate-200 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+              />
+              {searchEmpresaTerm && (
+                <button onClick={() => setSearchEmpresaTerm('')} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {loadingEmpresas ? (
+              <div className="col-span-full bg-white rounded-2xl p-12 text-center text-slate-400 border border-slate-200">
+                <RefreshCw className="w-6 h-6 animate-spin mx-auto mb-2 text-blue-600" />
+                Carregando dados das empresas...
+              </div>
+            ) : filteredEmpresas.length === 0 ? (
+              <div className="col-span-full bg-white rounded-2xl p-12 text-center text-slate-400 border border-slate-200">
+                <Building2 className="w-8 h-8 mx-auto mb-2 text-slate-300" />
+                Nenhuma empresa cadastrada ou encontrada na busca.
+              </div>
+            ) : (
+              filteredEmpresas.map((emp) => (
+                <div 
+                  key={emp.id}
+                  className={clsx(
+                    "bg-white rounded-2xl p-5 border transition-all flex flex-col justify-between gap-4 relative overflow-hidden shadow-xs",
+                    emp.is_padrao ? "border-blue-300 ring-2 ring-blue-500/20" : "border-slate-200 hover:border-slate-300"
+                  )}
+                >
+                  {/* Top Badge & Header */}
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex items-center gap-3">
+                      <div className="w-14 h-14 rounded-xl bg-slate-50 border border-slate-200 p-1.5 flex items-center justify-center shrink-0">
+                        {emp.logo_url ? (
+                          <img src={emp.logo_url} alt={emp.razao_social} className="max-h-full max-w-full object-contain" />
+                        ) : (
+                          <Building2 className="w-7 h-7 text-slate-400" />
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <h3 className="font-extrabold text-slate-900 text-sm leading-snug">{emp.razao_social}</h3>
+                          {emp.is_padrao && (
+                            <span className="bg-blue-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider shadow-2xs">
+                              PADRÃO
+                            </span>
+                          )}
+                        </div>
+                        {emp.nome_fantasia && (
+                          <p className="text-xs text-slate-500 font-medium">Fantasia: {emp.nome_fantasia}</p>
+                        )}
+                      </div>
+                    </div>
+
+                    <span className={clsx(
+                      "px-2 py-0.5 rounded font-bold text-[10px] uppercase border shrink-0",
+                      emp.status === 'ativo' ? "bg-emerald-100 text-emerald-800 border-emerald-200" : "bg-rose-100 text-rose-800 border-rose-200"
+                    )}>
+                      {emp.status || 'ativo'}
+                    </span>
+                  </div>
+
+                  {/* Informações Fiscais & Endereço */}
+                  <div className="grid grid-cols-2 gap-2 bg-slate-50/70 p-3 rounded-xl border border-slate-100 text-xs">
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">CNPJ</span>
+                      <span className="font-mono font-bold text-slate-800">{emp.cnpj || '-'}</span>
+                    </div>
+                    <div>
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Inscrição Estadual</span>
+                      <span className="font-mono text-slate-700">{emp.inscricao_estadual || '-'}</span>
+                    </div>
+                    <div className="col-span-2">
+                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Localização / Cidade</span>
+                      <span className="text-slate-700 flex items-center gap-1 font-medium">
+                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                        {[emp.logradouro, emp.numero, emp.bairro, emp.cidade && emp.uf ? `${emp.cidade}/${emp.uf}` : emp.cidade].filter(Boolean).join(', ') || '-'}
+                      </span>
+                    </div>
+                    {emp.telefone && (
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Telefone</span>
+                        <span className="text-slate-700 font-medium flex items-center gap-1">
+                          <Phone className="w-3 h-3 text-slate-400 shrink-0" />
+                          {emp.telefone}
+                        </span>
+                      </div>
+                    )}
+                    {emp.email && (
+                      <div>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">E-mail</span>
+                        <span className="text-slate-700 font-medium flex items-center gap-1 truncate">
+                          <Mail className="w-3 h-3 text-slate-400 shrink-0" />
+                          {emp.email}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Ações */}
+                  <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                    {!emp.is_padrao ? (
+                      <button
+                        onClick={() => handleSetPadraoEmpresa(emp)}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 hover:underline cursor-pointer"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Definir como Padrão</span>
+                      </button>
+                    ) : (
+                      <span className="text-xs text-emerald-700 font-bold flex items-center gap-1">
+                        <Check className="w-3.5 h-3.5 text-emerald-600" />
+                        Empresa Selecionada para Orçamentos
+                      </span>
+                    )}
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEditEmpresaModal(emp)}
+                        className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                        title="Editar Empresa"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                      <button
+                        onClick={() => handleDeleteEmpresaClick(emp.id, emp.razao_social)}
+                        className="p-1.5 text-slate-500 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                        title="Excluir Empresa"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
       )}
 
@@ -1595,6 +1899,262 @@ export default function Configuracoes() {
                   className="px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg shadow-xs cursor-pointer disabled:opacity-50"
                 >
                   {savingCliente ? 'Salvando...' : editingCliente ? 'Salvar Alterações' : 'Cadastrar Cliente'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DE CADASTRO / EDIÇÃO DE EMPRESA */}
+      {isEmpresaModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[90vh] overflow-y-auto">
+            <div className="p-5 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
+              <div className="flex items-center gap-2">
+                <div className="w-9 h-9 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Building2 className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="font-extrabold text-slate-900 text-sm">
+                    {editingEmpresa ? 'Editar Dados da Empresa' : 'Cadastrar Nova Empresa'}
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Defina os dados cadastrais, fiscais e logotipo para utilização na lista de materiais
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsEmpresaModalOpen(false)}
+                className="p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEmpresaSubmit} className="p-6 space-y-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Razão Social <span className="text-rose-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: BRP Soluções Metálicas Ltda"
+                    value={empRazaoSocial}
+                    onChange={(e) => setEmpRazaoSocial(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Nome Fantasia</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: BRP Soluções Metálicas"
+                    value={empNomeFantasia}
+                    onChange={(e) => setEmpNomeFantasia(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">CNPJ</label>
+                  <input
+                    type="text"
+                    placeholder="00.000.000/0001-00"
+                    value={empCnpj}
+                    onChange={(e) => setEmpCnpj(formatEmpresaCNPJ(e.target.value))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Inscrição Estadual</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 10.589.412-0"
+                    value={empInscricaoEstadual}
+                    onChange={(e) => setEmpInscricaoEstadual(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Telefone de Contato</label>
+                  <input
+                    type="text"
+                    placeholder="(62) 3200-0000"
+                    value={empTelefone}
+                    onChange={(e) => setEmpTelefone(formatEmpresaTel(e.target.value))}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-bold text-slate-700 mb-1">E-mail Corporativo</label>
+                  <input
+                    type="email"
+                    placeholder="contato@brpmetalica.com.br"
+                    value={empEmail}
+                    onChange={(e) => setEmpEmail(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-mono"
+                  />
+                </div>
+
+                {/* Endereço */}
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Logradouro / Rua</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Av. Industrial"
+                    value={empLogradouro}
+                    onChange={(e) => setEmpLogradouro(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Número / Bairro</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <input
+                      type="text"
+                      placeholder="Nº 1200"
+                      value={empNumero}
+                      onChange={(e) => setEmpNumero(e.target.value)}
+                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                    <input
+                      type="text"
+                      placeholder="Bairro"
+                      value={empBairro}
+                      onChange={(e) => setEmpBairro(e.target.value)}
+                      className="w-full px-2.5 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Cidade</label>
+                  <input
+                    type="text"
+                    placeholder="Goiânia"
+                    value={empCidade}
+                    onChange={(e) => setEmpCidade(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-semibold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Estado (UF)</label>
+                  <select
+                    value={empUf}
+                    onChange={(e) => setEmpUf(e.target.value)}
+                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white font-bold"
+                  >
+                    {['AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO'].map(uf => (
+                      <option key={uf} value={uf}>{uf}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Logotipo */}
+                <div className="sm:col-span-2 space-y-2 bg-slate-50 p-3 rounded-xl border border-slate-200">
+                  <label className="block text-xs font-bold text-slate-800">
+                    Logotipo da Empresa (Utilizado nos Documentos & Listas de Materiais)
+                  </label>
+
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setEmpLogoUrl('/logo_brp_metalica_cinza.png')}
+                      className={clsx(
+                        "p-2.5 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer bg-white",
+                        empLogoUrl === '/logo_brp_metalica_cinza.png' ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/50" : "border-slate-200 hover:border-slate-300"
+                      )}
+                    >
+                      <img src="/logo_brp_metalica_cinza.png" alt="BRP Metálica (Cinza)" className="h-7 object-contain mx-auto" />
+                      <span className="text-[10px] font-bold text-slate-700">Logo Metálica (Cinza)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEmpLogoUrl('/logo_brp_color.png')}
+                      className={clsx(
+                        "p-2.5 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer bg-white",
+                        empLogoUrl === '/logo_brp_color.png' ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/50" : "border-slate-200 hover:border-slate-300"
+                      )}
+                    >
+                      <img src="/logo_brp_color.png" alt="BRP Engenharia" className="h-7 object-contain mx-auto" />
+                      <span className="text-[10px] font-bold text-slate-700">Logo Engenharia</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setEmpLogoUrl('/logo_brp_metalica.png')}
+                      className={clsx(
+                        "p-2.5 rounded-xl border text-center transition-all flex flex-col items-center gap-1.5 cursor-pointer bg-white",
+                        empLogoUrl === '/logo_brp_metalica.png' ? "border-blue-600 ring-2 ring-blue-500/20 bg-blue-50/50" : "border-slate-200 hover:border-slate-300"
+                      )}
+                    >
+                      <img src="/logo_brp_metalica.png" alt="BRP Soluções Metálicas" className="h-7 object-contain mx-auto" />
+                      <span className="text-[10px] font-bold text-slate-700">Logo Soluções Metálicas</span>
+                    </button>
+                  </div>
+
+                  <div className="mt-2">
+                    <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block mb-1">Ou informe uma URL de Logo Personalizada</span>
+                    <input
+                      type="text"
+                      placeholder="https://..."
+                      value={empLogoUrl}
+                      onChange={(e) => setEmpLogoUrl(e.target.value)}
+                      className="w-full px-3 py-1.5 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500 bg-white"
+                    />
+                  </div>
+                </div>
+
+                <div className="sm:col-span-2 flex items-center justify-between pt-2">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={empIsPadrao}
+                      onChange={(e) => setEmpIsPadrao(e.target.checked)}
+                      className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                    />
+                    <span className="text-xs font-bold text-slate-800">Definir como Empresa Padrão nos Orçamentos</span>
+                  </label>
+
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs font-bold text-slate-700">Status:</label>
+                    <select
+                      value={empStatus}
+                      onChange={(e) => setEmpStatus(e.target.value as 'ativo' | 'inativo')}
+                      className="px-2.5 py-1 border border-slate-300 rounded-lg text-xs outline-none font-bold text-slate-700 cursor-pointer bg-white"
+                    >
+                      <option value="ativo">Ativo</option>
+                      <option value="inativo">Inativo</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex items-center justify-end gap-2 pt-4 border-t border-slate-100">
+                <button
+                  type="button"
+                  onClick={() => setIsEmpresaModalOpen(false)}
+                  className="px-4 py-2 border border-slate-300 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition-colors cursor-pointer"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={savingEmpresa}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer disabled:opacity-50"
+                >
+                  <Check className="w-4 h-4" />
+                  <span>{savingEmpresa ? 'Salvando...' : 'Salvar Empresa'}</span>
                 </button>
               </div>
             </form>

@@ -99,6 +99,7 @@ const navSections: NavSection[] = [
     icon: Settings,
     children: [
       { name: 'Usuários & Acessos', path: '/configuracoes?tab=usuarios', icon: Users },
+      { name: 'Minha Empresa', path: '/configuracoes?tab=empresas', icon: Building2 },
       { name: 'Clientes', path: '/configuracoes?tab=clientes', icon: Briefcase },
     ]
   },
