@@ -158,3 +158,51 @@ export async function deleteCliente(clienteId: string): Promise<boolean> {
 
   return true;
 }
+
+// Resolver Cidade e Estado (UF) a partir do cadastro de cliente
+export function resolveCidadeEstadoFromCliente(
+  clientName?: string,
+  currentCity?: string,
+  currentState?: string
+): { cidade: string; estado: string } {
+  let cidade = (currentCity || '').trim();
+  let estado = (currentState || '').trim();
+
+  if (cidade && estado) {
+    return { cidade, estado };
+  }
+
+  if (!clientName) {
+    return { cidade, estado };
+  }
+
+  const searchName = clientName.toLowerCase().trim();
+
+  let allClientes: ClienteData[] = CLIENTES_BASE_INICIAL;
+  try {
+    const saved = localStorage.getItem(LOCAL_STORAGE_CLIENTES_KEY);
+    if (saved) {
+      const parsed = JSON.parse(saved);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        allClientes = parsed;
+      }
+    }
+  } catch {}
+
+  const found = allClientes.find(c => {
+    const rSocial = (c.razao_social || '').toLowerCase().trim();
+    const nFantasia = (c.nome_fantasia || '').toLowerCase().trim();
+    return (
+      (rSocial && (searchName.includes(rSocial) || rSocial.includes(searchName))) ||
+      (nFantasia && (searchName.includes(nFantasia) || nFantasia.includes(searchName)))
+    );
+  });
+
+  if (found) {
+    if (!cidade && found.cidade) cidade = found.cidade;
+    if (!estado && found.uf) estado = found.uf;
+  }
+
+  return { cidade, estado };
+}
+

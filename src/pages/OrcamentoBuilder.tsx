@@ -15,6 +15,7 @@ import DistribuiçãoEquipeTab from '../components/calculos/DistribuiçãoEquipe
 import ListaMateriaisTab from '../components/calculos/ListaMateriaisTab';
 import type { CalculoItem } from '../types/calculos';
 import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
+import { resolveCidadeEstadoFromCliente } from '../lib/clientes';
 
 type OrcamentoItem = {
   id: string;
@@ -2020,8 +2021,17 @@ export default function OrcamentoBuilder() {
         if (dbEquipe.jornadas) setEquipeJornadasMap(dbEquipe.jornadas);
       }
 
+      const clientName = orcData.cliente || orcData.cliente_nome || '';
+      const resolvedLocation = resolveCidadeEstadoFromCliente(
+        clientName,
+        orcData.cidade || orcData.cidade_obra || (effectiveDC as any)?.cidade,
+        orcData.estado || orcData.uf || (effectiveDC as any)?.estado
+      );
+
       setOrcamento({
         ...orcData,
+        cidade: resolvedLocation.cidade,
+        estado: resolvedLocation.estado,
         empresa: effectiveEmpresa,
         responsavel: effectiveResponsavel,
         observacao_gestor: effectiveObs,

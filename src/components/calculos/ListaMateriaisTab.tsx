@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { supabase } from '../../lib/supabase';
+import { resolveCidadeEstadoFromCliente } from '../../lib/clientes';
 
 type OrcamentoItem = {
   id: string;
@@ -314,8 +315,13 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
       ? `${orcamentoInfo.codigo ? `${orcamentoInfo.codigo} - ` : ''}${orcamentoInfo.nome || 'Orçamento'}`
       : 'Orçamento';
 
-    const city = orcamentoInfo?.cidade || orcamentoInfo?.dadosComplementares?.cidade || '';
-    const state = orcamentoInfo?.estado || orcamentoInfo?.dadosComplementares?.estado || '';
+    const rawCity = orcamentoInfo?.cidade || orcamentoInfo?.dadosComplementares?.cidade || orcamentoInfo?.cidade_obra || '';
+    const rawState = orcamentoInfo?.estado || orcamentoInfo?.dadosComplementares?.estado || orcamentoInfo?.uf || '';
+    const clientName = orcamentoInfo?.cliente || orcamentoInfo?.cliente_nome || '';
+    const resolvedLoc = resolveCidadeEstadoFromCliente(clientName, rawCity, rawState);
+
+    const city = resolvedLoc.cidade;
+    const state = resolvedLoc.estado;
     const emp = orcamentoInfo?.empresa || 'BRP Soluções Metálicas';
 
     setSolicitacaoForm({
