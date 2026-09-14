@@ -314,13 +314,17 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
       ? `${orcamentoInfo.codigo ? `${orcamentoInfo.codigo} - ` : ''}${orcamentoInfo.nome || 'Orçamento'}`
       : 'Orçamento';
 
+    const city = orcamentoInfo?.cidade || orcamentoInfo?.dadosComplementares?.cidade || '';
+    const state = orcamentoInfo?.estado || orcamentoInfo?.dadosComplementares?.estado || '';
+    const emp = orcamentoInfo?.empresa || 'BRP Soluções Metálicas';
+
     setSolicitacaoForm({
       emissao: formattedDate,
-      empresa: orcamentoInfo?.empresa || 'BRP ENGENHARIA',
+      empresa: emp,
       orcamento: defaultOrcamentoName,
       enderecoEntrega: orcamentoInfo?.dadosComplementares?.enderecoEntrega || '',
-      cidade: orcamentoInfo?.cidade || '',
-      estado: orcamentoInfo?.estado || '',
+      cidade: city,
+      estado: state,
       prazoRetorno: '',
       unidadeContratacao: '',
       razaoSocial: '',
@@ -399,7 +403,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     window.print();
   };
 
-  // Identificação dinâmica da logo da empresa selecionada/preenchida
+  // Identificação dinâmica da logo da empresa selecionada/preenchida no orçamento
   const currentEmpresaName = (solicitacaoForm.empresa || orcamentoInfo?.empresa || '').toLowerCase();
   const isSolucoesMetalicas = currentEmpresaName.includes('soluç') || currentEmpresaName.includes('metálic') || currentEmpresaName.includes('metalic') || currentEmpresaName.includes('soluc');
 
@@ -428,7 +432,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                 </span>
               </h2>
               <p className="text-xs text-slate-500">
-                Preencha os campos da solicitação e clique em Exportar PDF para gerar o documento oficial
+                Preencha os dados adicionais da solicitação e clique em Exportar PDF para gerar o documento oficial
               </p>
             </div>
           </div>
@@ -444,7 +448,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
           </div>
         </div>
 
-        {/* ── DOCUMENTO DA SOLICITAÇÃO (MODELO FIDEDIGNO AO PDF) ── */}
+        {/* ── DOCUMENTO DA SOLICITAÇÃO (MODELO CLEAN FIDEDIGNO AO PDF) ── */}
         <div className="p-4 md:p-8 flex justify-center">
           <div 
             id="solicitacao-cotacao-pdf"
@@ -484,16 +488,11 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
 
               <div className="flex items-center gap-2 font-bold text-slate-700">
                 <span>EMISSÃO:</span>
-                <input
-                  type="text"
-                  value={solicitacaoForm.emissao}
-                  onChange={e => setSolicitacaoForm(prev => ({ ...prev, emissao: e.target.value }))}
-                  className="w-36 px-1.5 py-0.5 border border-slate-300 rounded text-center text-[11px] font-semibold print:border-0 print:px-0"
-                />
+                <span className="font-semibold text-slate-900">{solicitacaoForm.emissao}</span>
               </div>
             </div>
 
-            {/* Cabeçalho de Informações do Orçamento (Tabela Alinhada com 100% Contenção) */}
+            {/* Cabeçalho de Informações do Orçamento (Campos Ineditáveis vêm do cadastro do orçamento) */}
             <table className="w-full border-collapse border border-slate-400 mb-3 text-[11px] bg-white">
               <tbody>
                 {/* Linha 1 */}
@@ -501,23 +500,13 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                   <td className="p-1.5 border-r border-slate-400 w-[50%]">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">EMPRESA:</span>
-                      <input
-                        type="text"
-                        value={solicitacaoForm.empresa}
-                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, empresa: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] font-medium focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                      />
+                      <span className="font-semibold text-slate-900 truncate">{solicitacaoForm.empresa || 'BRP ENGENHARIA'}</span>
                     </div>
                   </td>
                   <td className="p-1.5 border-r border-slate-400 w-[20%]">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">CIDADE:</span>
-                      <input
-                        type="text"
-                        value={solicitacaoForm.cidade}
-                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidade: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                      />
+                      <span className="font-semibold text-slate-900 truncate">{solicitacaoForm.cidade || '-'}</span>
                     </div>
                   </td>
                   <td className="p-1.5 w-[30%]">
@@ -528,7 +517,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         placeholder="Ex: 20/09/2026 17:00"
                         value={solicitacaoForm.prazoRetorno}
                         onChange={e => setSolicitacaoForm(prev => ({ ...prev, prazoRetorno: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none placeholder-slate-400"
                       />
                     </div>
                   </td>
@@ -539,23 +528,13 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                   <td className="p-1.5 border-r border-slate-400">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ORÇAMENTO:</span>
-                      <input
-                        type="text"
-                        value={solicitacaoForm.orcamento}
-                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, orcamento: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] font-medium focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                      />
+                      <span className="font-semibold text-slate-900 truncate">{solicitacaoForm.orcamento || '-'}</span>
                     </div>
                   </td>
                   <td className="p-1.5 border-r border-slate-400">
                     <div className="flex items-center gap-1.5 w-full">
                       <span className="font-bold text-slate-700 whitespace-nowrap shrink-0">ESTADO:</span>
-                      <input
-                        type="text"
-                        value={solicitacaoForm.estado}
-                        onChange={e => setSolicitacaoForm(prev => ({ ...prev, estado: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
-                      />
+                      <span className="font-semibold text-slate-900 truncate">{solicitacaoForm.estado || '-'}</span>
                     </div>
                   </td>
                   <td className="p-1.5">
@@ -566,7 +545,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         placeholder="Ex: Matriz / Obra X"
                         value={solicitacaoForm.unidadeContratacao}
                         onChange={e => setSolicitacaoForm(prev => ({ ...prev, unidadeContratacao: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none placeholder-slate-400"
                       />
                     </div>
                   </td>
@@ -582,7 +561,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         placeholder="Rua, número, bairro, cidade - UF"
                         value={solicitacaoForm.enderecoEntrega}
                         onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoEntrega: e.target.value }))}
-                        className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                        className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] font-medium text-slate-900 focus:outline-none placeholder-slate-400"
                       />
                     </div>
                   </td>
@@ -590,7 +569,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               </tbody>
             </table>
 
-            {/* Seção DADOS CADASTRAIS (Fornecedor) - Tabela Perfeitamente Alinhada */}
+            {/* Seção DADOS CADASTRAIS (Fornecedor) - Campos sem bordas de input */}
             <div className="border border-slate-400 mb-3">
               <div className="bg-slate-200 text-center font-extrabold uppercase py-1 text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
                 DADOS CADASTRAIS
@@ -605,7 +584,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.razaoSocial}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, razaoSocial: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -616,7 +595,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.telefone}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, telefone: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -630,7 +609,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.cnpj}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, cnpj: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -641,7 +620,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.cidadeFornecedor}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, cidadeFornecedor: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -655,7 +634,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.ie}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, ie: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -666,7 +645,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.estadoFornecedor}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, estadoFornecedor: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -680,7 +659,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.cep}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, cep: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -691,7 +670,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                           type="text"
                           value={solicitacaoForm.enderecoFornecedor}
                           onChange={e => setSolicitacaoForm(prev => ({ ...prev, enderecoFornecedor: e.target.value }))}
-                          className="w-full min-w-0 px-1.5 py-0.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                          className="w-full min-w-0 bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none"
                         />
                       </div>
                     </td>
@@ -700,18 +679,18 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               </table>
             </div>
 
-            {/* Seção ANEXOS */}
+            {/* Seção ANEXOS sem borda no textarea */}
             <div className="border border-slate-400 mb-3">
               <div className="bg-slate-200 text-center font-extrabold uppercase py-1 text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
                 ANEXOS
               </div>
-              <div className="p-2 min-h-[50px] bg-white">
+              <div className="p-1.5 min-h-[45px] bg-white">
                 <textarea
                   rows={2}
                   placeholder="Descreva anexos, links de projetos, memoriais ou especificações técnicas..."
                   value={solicitacaoForm.anexos}
                   onChange={e => setSolicitacaoForm(prev => ({ ...prev, anexos: e.target.value }))}
-                  className="w-full p-1.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 print:resize-none"
+                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none placeholder-slate-400"
                 />
               </div>
             </div>
@@ -770,7 +749,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                                   placeholder="0,00"
                                   value={item.unitMatInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'unitMatInput', e.target.value)}
-                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                  className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] text-slate-900 focus:outline-none"
                                 />
                               </td>
                               <td className="p-1 border-r border-slate-300 text-right">
@@ -779,7 +758,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                                   placeholder="0,00"
                                   value={item.unitMoInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'unitMoInput', e.target.value)}
-                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                  className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] text-slate-900 focus:outline-none"
                                 />
                               </td>
                               <td className="p-1 border-r border-slate-300 text-right">
@@ -788,7 +767,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                                   placeholder="0,00"
                                   value={item.valorUnitInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'valorUnitInput', e.target.value)}
-                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded font-medium focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                  className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] font-medium text-slate-900 focus:outline-none"
                                 />
                               </td>
                               <td className="p-1 text-right">
@@ -797,7 +776,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                                   placeholder="0,00"
                                   value={item.valorTotalInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'valorTotalInput', e.target.value)}
-                                  className="w-full px-1 py-0.5 text-right border border-slate-200 rounded font-semibold focus:outline-none focus:border-blue-500 print:border-0 print:p-0"
+                                  className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] font-semibold text-slate-900 focus:outline-none"
                                 />
                               </td>
                             </tr>
@@ -810,18 +789,18 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               </div>
             </div>
 
-            {/* Seção OBSERVAÇÕES */}
+            {/* Seção OBSERVAÇÕES sem bordas no textarea */}
             <div className="border border-slate-400">
               <div className="bg-slate-200 px-3 py-1 font-extrabold uppercase text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
                 OBSERVAÇÕES:
               </div>
-              <div className="p-2 min-h-[70px] bg-white">
+              <div className="p-1.5 min-h-[60px] bg-white">
                 <textarea
                   rows={3}
                   placeholder="Condições de pagamento, frete, prazo de entrega ou observações gerais para a cotação..."
                   value={solicitacaoForm.observacoes}
                   onChange={e => setSolicitacaoForm(prev => ({ ...prev, observacoes: e.target.value }))}
-                  className="w-full p-1.5 border border-slate-200 rounded text-[11px] focus:outline-none focus:border-blue-500 print:border-0 print:p-0 print:resize-none"
+                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none placeholder-slate-400"
                 />
               </div>
             </div>
