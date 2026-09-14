@@ -346,17 +346,12 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     });
 
     const itemsForForm: SolicitacaoItem[] = selected.map(item => {
-      const mat = item.unitMat || 0;
-      const mo = item.unitMo || 0;
-      const unitVal = mat + mo;
-      const totalVal = unitVal > 0 ? item.quantidadeTotal * unitVal : 0;
-
       return {
         ...item,
-        unitMatInput: mat > 0 ? mat.toFixed(2) : '',
-        unitMoInput: mo > 0 ? mo.toFixed(2) : '',
-        valorUnitInput: unitVal > 0 ? unitVal.toFixed(2) : '',
-        valorTotalInput: totalVal > 0 ? totalVal.toFixed(2) : ''
+        unitMatInput: '',
+        unitMoInput: '',
+        valorUnitInput: '',
+        valorTotalInput: ''
       };
     });
 
@@ -738,7 +733,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                               <td className="p-1 border-r border-slate-300 text-right">
                                 <input
                                   type="text"
-                                  placeholder="0,00"
+                                  placeholder=""
                                   value={item.unitMatInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'unitMatInput', e.target.value)}
                                   className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] text-slate-900 focus:outline-none"
@@ -747,7 +742,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                               <td className="p-1 border-r border-slate-300 text-right">
                                 <input
                                   type="text"
-                                  placeholder="0,00"
+                                  placeholder=""
                                   value={item.unitMoInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'unitMoInput', e.target.value)}
                                   className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] text-slate-900 focus:outline-none"
@@ -756,7 +751,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                               <td className="p-1 border-r border-slate-300 text-right">
                                 <input
                                   type="text"
-                                  placeholder="0,00"
+                                  placeholder=""
                                   value={item.valorUnitInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'valorUnitInput', e.target.value)}
                                   className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] font-medium text-slate-900 focus:outline-none"
@@ -765,7 +760,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                               <td className="p-1 text-right">
                                 <input
                                   type="text"
-                                  placeholder="0,00"
+                                  placeholder=""
                                   value={item.valorTotalInput}
                                   onChange={e => handleUpdateItemValue(item.key, 'valorTotalInput', e.target.value)}
                                   className="w-full bg-transparent border-0 outline-none p-0 text-right text-[10px] font-semibold text-slate-900 focus:outline-none"
