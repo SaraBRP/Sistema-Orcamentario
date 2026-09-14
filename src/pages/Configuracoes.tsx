@@ -841,20 +841,20 @@ export default function Configuracoes() {
                   <span>Usuários Ativos ({approvedProfiles.length})</span>
                 </button>
 
-                {pendingProfiles.length > 0 && (
-                  <button
-                    onClick={() => setSubTabUsuarios('pendentes')}
-                    className={clsx(
-                      'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5',
-                      subTabUsuarios === 'pendentes'
-                        ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs font-black'
-                        : 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
-                    )}
-                  >
-                    <AlertCircle className="w-3.5 h-3.5 text-amber-700" />
-                    <span>Solicitações Pendentes ({pendingProfiles.length})</span>
-                  </button>
-                )}
+                <button
+                  onClick={() => setSubTabUsuarios('pendentes')}
+                  className={clsx(
+                    'px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all border cursor-pointer flex items-center gap-1.5',
+                    subTabUsuarios === 'pendentes'
+                      ? 'bg-amber-500 text-slate-950 border-amber-500 shadow-2xs font-black'
+                      : pendingProfiles.length > 0
+                      ? 'bg-amber-50 text-amber-900 border-amber-300 hover:bg-amber-100'
+                      : 'bg-white text-slate-600 border-slate-300 hover:bg-slate-50'
+                  )}
+                >
+                  <AlertCircle className={clsx('w-3.5 h-3.5', pendingProfiles.length > 0 ? 'text-amber-700' : 'text-slate-400')} />
+                  <span>Solicitações Pendentes ({pendingProfiles.length})</span>
+                </button>
               </div>
 
               {/* Filtros da Tabela */}
