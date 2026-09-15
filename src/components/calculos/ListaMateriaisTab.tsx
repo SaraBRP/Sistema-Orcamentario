@@ -493,6 +493,8 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
     const state = resolvedLoc.estado;
     const emp = orcamentoInfo?.empresa || 'BRP Soluções Metálicas';
 
+    const defaultObservacoes = `A proposta deve conter:\n• Prazo de entrega\n• Condições de pagamento\n• Inclusões/Exclusões\n• Contato do fornecedor`;
+
     setSolicitacaoForm({
       emissao: formattedDate,
       empresa: emp,
@@ -511,7 +513,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
       estadoFornecedor: '',
       enderecoFornecedor: '',
       anexos: '',
-      observacoes: ''
+      observacoes: defaultObservacoes
     });
 
     const itemsForForm: SolicitacaoItem[] = selected.map(item => {
@@ -987,13 +989,13 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <div className="bg-slate-200 px-3 py-1 font-extrabold uppercase text-[11px] text-slate-800 tracking-wider border-b border-slate-400">
                 OBSERVAÇÕES:
               </div>
-              <div className="p-1.5 min-h-[60px] bg-white">
+              <div className="p-1.5 min-h-[70px] bg-white">
                 <textarea
-                  rows={3}
-                  placeholder="Condições de pagamento, frete, prazo de entrega ou observações gerais para a cotação..."
+                  rows={5}
+                  placeholder="Observações da proposta..."
                   value={solicitacaoForm.observacoes}
                   onChange={e => setSolicitacaoForm(prev => ({ ...prev, observacoes: e.target.value }))}
-                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none placeholder-slate-400"
+                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none overflow-hidden leading-relaxed placeholder-slate-400 font-normal"
                 />
               </div>
             </div>
