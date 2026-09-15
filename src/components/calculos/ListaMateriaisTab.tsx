@@ -626,6 +626,16 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
             id="solicitacao-cotacao-pdf"
             className="w-full max-w-[1000px] bg-white border border-slate-400 p-6 shadow-md text-slate-900 font-sans print:border-0 print:p-0 print:shadow-none print:w-full print:max-w-none text-[11px] leading-tight"
           >
+            <style>{`
+              @media print {
+                #solicitacao-cotacao-pdf input::placeholder,
+                #solicitacao-cotacao-pdf textarea::placeholder {
+                  color: transparent !important;
+                  opacity: 0 !important;
+                  -webkit-text-fill-color: transparent !important;
+                }
+              }
+            `}</style>
             {/* Header: Logo BRP da Empresa + Emissão */}
             <div className="flex justify-between items-center border-b border-slate-400 pb-3 mb-3">
               <div className="flex items-center">
@@ -885,7 +895,10 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                   onFocus={handleAnexosFocus}
                   onChange={handleAnexosChange}
                   onKeyDown={handleAnexosKeyDown}
-                  className="w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none overflow-hidden leading-relaxed placeholder-slate-400 font-normal"
+                  className={clsx(
+                    "w-full bg-transparent border-0 outline-none p-0 text-[11px] text-slate-900 focus:outline-none resize-none overflow-hidden leading-relaxed placeholder-slate-400 font-normal",
+                    (!solicitacaoForm.anexos || solicitacaoForm.anexos.trim() === '' || solicitacaoForm.anexos.trim() === '•') && "print:text-transparent"
+                  )}
                 />
               </div>
             </div>
