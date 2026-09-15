@@ -51,6 +51,7 @@ export interface AggregatedInsumo {
   itemCount: number;
   unitMat?: number;
   unitMo?: number;
+  status?: string;
 }
 
 export interface SolicitacaoItem extends AggregatedInsumo {
@@ -66,6 +67,36 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
   const [selectedKeys, setSelectedKeys] = useState<Set<string>>(new Set());
   const [dbTiposMap, setDbTiposMap] = useState<Record<string, string>>({});
   const [loadingDbTipos, setLoadingDbTipos] = useState<boolean>(false);
+
+  // Estado para controlar o status das cotações por insumo
+  const [itemStatusMap, setItemStatusMap] = useState<Record<string, string>>(() => {
+    if (orcamentoId) {
+      try {
+        const saved = localStorage.getItem(`lista_materiais_status_${orcamentoId}`);
+        if (saved) return JSON.parse(saved);
+      } catch (e) {
+        console.error('Erro ao carregar status salvo:', e);
+      }
+    }
+    return {};
+  });
+
+  useEffect(() => {
+    if (orcamentoId) {
+      try {
+        localStorage.setItem(`lista_materiais_status_${orcamentoId}`, JSON.stringify(itemStatusMap));
+      } catch (e) {
+        console.error('Erro ao salvar status:', e);
+      }
+    }
+  }, [itemStatusMap, orcamentoId]);
+
+  const handleStatusChange = (key: string, newStatus: string) => {
+    setItemStatusMap(prev => ({
+      ...prev,
+      [key]: newStatus
+    }));
+  };
 
   // Estado para controlar a visualização da Solicitação de Cotação
   const [showSolicitacaoView, setShowSolicitacaoView] = useState<boolean>(false);
@@ -350,13 +381,14 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
           bancoFonte: item.banco_fonte || undefined,
           itemCount: 1,
           unitMat: item.valor_unitario_mat || 0,
-          unitMo: item.valor_unitario_mo || 0
+          unitMo: item.valor_unitario_mo || 0,
+          status: itemStatusMap[key] || ''
         });
       }
     });
 
     return Array.from(map.values()).sort((a, b) => a.codigo.localeCompare(b.codigo));
-  }, [rawInsumos, dbTiposMap]);
+  }, [rawInsumos, dbTiposMap, itemStatusMap]);
 
   // Inicializa seleção
   useEffect(() => {
@@ -1055,6 +1087,9 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <th className="py-3 px-4 border-r border-slate-300 text-left bg-slate-100">
                 DESCRIÇÃO
               </th>
+              <th className="py-3 px-4 border-r border-slate-300 w-36 text-center bg-slate-100">
+                STATUS
+              </th>
               <th className="py-3 px-4 border-r border-slate-300 w-36 text-right bg-slate-100">
                 QUANTIDADE
               </th>
@@ -1067,7 +1102,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
           <tbody className="divide-y divide-slate-200 text-xs">
             {aggregatedInsumos.length === 0 ? (
               <tr>
-                <td colSpan={5} className="py-16 text-center text-slate-400">
+                <td colSpan={6} className="py-16 text-center text-slate-400">
                   <Package className="w-12 h-12 mx-auto mb-3 opacity-30 text-slate-400" />
                   <p className="font-semibold text-slate-600 text-sm">Nenhum insumo encontrado no orçamento</p>
                   <p className="text-xs mt-1 text-slate-400">Adicione composições ou insumos na Planilha Orçamentária para visualizar os materiais.</p>
@@ -1141,6 +1176,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         )}
                       </td>
 
+                      <td className="py-2.5 px-4 border-r border-slate-300 text-center" />
                       <td className="py-2.5 px-4 border-r border-slate-300 text-right" />
                       <td className="py-2.5 px-4 text-center" />
                     </tr>
@@ -1148,6 +1184,7 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                     {/* Linhas Filhas do Grupo */}
                     {!isCollapsed && groupItems.map(item => {
                       const isSelected = selectedKeys.has(item.key);
+                      const currentStatus = itemStatusMap[item.key] || '';
 
                       return (
                         <tr 
@@ -1176,6 +1213,30 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
 
                           <td className="py-2 px-4 border-r border-slate-200 text-slate-800 font-medium">
                             {item.descricao}
+                          </td>
+
+                          <td 
+                            className="py-2 px-3 border-r border-slate-200 text-center"
+                            onClick={e => e.stopPropagation()}
+                          >
+                            <select
+                              value={currentStatus}
+                              onChange={e => handleStatusChange(item.key, e.target.value)}
+                              className={clsx(
+                                "px-2.5 py-1 text-xs font-semibold rounded-lg border outline-none cursor-pointer transition-all shadow-2xs",
+                                !currentStatus && "bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300",
+                                currentStatus === 'Enviado' && "bg-blue-100 text-blue-800 border-blue-300 font-bold",
+                                currentStatus === 'Em dúvida' && "bg-amber-100 text-amber-800 border-amber-300 font-bold",
+                                currentStatus === 'Recebido' && "bg-emerald-100 text-emerald-800 border-emerald-300 font-bold",
+                                currentStatus === 'Revisado' && "bg-purple-100 text-purple-800 border-purple-300 font-bold"
+                              )}
+                            >
+                              <option value="">Status...</option>
+                              <option value="Enviado">Enviado</option>
+                              <option value="Em dúvida">Em dúvida</option>
+                              <option value="Recebido">Recebido</option>
+                              <option value="Revisado">Revisado</option>
+                            </select>
                           </td>
 
                           <td className="py-2 px-4 border-r border-slate-200 text-right font-semibold text-slate-800 tabular-nums">
