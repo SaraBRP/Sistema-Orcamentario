@@ -1249,15 +1249,15 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                               value={currentStatus}
                               onChange={e => handleStatusChange(item.key, e.target.value)}
                               className={clsx(
-                                "px-2.5 py-1 text-xs font-semibold rounded-lg border outline-none cursor-pointer transition-all shadow-2xs",
-                                !currentStatus && "bg-slate-50 text-slate-400 border-slate-200 hover:border-slate-300",
+                                "px-2.5 py-1 text-xs font-semibold rounded-lg border outline-none cursor-pointer transition-all shadow-2xs min-w-[90px]",
+                                !currentStatus && "bg-slate-50/50 text-slate-700 border-slate-200/80 hover:bg-slate-100 hover:border-slate-300",
                                 currentStatus === 'Enviado' && "bg-blue-100 text-blue-800 border-blue-300 font-bold",
                                 currentStatus === 'Em dúvida' && "bg-amber-100 text-amber-800 border-amber-300 font-bold",
                                 currentStatus === 'Recebido' && "bg-emerald-100 text-emerald-800 border-emerald-300 font-bold",
                                 currentStatus === 'Revisado' && "bg-purple-100 text-purple-800 border-purple-300 font-bold"
                               )}
                             >
-                              <option value="">Status...</option>
+                              <option value=""></option>
                               <option value="Enviado">Enviado</option>
                               <option value="Em dúvida">Em dúvida</option>
                               <option value="Recebido">Recebido</option>
