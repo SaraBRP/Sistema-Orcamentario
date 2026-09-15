@@ -1087,14 +1087,14 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
               <th className="py-3 px-4 border-r border-slate-300 text-left bg-slate-100">
                 DESCRIÇÃO
               </th>
-              <th className="py-3 px-4 border-r border-slate-300 w-36 text-center bg-slate-100">
-                STATUS
-              </th>
               <th className="py-3 px-4 border-r border-slate-300 w-36 text-right bg-slate-100">
                 QUANTIDADE
               </th>
-              <th className="py-3 px-4 w-28 text-center bg-slate-100">
+              <th className="py-3 px-4 border-r border-slate-300 w-28 text-center bg-slate-100">
                 UNIDADE
+              </th>
+              <th className="py-3 px-4 w-36 text-center bg-slate-100">
+                STATUS
               </th>
             </tr>
           </thead>
@@ -1176,8 +1176,8 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                         )}
                       </td>
 
-                      <td className="py-2.5 px-4 border-r border-slate-300 text-center" />
                       <td className="py-2.5 px-4 border-r border-slate-300 text-right" />
+                      <td className="py-2.5 px-4 border-r border-slate-300 text-center" />
                       <td className="py-2.5 px-4 text-center" />
                     </tr>
 
@@ -1215,8 +1215,19 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                             {item.descricao}
                           </td>
 
+                          <td className="py-2 px-4 border-r border-slate-200 text-right font-semibold text-slate-800 tabular-nums">
+                            {item.quantidadeTotal.toLocaleString('pt-BR', { 
+                              minimumFractionDigits: 0, 
+                              maximumFractionDigits: 4 
+                            })}
+                          </td>
+
+                          <td className="py-2 px-4 border-r border-slate-200 text-center text-slate-700 font-medium">
+                            {item.unidade}
+                          </td>
+
                           <td 
-                            className="py-2 px-3 border-r border-slate-200 text-center"
+                            className="py-2 px-3 text-center"
                             onClick={e => e.stopPropagation()}
                           >
                             <select
@@ -1237,17 +1248,6 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                               <option value="Recebido">Recebido</option>
                               <option value="Revisado">Revisado</option>
                             </select>
-                          </td>
-
-                          <td className="py-2 px-4 border-r border-slate-200 text-right font-semibold text-slate-800 tabular-nums">
-                            {item.quantidadeTotal.toLocaleString('pt-BR', { 
-                              minimumFractionDigits: 0, 
-                              maximumFractionDigits: 4 
-                            })}
-                          </td>
-
-                          <td className="py-2 px-4 text-center text-slate-700 font-medium">
-                            {item.unidade}
                           </td>
                         </tr>
                       );
