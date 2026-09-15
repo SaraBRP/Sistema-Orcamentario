@@ -88,7 +88,7 @@ input[type=number] {
 
   #solicitacao-cotacao-pdf {
     display: block !important;
-    position: static !important;
+    position: relative !important;
     width: 100% !important;
     max-width: 100% !important;
     margin: 0 !important;
@@ -98,18 +98,26 @@ input[type=number] {
     visibility: visible !important;
     box-shadow: none !important;
     border: none !important;
+    overflow: visible !important;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
-  /* 3. Limpa o container raiz para ocupação total de página */
-  html, body, #root, main {
+  /* 3. Limpa TODOS os containers pai e elementos envolvidos para permitirem expansão vertical e múltiplas páginas */
+  html, body, #root, #root *, main, div {
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none !important;
+    overflow: visible !important;
+    float: none !important;
+  }
+
+  html, body {
     background: #ffffff !important;
     color: #0f172a !important;
     margin: 0 !important;
     padding: 0 !important;
     width: 100% !important;
-    height: auto !important;
-    min-height: auto !important;
-    overflow: visible !important;
   }
 
   /* 4. Configuração de página A4 */
@@ -120,14 +128,17 @@ input[type=number] {
 
   /* 5. Regras de quebra de página de alta qualidade para tabelas */
   table {
-    page-break-inside: auto;
+    page-break-inside: auto !important;
+    break-inside: auto !important;
     border-collapse: collapse !important;
     width: 100% !important;
   }
 
   tr {
     page-break-inside: avoid !important;
+    break-inside: avoid !important;
     page-break-after: auto !important;
+    break-after: auto !important;
   }
 
   thead {
@@ -136,6 +147,11 @@ input[type=number] {
 
   tfoot {
     display: table-footer-group !important;
+  }
+
+  .border.border-slate-400 {
+    page-break-inside: auto !important;
+    break-inside: auto !important;
   }
 
   /* Força a fidelidade de cores de fundo e bordas ao salvar em PDF */
