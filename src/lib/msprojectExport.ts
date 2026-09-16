@@ -98,36 +98,29 @@ export function generateMsProjectXML({
     return parts.slice(0, -1).join('.');
   };
 
-  // Separa tarefas principais (Seções e Composições) dos insumos filhos
+  // Separa tarefas principais (Seções, Composições e Subcomposições) dos insumos filhos
   const taskItems: any[] = [];
-  const childInsumosByParentEap = new Map<string, any[]>();
+  const childInsumoItems: any[] = [];
 
   itens.forEach(item => {
     const eapClean = (item.item_eap || '').trim();
     if (!eapClean) return;
 
-    const isChild = Boolean(
-      item.isChildInsumoOfComposition ||
-      item.is_child_insumo ||
-      item.composicao_id ||
-      item.parentCompositionId ||
-      item.parent_composition_id
+    // Um item é insumo filho SE for explicitamente marcado como tal
+    // NOTA IMPORTANTE: item.composicao_id é o ID do modelo no BD da composição, NÃO deve ser usado para checar se é filho!
+    const isChildInsumo = Boolean(
+      item.isChildInsumoOfComposition === true ||
+      item.is_child_insumo === true
     );
 
-    if (isChild) {
-      const parentEap = getParentEap(eapClean);
-      if (parentEap) {
-        if (!childInsumosByParentEap.has(parentEap)) {
-          childInsumosByParentEap.set(parentEap, []);
-        }
-        childInsumosByParentEap.get(parentEap)!.push(item);
-      }
+    if (isChildInsumo) {
+      childInsumoItems.push(item);
     } else {
       taskItems.push(item);
     }
   });
 
-  // Mapeamento único de Recursos para a seção <Resources>
+  // Mapeamento único de Recursos para a seção <Resources> do MS Project
   const resourcesMap = new Map<string, {
     uid: number;
     code: string;
@@ -139,33 +132,23 @@ export function generateMsProjectXML({
 
   let nextResourceUid = 1;
 
-  // Processa todos os insumos para cadastrar a lista global de Recursos do MS Project
-  itens.forEach(item => {
-    const isChild = Boolean(
-      item.isChildInsumoOfComposition ||
-      item.is_child_insumo ||
-      item.composicao_id ||
-      item.parentCompositionId ||
-      item.parent_composition_id
-    );
+  // Processa todos os insumos filhos para cadastrar a lista global de Recursos do MS Project
+  childInsumoItems.forEach(item => {
+    const desc = (item.descricao || '').trim();
+    const cod = (item.codigo || '').trim();
+    if (!desc && !cod) return;
 
-    if (isChild || (!item.isSecao && item.codigo)) {
-      const desc = (item.descricao || '').trim();
-      const cod = (item.codigo || '').trim();
-      if (!desc && !cod) return;
-
-      const key = cod ? `COD:${cod.toUpperCase()}` : `DESC:${desc.toUpperCase()}`;
-      if (!resourcesMap.has(key)) {
-        const cls = classifyInsumoForMsProject(item);
-        resourcesMap.set(key, {
-          uid: nextResourceUid++,
-          code: cod,
-          name: desc || cod,
-          type: cls.type,
-          group: cls.group,
-          label: cls.label
-        });
-      }
+    const key = cod ? `COD:${cod.toUpperCase()}` : `DESC:${desc.toUpperCase()}`;
+    if (!resourcesMap.has(key)) {
+      const cls = classifyInsumoForMsProject(item);
+      resourcesMap.set(key, {
+        uid: nextResourceUid++,
+        code: cod,
+        name: desc || cod,
+        type: cls.type,
+        group: cls.group,
+        label: cls.label
+      });
     }
   });
 
@@ -194,16 +177,30 @@ export function generateMsProjectXML({
       <Critical>1</Critical>
     </Task>`);
 
-  // Monta as tarefas do cronograma respeitando a EAP e EDT
+  // Pré-calcula os UIDs das tarefas no MS Project para vincular atribuições corretamente
   taskItems.forEach((item, index) => {
-    const taskUid = nextTaskUid++;
-    const taskId = index + 1;
+    item._msTaskUid = nextTaskUid++;
+    item._msTaskId = index + 1;
+  });
+
+  // Monta as tarefas do cronograma respeitando a EAP e EDT
+  taskItems.forEach(item => {
+    const taskUid = item._msTaskUid;
+    const taskId = item._msTaskId;
     const eapClean = (item.item_eap || '').trim();
     const eapParts = eapClean.split('.').filter(Boolean);
     const outlineLevel = Math.max(1, eapParts.length);
 
-    const isSecao = item.isSecao || item.is_secao || (!item.codigo && (!item.quantidade || item.quantidade === 0) && !item.unidade);
-    
+    const isSecao = Boolean(item.isSecao || item.is_secao || (!item.codigo && (!item.quantidade || item.quantidade === 0) && !item.unidade));
+
+    // Checa se esta tarefa possui sub-tarefas no cronograma
+    const hasChildTasks = taskItems.some(other => {
+      const otherEap = (other.item_eap || '').trim();
+      return otherEap !== eapClean && otherEap.startsWith(eapClean + '.');
+    });
+
+    const isSummary = isSecao || hasChildTasks;
+
     // Duração em dias vinda da Distribuição de Equipe ou padrão (1 dia)
     const duracaoStr = duracoesMap[item.id] || '1';
     const duracaoDias = parseFloat(duracaoStr) || 1;
@@ -221,56 +218,69 @@ export function generateMsProjectXML({
       <OutlineLevel>${outlineLevel}</OutlineLevel>
       <Priority>500</Priority>
       <Start>${creationDateISO}</Start>
-      <Duration>${isSecao ? 'PT8H0M0S' : durationXml}</Duration>
+      <Duration>${isSummary ? 'PT8H0M0S' : durationXml}</Duration>
       <DurationFormat>7</DurationFormat>
-      <Summary>${isSecao ? '1' : '0'}</Summary>
+      <Summary>${isSummary ? '1' : '0'}</Summary>
     </Task>`);
 
-    // Atribuições de Recursos (Assignments) para cada composição
-    const childInsumos = childInsumosByParentEap.get(eapClean) || [];
-    if (childInsumos.length > 0 && !isSecao) {
-      const jornadaStr = jornadasMap[item.id] || '8';
-      const jornadaNum = parseFloat(jornadaStr) || 8;
-      const horasDisponiveis = duracaoDias * jornadaNum;
+    // Atribuições de Recursos (Assignments) para tarefas que são Composições / Subcomposições finais (não summary)
+    if (!isSummary) {
+      const childInsumos = childInsumoItems.filter(child => {
+        // Opção 1: correspondência direta por parentCompositionId
+        if (child.parentCompositionId && String(child.parentCompositionId) === String(item.id)) return true;
+        if (child.parent_composition_id && String(child.parent_composition_id) === String(item.id)) return true;
 
-      childInsumos.forEach(insumo => {
-        const cod = (insumo.codigo || '').trim();
-        const desc = (insumo.descricao || '').trim();
-        const key = cod ? `COD:${cod.toUpperCase()}` : `DESC:${desc.toUpperCase()}`;
-        const resObj = resourcesMap.get(key);
+        // Opção 2: correspondência por EAP pai
+        const childEap = (child.item_eap || '').trim();
+        if (childEap && getParentEap(childEap) === eapClean) return true;
 
-        if (resObj) {
-          const assignUid = nextAssignmentUid++;
-          const totalHoras = insumo.displayQuantidade !== undefined ? insumo.displayQuantidade : (insumo.quantidade || 0);
+        return false;
+      });
 
-          if (resObj.type === 1) {
-            // Recurso Tipo Material (Mão de Obra, Equipamento, Material)
-            let units = 1;
-            if (resObj.group === 'Mão de Obra') {
-              const exatos = horasDisponiveis > 0 ? (totalHoras / horasDisponiveis) : 0;
-              units = totalHoras > 0 && horasDisponiveis > 0 ? Math.max(1, Math.ceil(exatos)) : (insumo.quantidade || 1);
-            } else {
-              units = totalHoras > 0 ? totalHoras : 1;
-            }
+      if (childInsumos.length > 0) {
+        const jornadaStr = jornadasMap[item.id] || '8';
+        const jornadaNum = parseFloat(jornadaStr) || 8;
+        const horasDisponiveis = duracaoDias * jornadaNum;
 
-            assignmentsXml.push(`    <Assignment>
+        childInsumos.forEach(insumo => {
+          const cod = (insumo.codigo || '').trim();
+          const desc = (insumo.descricao || '').trim();
+          const key = cod ? `COD:${cod.toUpperCase()}` : `DESC:${desc.toUpperCase()}`;
+          const resObj = resourcesMap.get(key);
+
+          if (resObj) {
+            const assignUid = nextAssignmentUid++;
+            const totalHoras = insumo.displayQuantidade !== undefined ? insumo.displayQuantidade : (insumo.quantidade || 0);
+
+            if (resObj.type === 1) {
+              // Recurso Tipo Material (Mão de Obra, Equipamento, Material)
+              let units = 1;
+              if (resObj.group === 'Mão de Obra') {
+                const exatos = horasDisponiveis > 0 ? (totalHoras / horasDisponiveis) : 0;
+                units = totalHoras > 0 && horasDisponiveis > 0 ? Math.max(1, Math.ceil(exatos)) : (insumo.quantidade || 1);
+              } else {
+                units = totalHoras > 0 ? totalHoras : 1;
+              }
+
+              assignmentsXml.push(`    <Assignment>
       <UID>${assignUid}</UID>
       <TaskUID>${taskUid}</TaskUID>
       <ResourceUID>${resObj.uid}</ResourceUID>
       <Units>${units}</Units>
     </Assignment>`);
-          } else {
-            // Recurso Tipo Custo (Demais)
-            const totalCost = (insumo.total || (insumo.quantidade * (insumo.valor_unitario || 0))) || 0;
-            assignmentsXml.push(`    <Assignment>
+            } else {
+              // Recurso Tipo Custo (Demais)
+              const totalCost = (insumo.total || (totalHoras * (insumo.valor_unitario || 0))) || 0;
+              assignmentsXml.push(`    <Assignment>
       <UID>${assignUid}</UID>
       <TaskUID>${taskUid}</TaskUID>
       <ResourceUID>${resObj.uid}</ResourceUID>
       <Cost>${totalCost.toFixed(2)}</Cost>
     </Assignment>`);
+            }
           }
-        }
-      });
+        });
+      }
     }
   });
 
