@@ -25,54 +25,63 @@ export function classifyInsumoForMsProject(insumo: any): { type: number; group: 
   const descUpper = (insumo.descricao || '').trim().toUpperCase();
   const fonteUpper = (insumo.banco_fonte || '').trim().toUpperCase();
   const uniUpper = (insumo.unidade || '').trim().toUpperCase();
+  const tipoUpper = (insumo.tipo || insumo.tipo_item || insumo.categoria || insumo.grupo || '').trim().toUpperCase();
 
-  // 1. Mão de Obra -> Tipo 1 (Material), Grupo: Mão de Obra
-  const isMO = codUpper.startsWith('MO.') || codUpper.startsWith('MO') || 
+  // 1. Mão de Obra -> Tipo 0 (Trabalho / Work), Grupo: Mão de obra
+  const isMO = tipoUpper.includes('MÃO DE OBRA') || tipoUpper.includes('MAO DE OBRA') || tipoUpper === 'MO' ||
+               codUpper.startsWith('MO.') || codUpper.startsWith('MO') || 
                fonteUpper.includes('MO') || fonteUpper.includes('MÃO DE OBRA') ||
                descUpper.includes('SERVENTE') || descUpper.includes('PEDREIRO') || 
                descUpper.includes('CARPINTEIRO') || descUpper.includes('ARMADOR') ||
                descUpper.includes('OPERADOR') || descUpper.includes('OFICIAL') ||
-               descUpper.includes('MÃO DE OBRA') || descUpper.includes('MAO DE OBRA');
+               descUpper.includes('ENCARREGADO') || descUpper.includes('MÃO DE OBRA') || descUpper.includes('MAO DE OBRA');
 
   if (isMO) {
-    return { type: 1, group: 'Mão de Obra', label: 'UN' };
+    return { type: 0, group: 'Mão de obra', label: '' };
   }
 
-  // 2. Equipamento -> Tipo 1 (Material), Grupo: Equipamento
-  const isEQP = codUpper.startsWith('EQP.') || codUpper.startsWith('EQP') || codUpper.startsWith('EQ.') || codUpper.startsWith('EQ') ||
+  // 2. Equipamento para Aquisição Permanente -> Tipo 2 (Custo / Cost), Grupo: Equipamento para aquisição permanente
+  const isEqpPermanente = tipoUpper.includes('PERMANENTE') || descUpper.includes('AQUISIÇÃO PERMANENTE') || descUpper.includes('AQUISICAO PERMANENTE');
+  if (isEqpPermanente) {
+    return { type: 2, group: 'Equipamento para aquisição permanente', label: 'R$' };
+  }
+
+  // 3. Equipamento (Uso / Locação) -> Tipo 0 (Trabalho / Work), Grupo: Equipamento
+  const isEQP = tipoUpper.includes('EQUIPAMENTO') || tipoUpper === 'EQP' || tipoUpper === 'EQ' ||
+                codUpper.startsWith('EQP.') || codUpper.startsWith('EQP') || codUpper.startsWith('EQ.') || codUpper.startsWith('EQ') ||
                 descUpper.includes('EQUIPAMENTO') || descUpper.includes('MAQUINA') || descUpper.includes('MÁQUINA') ||
                 descUpper.includes('CAMINHAO') || descUpper.includes('CAMINHÃO') || descUpper.includes('BETONEIRA') ||
-                descUpper.includes('RETROESCAVADEIRA') || descUpper.includes('VIBRADOR') || descUpper.includes('COMPACTADOR');
+                descUpper.includes('RETROESCAVADEIRA') || descUpper.includes('VIBRADOR') || descUpper.includes('COMPACTADOR') ||
+                descUpper.includes('PERFURATRIZ') || descUpper.includes('PÁ CARREGADEIRA') || descUpper.includes('PA CARREGADEIRA');
 
   if (isEQP) {
-    return { type: 1, group: 'Equipamento', label: uniUpper || 'UN' };
+    return { type: 0, group: 'Equipamento', label: '' };
   }
 
-  // 3. Material -> Tipo 1 (Material), Grupo: Material
-  const isMAT = codUpper.startsWith('MAT.') || codUpper.startsWith('MAT') ||
+  // 4. Material -> Tipo 1 (Material), Grupo: Material
+  const isMAT = tipoUpper.includes('MATERIAL') || tipoUpper === 'MAT' ||
+                codUpper.startsWith('MAT.') || codUpper.startsWith('MAT') ||
                 descUpper.includes('AÇO') || descUpper.includes('ACO') || descUpper.includes('CONCRETO') ||
                 descUpper.includes('PREGO') || descUpper.includes('ARAME') || descUpper.includes('TABUA') ||
                 descUpper.includes('SARRAFO') || descUpper.includes('DESMOLDANTE') || descUpper.includes('VERGALHAO') ||
-                descUpper.includes('LOCACAO DE BANHEIRO') || descUpper.includes('LOCAÇÃO DE BANHEIRO');
+                descUpper.includes('ESPACADOR') || descUpper.includes('ESPAÇADOR') || descUpper.includes('CACAMBA') || descUpper.includes('CAÇAMBA');
 
   if (isMAT) {
     return { type: 1, group: 'Material', label: uniUpper || 'UN' };
   }
 
-  // 4. Demais -> Tipo 2 (Custo / Cost), Grupo correspondente do sistema
+  // 5. Categorias Específicas de Custo -> Tipo 2 (Custo / Cost)
   let groupName = 'Outros';
-  if (descUpper.includes('ALUGUEL') || descUpper.includes('LOCACAO') || descUpper.includes('LOCAÇÃO')) {
-    groupName = 'Aluguel';
-  } else if (descUpper.includes('SERVIÇO') || descUpper.includes('SERVICO') || descUpper.includes('TERCEIRO')) {
-    groupName = 'Serviços de Terceiros';
-  } else if (descUpper.includes('TAXA') || descUpper.includes('IMPOSTO')) {
+  if (tipoUpper.includes('TAXA') || descUpper.includes('TAXA') || descUpper.includes('IMPOSTO')) {
     groupName = 'Taxas';
-  } else if (descUpper.includes('ADMINISTRAÇÃO') || descUpper.includes('ADMINISTRACAO')) {
+  } else if (tipoUpper.includes('ADMINISTRAÇÃO') || tipoUpper.includes('ADMINISTRACAO') || descUpper.includes('ADMINISTRAÇÃO') || descUpper.includes('ADMINISTRACAO')) {
     groupName = 'Administração';
-  } else if (descUpper.includes('VERBA')) {
+  } else if (tipoUpper.includes('ALUGUEL') || descUpper.includes('ALUGUEL')) {
+    groupName = 'Aluguel';
+  } else if (tipoUpper.includes('VERBA') || descUpper.includes('VERBA')) {
     groupName = 'Verba';
-  } else if (descUpper.includes('TRANSPORTE') || descUpper.includes('FRETE') || descUpper.includes('LOGÍSTICA')) {
-    groupName = 'Transporte e Logística';
+  } else if (tipoUpper.includes('TRANSPORTE') || tipoUpper.includes('LOGÍSTICA') || tipoUpper.includes('LOGISTICA') || descUpper.includes('TRANSPORTE') || descUpper.includes('FRETE') || descUpper.includes('LOGÍSTICA')) {
+    groupName = 'Transporte e logistica';
   }
 
   return { type: 2, group: groupName, label: 'R$' };
@@ -91,14 +100,23 @@ export function generateMsProjectXML({
   const now = new Date();
   const creationDateISO = now.toISOString().split('.')[0];
 
-  // Helper para extrair a EAP pai (ex: "1.2.1" -> "1.2")
-  const getParentEap = (eap: string): string => {
-    const parts = (eap || '').trim().split('.').filter(Boolean);
-    if (parts.length <= 1) return '';
-    return parts.slice(0, -1).join('.');
+  // Helper para verificar se child é um item descendente de parent na planilha
+  const isItemChildOf = (child: any, parent: any): boolean => {
+    if (!child || !parent || child === parent) return false;
+    if (child.parentCompositionId && String(child.parentCompositionId) === String(parent.id)) return true;
+    if (child.parent_composition_id && String(child.parent_composition_id) === String(parent.id)) return true;
+    const cEap = (child.item_eap || '').trim();
+    const pEap = (parent.item_eap || '').trim();
+    if (cEap && pEap && cEap.startsWith(pEap + '.')) return true;
+    return false;
   };
 
-  // Separa tarefas principais (Seções, Composições e Subcomposições) dos insumos filhos
+  // Identifica se um item possui filhos na planilha orçamentária
+  const hasChildItems = (item: any): boolean => {
+    return itens.some(other => isItemChildOf(other, item));
+  };
+
+  // Classifica itens em Tarefas (Seções, Composições, Subcomposições) vs Recursos (Insumos Folhas)
   const taskItems: any[] = [];
   const childInsumoItems: any[] = [];
 
@@ -106,21 +124,75 @@ export function generateMsProjectXML({
     const eapClean = (item.item_eap || '').trim();
     if (!eapClean) return;
 
-    // Um item é insumo filho SE for explicitamente marcado como tal
-    // NOTA IMPORTANTE: item.composicao_id é o ID do modelo no BD da composição, NÃO deve ser usado para checar se é filho!
-    const isChildInsumo = Boolean(
-      item.isChildInsumoOfComposition === true ||
-      item.is_child_insumo === true
+    const hasChildren = hasChildItems(item);
+    const isExplicitInsumo = Boolean(item.isChildInsumoOfComposition || item.is_child_insumo || item.parentCompositionId || item.parent_composition_id);
+
+    // Um item é Insumo (Recurso) se NÃO possui filhos e for marcado como insumo filho ou estiver sob uma composição
+    const isInsumo = !hasChildren && (
+      isExplicitInsumo ||
+      itens.some(parent => !parent.isSecao && !parent.is_secao && isItemChildOf(item, parent))
     );
 
-    if (isChildInsumo) {
+    if (isInsumo) {
       childInsumoItems.push(item);
     } else {
       taskItems.push(item);
     }
   });
 
-  // Mapeamento único de Recursos para a seção <Resources> do MS Project
+  // Mapeamento de parent task para cada insumo filho
+  const getParentTaskForInsumo = (insumo: any): any | null => {
+    let bestParent: any | null = null;
+    let bestEapLen = -1;
+
+    taskItems.forEach(t => {
+      if (isItemChildOf(insumo, t)) {
+        const pEap = (t.item_eap || '').trim();
+        if (pEap.length > bestEapLen) {
+          bestParent = t;
+          bestEapLen = pEap.length;
+        }
+      }
+    });
+
+    return bestParent;
+  };
+
+  // 1. Recalcula a EDT (WBS) das Tarefas no Cronograma MS Project
+  const getParentTaskForTask = (task: any): any | null => {
+    let bestParent: any | null = null;
+    let bestEapLen = -1;
+
+    taskItems.forEach(parentCandidate => {
+      if (parentCandidate !== task && isItemChildOf(task, parentCandidate)) {
+        const pEap = (parentCandidate.item_eap || '').trim();
+        if (pEap.length > bestEapLen) {
+          bestParent = parentCandidate;
+          bestEapLen = pEap.length;
+        }
+      }
+    });
+
+    return bestParent;
+  };
+
+  // Atribui nova EDT (WBS) ajustada sequencialmente por nível
+  const childCounterMap = new Map<string, number>();
+
+  taskItems.forEach(task => {
+    const parentTask = getParentTaskForTask(task);
+    const parentKey = parentTask ? parentTask.id : 'root';
+
+    const childIndex = (childCounterMap.get(parentKey) || 0) + 1;
+    childCounterMap.set(parentKey, childIndex);
+
+    const newWbs = parentTask ? `${parentTask._newWbs}.${childIndex}` : `${childIndex}`;
+    task._newWbs = newWbs;
+    task._parentTask = parentTask;
+    task._outlineLevel = newWbs.split('.').length;
+  });
+
+  // 2. Mapeamento único de Recursos para a seção <Resources> do MS Project
   const resourcesMap = new Map<string, {
     uid: number;
     code: string;
@@ -132,7 +204,6 @@ export function generateMsProjectXML({
 
   let nextResourceUid = 1;
 
-  // Processa todos os insumos filhos para cadastrar a lista global de Recursos do MS Project
   childInsumoItems.forEach(item => {
     const desc = (item.descricao || '').trim();
     const cod = (item.codigo || '').trim();
@@ -177,28 +248,23 @@ export function generateMsProjectXML({
       <Critical>1</Critical>
     </Task>`);
 
-  // Pré-calcula os UIDs das tarefas no MS Project para vincular atribuições corretamente
+  // Pré-calcula UIDs das Tarefas
   taskItems.forEach((item, index) => {
     item._msTaskUid = nextTaskUid++;
     item._msTaskId = index + 1;
   });
 
-  // Monta as tarefas do cronograma respeitando a EAP e EDT
+  // Monta as tarefas do cronograma respeitando a nova EAP / EDT ajustada
   taskItems.forEach(item => {
     const taskUid = item._msTaskUid;
     const taskId = item._msTaskId;
-    const eapClean = (item.item_eap || '').trim();
-    const eapParts = eapClean.split('.').filter(Boolean);
-    const outlineLevel = Math.max(1, eapParts.length);
+    const newWbs = item._newWbs;
+    const outlineLevel = item._outlineLevel;
 
     const isSecao = Boolean(item.isSecao || item.is_secao || (!item.codigo && (!item.quantidade || item.quantidade === 0) && !item.unidade));
 
     // Checa se esta tarefa possui sub-tarefas no cronograma
-    const hasChildTasks = taskItems.some(other => {
-      const otherEap = (other.item_eap || '').trim();
-      return otherEap !== eapClean && otherEap.startsWith(eapClean + '.');
-    });
-
+    const hasChildTasks = taskItems.some(other => other._parentTask === item);
     const isSummary = isSecao || hasChildTasks;
 
     // Duração em dias vinda da Distribuição de Equipe ou padrão (1 dia)
@@ -213,8 +279,8 @@ export function generateMsProjectXML({
       <Name>${escapeXml(item.descricao)}</Name>
       <Type>0</Type>
       <IsNull>0</IsNull>
-      <WBS>${escapeXml(eapClean)}</WBS>
-      <OutlineNumber>${escapeXml(eapClean)}</OutlineNumber>
+      <WBS>${escapeXml(newWbs)}</WBS>
+      <OutlineNumber>${escapeXml(newWbs)}</OutlineNumber>
       <OutlineLevel>${outlineLevel}</OutlineLevel>
       <Priority>500</Priority>
       <Start>${creationDateISO}</Start>
@@ -223,26 +289,16 @@ export function generateMsProjectXML({
       <Summary>${isSummary ? '1' : '0'}</Summary>
     </Task>`);
 
-    // Atribuições de Recursos (Assignments) para tarefas que são Composições / Subcomposições finais (não summary)
+    // Atribuições de Recursos (Assignments) para tarefas folha (composições / subcomposições)
     if (!isSummary) {
-      const childInsumos = childInsumoItems.filter(child => {
-        // Opção 1: correspondência direta por parentCompositionId
-        if (child.parentCompositionId && String(child.parentCompositionId) === String(item.id)) return true;
-        if (child.parent_composition_id && String(child.parent_composition_id) === String(item.id)) return true;
+      const assignedInsumos = childInsumoItems.filter(insumo => getParentTaskForInsumo(insumo) === item);
 
-        // Opção 2: correspondência por EAP pai
-        const childEap = (child.item_eap || '').trim();
-        if (childEap && getParentEap(childEap) === eapClean) return true;
-
-        return false;
-      });
-
-      if (childInsumos.length > 0) {
+      if (assignedInsumos.length > 0) {
         const jornadaStr = jornadasMap[item.id] || '8';
         const jornadaNum = parseFloat(jornadaStr) || 8;
         const horasDisponiveis = duracaoDias * jornadaNum;
 
-        childInsumos.forEach(insumo => {
+        assignedInsumos.forEach(insumo => {
           const cod = (insumo.codigo || '').trim();
           const desc = (insumo.descricao || '').trim();
           const key = cod ? `COD:${cod.toUpperCase()}` : `DESC:${desc.toUpperCase()}`;
@@ -252,21 +308,33 @@ export function generateMsProjectXML({
             const assignUid = nextAssignmentUid++;
             const totalHoras = insumo.displayQuantidade !== undefined ? insumo.displayQuantidade : (insumo.quantidade || 0);
 
-            if (resObj.type === 1) {
-              // Recurso Tipo Material (Mão de Obra, Equipamento, Material)
+            if (resObj.type === 0) {
+              // Recurso Tipo Trabalho (Mão de Obra ou Equipamento)
               let units = 1;
-              if (resObj.group === 'Mão de Obra') {
+              if (resObj.group === 'Mão de obra') {
                 const exatos = horasDisponiveis > 0 ? (totalHoras / horasDisponiveis) : 0;
                 units = totalHoras > 0 && horasDisponiveis > 0 ? Math.max(1, Math.ceil(exatos)) : (insumo.quantidade || 1);
               } else {
-                units = totalHoras > 0 ? totalHoras : 1;
+                units = 1;
               }
+
+              const workXml = `PT${Math.round(totalHoras * 10) / 10}H0M0S`;
 
               assignmentsXml.push(`    <Assignment>
       <UID>${assignUid}</UID>
       <TaskUID>${taskUid}</TaskUID>
       <ResourceUID>${resObj.uid}</ResourceUID>
       <Units>${units}</Units>
+      <Work>${workXml}</Work>
+    </Assignment>`);
+            } else if (resObj.type === 1) {
+              // Recurso Tipo Material
+              const totalQtd = totalHoras > 0 ? totalHoras : 1;
+              assignmentsXml.push(`    <Assignment>
+      <UID>${assignUid}</UID>
+      <TaskUID>${taskUid}</TaskUID>
+      <ResourceUID>${resObj.uid}</ResourceUID>
+      <Units>${totalQtd}</Units>
     </Assignment>`);
             } else {
               // Recurso Tipo Custo (Demais)
