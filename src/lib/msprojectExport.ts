@@ -165,37 +165,46 @@ export function generateMsProjectXML({
     return bestParent;
   };
 
+  // Helper para verificar se uma tarefa é uma Seção (Linha de texto / Etapa resumo)
+  const isSectionItem = (item: any): boolean => {
+    return Boolean(item.isSecao || item.is_secao || (!item.codigo && (!item.quantidade || item.quantidade === 0) && !item.unidade));
+  };
+
   // 1. Recalcula a EDT (WBS) das Tarefas no Cronograma MS Project
-  const getParentTaskForTask = (task: any): any | null => {
-    let bestParent: any | null = null;
+  // Todas as Composições e Subcomposições pertencentes a uma Seção viram Tarefas Folha de Nível 2 sob essa Seção
+  const getParentSectionForTask = (task: any): any | null => {
+    if (isSectionItem(task)) return null;
+
+    let bestSection: any | null = null;
     let bestEapLen = -1;
 
-    taskItems.forEach(parentCandidate => {
-      if (parentCandidate !== task && isItemChildOf(task, parentCandidate)) {
-        const pEap = (parentCandidate.item_eap || '').trim();
+    taskItems.forEach(sectionCandidate => {
+      if (isSectionItem(sectionCandidate) && isItemChildOf(task, sectionCandidate)) {
+        const pEap = (sectionCandidate.item_eap || '').trim();
         if (pEap.length > bestEapLen) {
-          bestParent = parentCandidate;
+          bestSection = sectionCandidate;
           bestEapLen = pEap.length;
         }
       }
     });
 
-    return bestParent;
+    return bestSection;
   };
 
   // Atribui nova EDT (WBS) ajustada sequencialmente por nível
   const childCounterMap = new Map<string, number>();
 
   taskItems.forEach(task => {
-    const parentTask = getParentTaskForTask(task);
-    const parentKey = parentTask ? parentTask.id : 'root';
+    const isSec = isSectionItem(task);
+    const parentSection = isSec ? null : getParentSectionForTask(task);
+    const parentKey = parentSection ? parentSection.id : 'root';
 
     const childIndex = (childCounterMap.get(parentKey) || 0) + 1;
     childCounterMap.set(parentKey, childIndex);
 
-    const newWbs = parentTask ? `${parentTask._newWbs}.${childIndex}` : `${childIndex}`;
+    const newWbs = parentSection ? `${parentSection._newWbs}.${childIndex}` : `${childIndex}`;
     task._newWbs = newWbs;
-    task._parentTask = parentTask;
+    task._parentTask = parentSection;
     task._outlineLevel = newWbs.split('.').length;
   });
 
@@ -293,11 +302,8 @@ export function generateMsProjectXML({
     const newWbs = item._newWbs;
     const outlineLevel = item._outlineLevel;
 
-    const isSecao = Boolean(item.isSecao || item.is_secao || (!item.codigo && (!item.quantidade || item.quantidade === 0) && !item.unidade));
-
-    // Checa se esta tarefa possui sub-tarefas no cronograma
-    const hasChildTasks = taskItems.some(other => other._parentTask === item);
-    const isSummary = isSecao || hasChildTasks;
+    const isSecao = isSectionItem(item);
+    const isSummary = isSecao;
 
     // Duração vinda exclusivamente da Distribuição de Equipe
     const durStr = getDuracaoRaw(item);
