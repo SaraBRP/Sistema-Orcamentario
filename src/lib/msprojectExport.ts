@@ -372,7 +372,7 @@ export function generateMsProjectXML({
                 units = 1;
               }
 
-              const totalWorkHoras = hasValidDuration ? (durHorasTask * units) : totalHoras;
+              const totalWorkHoras = hasValidDuration ? (durHorasTask * units) : 0;
               const workXml = totalWorkHoras > 0 ? `<Work>PT${Math.round(totalWorkHoras * 10) / 10}H0M0S</Work>` : '';
 
               assignmentsXml.push(`    <Assignment>
