@@ -329,7 +329,7 @@ export function generateMsProjectXML({
       <UID>${taskUid}</UID>
       <ID>${taskId}</ID>
       <Name>${escapeXml(item.descricao)}</Name>
-      <Type>0</Type>
+      <Type>1</Type>
       <IsNull>0</IsNull>
       <WBS>${escapeXml(newWbs)}</WBS>
       <OutlineNumber>${escapeXml(newWbs)}</OutlineNumber>
@@ -350,6 +350,7 @@ export function generateMsProjectXML({
         const jornadaStr = getJornadaRaw(item);
         const jornadaNum = parseFloat(jornadaStr) || 8;
         const horasDisponiveis = hasValidDuration ? (durNum * jornadaNum) : 0;
+        const durHorasTask = hasValidDuration ? (durNum * 8) : 0;
 
         assignedInsumos.forEach(insumo => {
           const cod = (insumo.codigo || '').trim();
@@ -371,14 +372,15 @@ export function generateMsProjectXML({
                 units = 1;
               }
 
-              const workXml = `PT${Math.round(totalHoras * 10) / 10}H0M0S`;
+              const totalWorkHoras = hasValidDuration ? (durHorasTask * units) : totalHoras;
+              const workXml = totalWorkHoras > 0 ? `<Work>PT${Math.round(totalWorkHoras * 10) / 10}H0M0S</Work>` : '';
 
               assignmentsXml.push(`    <Assignment>
       <UID>${assignUid}</UID>
       <TaskUID>${taskUid}</TaskUID>
       <ResourceUID>${resObj.uid}</ResourceUID>
       <Units>${units}</Units>
-      <Work>${workXml}</Work>
+      ${workXml}
     </Assignment>`);
             } else if (resObj.type === 0) {
               // Recurso Tipo Material
