@@ -27,10 +27,91 @@ export function classifyInsumoForMsProject(insumo: any): { type: number; group: 
   const uniUpper = (insumo.unidade || '').trim().toUpperCase();
   const tipoUpper = (insumo.tipo || insumo.tipo_item || insumo.categoria || insumo.grupo || '').trim().toUpperCase();
 
-  // 1. Mão de Obra -> Tipo 1 (Trabalho / Work no MS Project XML), Grupo: Mão de obra
-  const isMO = tipoUpper.includes('MÃO DE OBRA') || tipoUpper.includes('MAO DE OBRA') || tipoUpper === 'MO' ||
-               codUpper.startsWith('MO.') || codUpper.startsWith('MO') || 
-               fonteUpper.includes('MO') || fonteUpper.includes('MÃO DE OBRA') ||
+  // No esquema oficial do MS Project XML (MSPDI):
+  // Type = 0 -> Trabalho (Work: Mão de Obra e Equipamentos operacionais)
+  // Type = 1 -> Material (Material consumível)
+  // Type = 2 -> Custo (Cost: Transporte, Aluguel, Verba, Administração, Taxas, Equipamento Permanente, Outros)
+
+  // A. Checagem por tipo explícito no cadastro do insumo
+  if (tipoUpper.includes('MÃO DE OBRA') || tipoUpper.includes('MAO DE OBRA') || tipoUpper === 'MO') {
+    return { type: 0, group: 'Mão de obra', label: '' };
+  }
+
+  if (tipoUpper.includes('TRANSPORTE') || tipoUpper.includes('LOGÍSTICA') || tipoUpper.includes('LOGISTICA')) {
+    return { type: 2, group: 'Transporte e logistica', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('VERBA')) {
+    return { type: 2, group: 'Verba', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('ALUGUEL') || tipoUpper.includes('LOCACAO') || tipoUpper.includes('LOCAÇÃO')) {
+    const isOutrosGroup = descUpper.includes('MARTELO') || descUpper.includes('SERRA CIRCULAR');
+    return { type: 2, group: isOutrosGroup ? 'Outros' : 'Aluguel', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('ADMINISTRAÇÃO') || tipoUpper.includes('ADMINISTRACAO')) {
+    return { type: 2, group: 'Administração', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('TAXA')) {
+    return { type: 2, group: 'Taxas', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('PERMANENTE') || tipoUpper.includes('AQUISIÇÃO PERMANENTE') || tipoUpper.includes('AQUISICAO PERMANENTE')) {
+    return { type: 2, group: 'Equipamento para aquisição permanente', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('OUTROS')) {
+    return { type: 2, group: 'Outros', label: 'R$' };
+  }
+
+  if (tipoUpper.includes('MATERIAL') || tipoUpper === 'MAT') {
+    return { type: 1, group: 'Material', label: uniUpper || 'UN' };
+  }
+
+  // B. Checagem por palavras-chave na Descrição / Código
+
+  // 1. TRANSPORTE E LOGÍSTICA -> Tipo 2 (Custo), Grupo: Transporte e logistica
+  const isTransporte = descUpper.includes('TRANSPORTE') || descUpper.includes('FRETE') || descUpper.includes('LOGÍSTICA') || descUpper.includes('LOGISTICA');
+  if (isTransporte) {
+    return { type: 2, group: 'Transporte e logistica', label: 'R$' };
+  }
+
+  // 2. VERBA -> Tipo 2 (Custo), Grupo: Verba
+  const isVerba = descUpper.includes('VERBA');
+  if (isVerba) {
+    return { type: 2, group: 'Verba', label: 'R$' };
+  }
+
+  // 3. ALUGUEL / LOCAÇÃO -> Tipo 2 (Custo), Grupo: Aluguel ou Outros
+  const isAluguel = descUpper.includes('ALUGUEL') || descUpper.includes('LOCACAO') || descUpper.includes('LOCAÇÃO');
+  if (isAluguel) {
+    const isOutrosGroup = descUpper.includes('MARTELO') || descUpper.includes('SERRA CIRCULAR');
+    return { type: 2, group: isOutrosGroup ? 'Outros' : 'Aluguel', label: 'R$' };
+  }
+
+  // 4. ADMINISTRAÇÃO -> Tipo 2 (Custo), Grupo: Administração
+  const isAdmin = descUpper.includes('ADMINISTRAÇÃO') || descUpper.includes('ADMINISTRACAO') || descUpper.includes('SUPERVISÃO') || descUpper.includes('SUPERVISAO');
+  if (isAdmin) {
+    return { type: 2, group: 'Administração', label: 'R$' };
+  }
+
+  // 5. TAXAS -> Tipo 2 (Custo), Grupo: Taxas
+  const isTaxas = descUpper.includes('TAXA') || descUpper.includes('IMPOSTO') || descUpper.includes('LICENÇA') || descUpper.includes('LICENCA');
+  if (isTaxas) {
+    return { type: 2, group: 'Taxas', label: 'R$' };
+  }
+
+  // 6. Equipamento para Aquisição Permanente -> Tipo 2 (Custo), Grupo: Equipamento para aquisição permanente
+  const isEqpPermanente = descUpper.includes('AQUISIÇÃO PERMANENTE') || descUpper.includes('AQUISICAO PERMANENTE');
+  if (isEqpPermanente) {
+    return { type: 2, group: 'Equipamento para aquisição permanente', label: 'R$' };
+  }
+
+  // 7. Mão de Obra -> Tipo 0 (Trabalho no MS Project XML), Grupo: Mão de obra
+  const isMO = codUpper.startsWith('MO.') || codUpper.startsWith('MO') ||
+               fonteUpper.includes('MÃO DE OBRA') || fonteUpper.includes('MAO DE OBRA') ||
                descUpper.includes('SERVENTE') || descUpper.includes('PEDREIRO') || 
                descUpper.includes('CARPINTEIRO') || descUpper.includes('ARMADOR') ||
                descUpper.includes('OPERADOR') || descUpper.includes('OFICIAL') ||
@@ -39,58 +120,34 @@ export function classifyInsumoForMsProject(insumo: any): { type: number; group: 
                descUpper.includes('MÃO DE OBRA') || descUpper.includes('MAO DE OBRA');
 
   if (isMO) {
-    return { type: 1, group: 'Mão de obra', label: '' };
+    return { type: 0, group: 'Mão de obra', label: '' };
   }
 
-  // 2. Equipamento para Aquisição Permanente -> Tipo 2 (Custo / Cost no MS Project XML), Grupo: Equipamento para aquisição permanente
-  const isEqpPermanente = tipoUpper.includes('PERMANENTE') || descUpper.includes('AQUISIÇÃO PERMANENTE') || descUpper.includes('AQUISICAO PERMANENTE');
-  if (isEqpPermanente) {
-    return { type: 2, group: 'Equipamento para aquisição permanente', label: 'R$' };
-  }
-
-  // 3. Demais Categorias Específicas de Custo -> Tipo 2 (Custo / Cost no MS Project XML)
-  if (tipoUpper.includes('TAXA') || descUpper.includes('TAXA') || descUpper.includes('IMPOSTO') || descUpper.includes('LICENÇA') || descUpper.includes('LICENCA')) {
-    return { type: 2, group: 'Taxas', label: 'R$' };
-  }
-  if (tipoUpper.includes('ADMINISTRAÇÃO') || tipoUpper.includes('ADMINISTRACAO') || descUpper.includes('ADMINISTRAÇÃO') || descUpper.includes('ADMINISTRACAO') || descUpper.includes('SUPERVISÃO') || descUpper.includes('SUPERVISAO')) {
-    return { type: 2, group: 'Administração', label: 'R$' };
-  }
-  if (tipoUpper.includes('ALUGUEL') || descUpper.includes('ALUGUEL')) {
-    return { type: 2, group: 'Aluguel', label: 'R$' };
-  }
-  if (tipoUpper.includes('VERBA') || descUpper.includes('VERBA')) {
-    return { type: 2, group: 'Verba', label: 'R$' };
-  }
-  if (tipoUpper.includes('TRANSPORTE') || tipoUpper.includes('LOGÍSTICA') || tipoUpper.includes('LOGISTICA') || descUpper.includes('TRANSPORTE') || descUpper.includes('FRETE') || descUpper.includes('LOGÍSTICA') || descUpper.includes('LOGISTICA')) {
-    return { type: 2, group: 'Transporte e logistica', label: 'R$' };
-  }
-
-  // 4. Equipamento (Uso / Locação) -> Tipo 1 (Trabalho / Work no MS Project XML), Grupo: Equipamento
+  // 8. Equipamento (Uso Direto em Obra / Operacional) -> Tipo 0 (Trabalho no MS Project XML), Grupo: Equipamento
   const isEQP = tipoUpper.includes('EQUIPAMENTO') || tipoUpper === 'EQP' || tipoUpper === 'EQ' ||
                 codUpper.startsWith('EQP.') || codUpper.startsWith('EQP') || codUpper.startsWith('EQ.') || codUpper.startsWith('EQ') ||
                 descUpper.includes('EQUIPAMENTO') || descUpper.includes('MAQUINA') || descUpper.includes('MÁQUINA') ||
-                descUpper.includes('CAMINHAO') || descUpper.includes('CAMINHÃO') || descUpper.includes('BETONEIRA') ||
-                descUpper.includes('RETROESCAVADEIRA') || descUpper.includes('VIBRADOR') || descUpper.includes('COMPACTADOR') ||
-                descUpper.includes('PERFURATRIZ') || descUpper.includes('PÁ CARREGADEIRA') || descUpper.includes('PA CARREGADEIRA');
+                descUpper.includes('BETONEIRA') || descUpper.includes('RETROESCAVADEIRA') || descUpper.includes('VIBRADOR') ||
+                descUpper.includes('COMPACTADOR') || descUpper.includes('PERFURATRIZ') || descUpper.includes('PÁ CARREGADEIRA') ||
+                descUpper.includes('PA CARREGADEIRA');
 
   if (isEQP) {
-    return { type: 1, group: 'Equipamento', label: '' };
+    return { type: 0, group: 'Equipamento', label: '' };
   }
 
-  // 5. Material -> Tipo 0 (Material no MS Project XML), Grupo: Material
-  const isMAT = tipoUpper.includes('MATERIAL') || tipoUpper === 'MAT' ||
-                codUpper.startsWith('MAT.') || codUpper.startsWith('MAT') ||
+  // 9. Material -> Tipo 1 (Material no MS Project XML), Grupo: Material
+  const isMAT = codUpper.startsWith('MAT.') || codUpper.startsWith('MAT') ||
                 descUpper.includes('AÇO') || descUpper.includes('ACO') || descUpper.includes('CONCRETO') ||
                 descUpper.includes('PREGO') || descUpper.includes('ARAME') || descUpper.includes('TABUA') ||
                 descUpper.includes('SARRAFO') || descUpper.includes('DESMOLDANTE') || descUpper.includes('VERGALHAO') ||
-                descUpper.includes('ESPACADOR') || descUpper.includes('ESPAÇADOR') || descUpper.includes('CACAMBA') || descUpper.includes('CAÇAMBA') ||
+                descUpper.includes('ESPACADOR') || descUpper.includes('ESPAÇADOR') || descUpper.includes('CAÇAMBA') || descUpper.includes('CACAMBA') ||
                 descUpper.includes('MATERIAL');
 
   if (isMAT) {
-    return { type: 0, group: 'Material', label: uniUpper || 'UN' };
+    return { type: 1, group: 'Material', label: uniUpper || 'UN' };
   }
 
-  // 6. Outros -> Tipo 2 (Custo / Cost no MS Project XML), Grupo: Outros
+  // 10. Outros -> Tipo 2 (Custo no MS Project XML), Grupo: Outros
   return { type: 2, group: 'Outros', label: 'R$' };
 }
 
@@ -362,8 +419,8 @@ export function generateMsProjectXML({
             const assignUid = nextAssignmentUid++;
             const totalHoras = insumo.displayQuantidade !== undefined ? insumo.displayQuantidade : (insumo.quantidade || 0);
 
-            if (resObj.type === 1) {
-              // Recurso Tipo Trabalho / Work (Mão de Obra ou Equipamento)
+            if (resObj.type === 0) {
+              // Recurso Tipo 0: Trabalho / Work (Mão de Obra ou Equipamento)
               let units = 1;
               if (resObj.group === 'Mão de obra') {
                 const exatos = horasDisponiveis > 0 ? (totalHoras / horasDisponiveis) : 0;
@@ -382,8 +439,8 @@ export function generateMsProjectXML({
       <Units>${units}</Units>
       ${workXml}
     </Assignment>`);
-            } else if (resObj.type === 0) {
-              // Recurso Tipo Material
+            } else if (resObj.type === 1) {
+              // Recurso Tipo 1: Material
               const totalQtd = totalHoras > 0 ? totalHoras : 1;
               assignmentsXml.push(`    <Assignment>
       <UID>${assignUid}</UID>
@@ -392,7 +449,7 @@ export function generateMsProjectXML({
       <Units>${totalQtd}</Units>
     </Assignment>`);
             } else {
-              // Recurso Tipo Custo (Demais)
+              // Recurso Tipo 2: Custo (Demais)
               const totalCost = (insumo.total || (totalHoras * (insumo.valor_unitario || 0))) || 0;
               assignmentsXml.push(`    <Assignment>
       <UID>${assignUid}</UID>
@@ -416,7 +473,7 @@ export function generateMsProjectXML({
       <Name>${escapeXml(res.name)}</Name>
       <Type>${res.type}</Type>
       <Group>${escapeXml(res.group)}</Group>
-      ${res.type === 0 ? `<MaterialLabel>${escapeXml(res.label)}</MaterialLabel>` : ''}
+      ${res.type === 1 ? `<MaterialLabel>${escapeXml(res.label)}</MaterialLabel>` : ''}
     </Resource>`);
   });
 

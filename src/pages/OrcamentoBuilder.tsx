@@ -337,7 +337,8 @@ const fetchCompositionChildrenRecursively = async (
           parentCompositionId: composicaoId,
           parent_composition_id: composicaoId,
           isChildInsumoOfComposition: true,
-          is_child_insumo: true
+          is_child_insumo: true,
+          tipo: item.insumo.tipo || item.insumo.tipo_item || item.insumo.categoria || item.insumo.grupo
         } as any;
 
         result.push(insumoItem);
