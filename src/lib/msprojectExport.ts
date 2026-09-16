@@ -255,6 +255,31 @@ export function generateMsProjectXML({
       <Critical>1</Critical>
     </Task>`);
 
+  // Helpers para busca de duração e jornada (por id ou eap)
+  const getDuracaoRaw = (item: any): string => {
+    if (!duracoesMap) return '';
+    if (item.id && duracoesMap[item.id] !== undefined && String(duracoesMap[item.id]).trim() !== '') {
+      return String(duracoesMap[item.id]).trim();
+    }
+    const eapClean = (item.item_eap || '').trim();
+    if (eapClean && duracoesMap[eapClean] !== undefined && String(duracoesMap[eapClean]).trim() !== '') {
+      return String(duracoesMap[eapClean]).trim();
+    }
+    return '';
+  };
+
+  const getJornadaRaw = (item: any): string => {
+    if (!jornadasMap) return '';
+    if (item.id && jornadasMap[item.id] !== undefined && String(jornadasMap[item.id]).trim() !== '') {
+      return String(jornadasMap[item.id]).trim();
+    }
+    const eapClean = (item.item_eap || '').trim();
+    if (eapClean && jornadasMap[eapClean] !== undefined && String(jornadasMap[eapClean]).trim() !== '') {
+      return String(jornadasMap[eapClean]).trim();
+    }
+    return '';
+  };
+
   // Pré-calcula UIDs das Tarefas
   taskItems.forEach((item, index) => {
     item._msTaskUid = nextTaskUid++;
@@ -274,11 +299,25 @@ export function generateMsProjectXML({
     const hasChildTasks = taskItems.some(other => other._parentTask === item);
     const isSummary = isSecao || hasChildTasks;
 
-    // Duração em dias vinda da Distribuição de Equipe ou padrão (1 dia)
-    const duracaoStr = duracoesMap[item.id] || '1';
-    const duracaoDias = parseFloat(duracaoStr) || 1;
-    const duracaoHoras = duracaoDias * 8;
-    const durationXml = `PT${Math.round(duracaoHoras * 10) / 10}H0M0S`;
+    // Duração vinda exclusivamente da Distribuição de Equipe
+    const durStr = getDuracaoRaw(item);
+    const durNum = parseFloat(durStr);
+    const hasValidDuration = !isNaN(durNum) && durNum > 0;
+
+    let durationXml = 'PT0H0M0S';
+    let isEstimated = '1';
+
+    if (isSummary) {
+      durationXml = 'PT8H0M0S';
+      isEstimated = '0';
+    } else if (hasValidDuration) {
+      const durHoras = durNum * 8;
+      durationXml = `PT${Math.round(durHoras * 10) / 10}H0M0S`;
+      isEstimated = '0';
+    } else {
+      durationXml = 'PT0H0M0S';
+      isEstimated = '1';
+    }
 
     tasksXml.push(`    <Task>
       <UID>${taskUid}</UID>
@@ -291,8 +330,9 @@ export function generateMsProjectXML({
       <OutlineLevel>${outlineLevel}</OutlineLevel>
       <Priority>500</Priority>
       <Start>${creationDateISO}</Start>
-      <Duration>${isSummary ? 'PT8H0M0S' : durationXml}</Duration>
+      <Duration>${durationXml}</Duration>
       <DurationFormat>7</DurationFormat>
+      <Estimated>${isEstimated}</Estimated>
       <Summary>${isSummary ? '1' : '0'}</Summary>
     </Task>`);
 
@@ -301,9 +341,9 @@ export function generateMsProjectXML({
       const assignedInsumos = childInsumoItems.filter(insumo => getParentTaskForInsumo(insumo) === item);
 
       if (assignedInsumos.length > 0) {
-        const jornadaStr = jornadasMap[item.id] || '8';
+        const jornadaStr = getJornadaRaw(item);
         const jornadaNum = parseFloat(jornadaStr) || 8;
-        const horasDisponiveis = duracaoDias * jornadaNum;
+        const horasDisponiveis = hasValidDuration ? (durNum * jornadaNum) : 0;
 
         assignedInsumos.forEach(insumo => {
           const cod = (insumo.codigo || '').trim();
