@@ -6,7 +6,7 @@ import {
   ArrowLeft, ArrowRight, Save, Plus, Search, Trash2, Import, Calculator, 
   Settings2, FileSpreadsheet, Layers, X, Check, ChevronDown, ChevronRight,
   Indent, Outdent, GripVertical, AlertCircle, Send, Lock, CheckCircle2, XCircle, Clock, ChevronUp, MessageSquare, AlertTriangle, BarChart3, Users,
-  Download, FileText, Undo2, Redo2, RefreshCw, Package
+  Download, FileText, Undo2, Redo2, RefreshCw, Package, Calendar
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
@@ -16,6 +16,7 @@ import ListaMateriaisTab from '../components/calculos/ListaMateriaisTab';
 import type { CalculoItem } from '../types/calculos';
 import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
 import { resolveCidadeEstadoFromCliente } from '../lib/clientes';
+import { downloadMsProjectXML } from '../lib/msprojectExport';
 
 type OrcamentoItem = {
   id: string;
@@ -3625,6 +3626,23 @@ export default function OrcamentoBuilder() {
             >
               <Download className="w-3 h-3 text-emerald-700" />
               <span>Exportar</span>
+            </button>
+
+            <button 
+              type="button"
+              onClick={() => {
+                downloadMsProjectXML({
+                  orcamentoInfo: orcamento,
+                  itens: computedItens,
+                  duracoesMap: equipeDuracoesMap,
+                  jornadasMap: equipeJornadasMap
+                });
+              }}
+              className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-800 px-2 py-1 rounded-lg text-[11px] font-extrabold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
+              title="Exportar Cronograma para o MS Project (.xml / .mpp)"
+            >
+              <Calendar className="w-3 h-3 text-indigo-700" />
+              <span>Exportar Cronograma</span>
             </button>
 
             <button
