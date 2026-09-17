@@ -634,6 +634,12 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                   opacity: 0 !important;
                   -webkit-text-fill-color: transparent !important;
                 }
+                #solicitacao-cotacao-pdf img {
+                  height: 48px !important;
+                  max-height: 48px !important;
+                  width: auto !important;
+                  object-fit: contain !important;
+                }
               }
             `}</style>
             {/* Header: Logo BRP da Empresa + Emissão */}
@@ -643,13 +649,15 @@ export default function ListaMateriaisTab({ orcamentoId, itens, orcamentoInfo }:
                   <img 
                     src="/logo_brp_metalica_cinza.png" 
                     alt="Logo BRP Soluções Metálicas" 
-                    className="h-12 max-h-14 w-auto object-contain"
+                    className="h-12 max-h-12 w-auto object-contain shrink-0 print:h-12 print:max-h-12"
+                    style={{ height: '48px', maxHeight: '48px', width: 'auto', objectFit: 'contain' }}
                   />
                 ) : (
                   <img 
                     src="/logo_brp.png" 
                     alt="Logo BRP Engenharia" 
-                    className="h-12 max-h-14 w-auto object-contain"
+                    className="h-12 max-h-12 w-auto object-contain shrink-0 print:h-12 print:max-h-12"
+                    style={{ height: '48px', maxHeight: '48px', width: 'auto', objectFit: 'contain' }}
                   />
                 )}
               </div>

@@ -103,13 +103,26 @@ input[type=number] {
     break-inside: auto !important;
   }
 
-  /* 3. Limpa TODOS os containers pai e elementos envolvidos para permitirem expansão vertical e múltiplas páginas */
-  html, body, #root, #root *, main, div {
+  /* 3. Limpa containers pai para permitirem expansão vertical e múltiplas páginas (preservando dimensões de imagens) */
+  html, body, #root, main, div, section, article, table {
     height: auto !important;
     min-height: 0 !important;
-    max-height: none !important;
     overflow: visible !important;
     float: none !important;
+  }
+
+  /* 3b. Proteção de imagens e logos na impressão */
+  img {
+    max-height: 52px !important;
+    width: auto !important;
+    object-fit: contain !important;
+  }
+
+  #solicitacao-cotacao-pdf img {
+    height: 48px !important;
+    max-height: 48px !important;
+    width: auto !important;
+    object-fit: contain !important;
   }
 
   html, body {
