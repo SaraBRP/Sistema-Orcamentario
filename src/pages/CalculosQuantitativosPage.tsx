@@ -190,7 +190,9 @@ export default function CalculosQuantitativosPage() {
         };
       });
 
-      const importadosConvertidos: MemorialCalculoRecord[] = dbImportados.map((imp: any) => {
+      const importadosConvertidos: MemorialCalculoRecord[] = dbImportados
+        .filter((imp: any) => Boolean(imp.codigo || imp.nome || imp.arquivo_nome || imp.cliente))
+        .map((imp: any) => {
         let itensMemoria: ItemMemoriaOficial[] = [];
         try {
           const raw = localStorage.getItem(`importado_calculos_${imp.id}`);
@@ -346,6 +348,16 @@ export default function CalculosQuantitativosPage() {
         await supabase.schema('engenharia').from('orcamentos').delete().eq('id', realId);
       } catch (e) {
         console.error('Erro ao remover orçamento do Supabase:', e);
+      }
+    }
+
+    if (target.isImportado || target.importadoId || id.startsWith('imp-')) {
+      const realImpId = target.importadoId || (id.startsWith('imp-') ? id.replace('imp-', '') : id);
+      try {
+        await supabase.schema('engenharia').from('orcamentos_importados_itens').delete().eq('importado_id', realImpId);
+        await supabase.schema('engenharia').from('orcamentos_importados').delete().eq('id', realImpId);
+      } catch (e) {
+        console.error('Erro ao remover orçamento importado do Supabase:', e);
       }
     }
 
