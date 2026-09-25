@@ -3566,7 +3566,7 @@ export default function OrcamentoBuilder() {
           <div className="min-w-0 flex flex-col justify-center">
             {/* Linha 1: Título na frente -> Código -> REV -> Status -> Ver Importada */}
             <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
-              <h2 className="text-base font-bold text-slate-800 leading-tight truncate max-w-xs md:max-w-sm" title={orcamento?.nome || orcamento?.projeto || 'Orçamento'}>
+              <h2 className="text-base font-bold text-slate-800 leading-tight whitespace-normal break-words" title={orcamento?.nome || orcamento?.projeto || 'Orçamento'}>
                 {orcamento?.nome || orcamento?.projeto || 'Orçamento'}
               </h2>
               
@@ -3686,56 +3686,58 @@ export default function OrcamentoBuilder() {
               )}
             </div>
 
-            {/* Linha 2: Metadados (Cliente, Gestor, Orçamentista, Local) */}
-            <p className="text-slate-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-x-1.5 leading-none">
-              <span>Cliente: <span className="font-semibold text-slate-600">{orcamento?.cliente || 'Não informado'}</span></span>
+            {/* Linha 2: Metadados (Cliente, Gestor, Orçamentista, Local) - Sem Negrito nos Valores */}
+            <p className="text-slate-400 text-[11px] mt-0.5 flex flex-wrap items-center gap-x-1.5 leading-none font-normal">
+              <span>Cliente: <span className="font-normal text-slate-500">{orcamento?.cliente || 'Não informado'}</span></span>
               <span>·</span>
-              <span>Gestor: <span className="font-semibold text-slate-600">{orcamento?.gestor_cliente || 'Não informado'}</span></span>
+              <span>Gestor: <span className="font-normal text-slate-500">{orcamento?.gestor_cliente || 'Não informado'}</span></span>
               {(orcamento as any)?.responsavel && (
                 <>
                   <span>·</span>
-                  <span>Orçamentista: <span className="font-semibold text-slate-600">{(orcamento as any)?.responsavel}</span></span>
+                  <span>Orçamentista: <span className="font-normal text-slate-500">{(orcamento as any)?.responsavel}</span></span>
                 </>
               )}
               {((orcamento as any)?.cidade || (orcamento as any)?.estado) && (
                 <>
                   <span>·</span>
-                  <span>Local: <span className="font-semibold text-slate-600">{[(orcamento as any)?.cidade, (orcamento as any)?.estado || 'GO'].filter(Boolean).join(' - ')}</span></span>
+                  <span>Local: <span className="font-normal text-slate-500">{[(orcamento as any)?.cidade, (orcamento as any)?.estado || 'GO'].filter(Boolean).join(' - ')}</span></span>
                 </>
               )}
             </p>
           </div>
         </div>
 
-        {/* ── Direita: Toolbar de 2 Sub-Linhas Organizadas ── */}
+        {/* ── Direita: Toolbar Organizada ── */}
         <div className="flex flex-col gap-1.5 shrink-0 justify-center items-end">
           
-          {/* Sub-Linha 1 (CIMA): BDI, Curva ABC, Exportar, Salvar & Workflow */}
+          {/* Sub-Linha 1 (CIMA): BDI Empilhado, Curva ABC, Exportar, Salvar & Workflow */}
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
-            {/* Botões BDI Alinhados Horizontalmente */}
-            <button 
-              type="button"
-              onClick={() => setExibirBdi(!exibirBdi)}
-              className={clsx(
-                "px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center gap-1 shadow-2xs",
-                exibirBdi 
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" 
-                  : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
-              )}
-              title={exibirBdi ? 'Ocultar BDI na planilha' : 'Exibir BDI na planilha'}
-            >
-              <Calculator className="w-3 h-3" />
-              <span>{exibirBdi ? 'COM BDI' : 'SEM BDI'}</span>
-            </button>
-            <button 
-              type="button"
-              onClick={() => setShowConfig(!showConfig)}
-              className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-2.5 py-1 rounded-lg text-[11px] font-semibold flex items-center gap-1 transition-colors cursor-pointer shadow-2xs"
-              title="Configurações do BDI"
-            >
-              <Settings2 className="w-3 h-3" />
-              <span>BDI / Config.</span>
-            </button>
+            {/* Botões BDI Reposicionados (Um abaixo do outro) */}
+            <div className="flex flex-col gap-0.5 shrink-0 justify-center">
+              <button 
+                type="button"
+                onClick={() => setExibirBdi(!exibirBdi)}
+                className={clsx(
+                  "px-2 py-0.5 rounded-md text-[10px] font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1 shadow-2xs whitespace-nowrap",
+                  exibirBdi 
+                    ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100" 
+                    : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"
+                )}
+                title={exibirBdi ? 'Ocultar BDI na planilha' : 'Exibir BDI na planilha'}
+              >
+                <Calculator className="w-3 h-3" />
+                <span>{exibirBdi ? 'COM BDI' : 'SEM BDI'}</span>
+              </button>
+              <button 
+                type="button"
+                onClick={() => setShowConfig(!showConfig)}
+                className="bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs whitespace-nowrap"
+                title="Configurações do BDI"
+              >
+                <Settings2 className="w-3 h-3" />
+                <span>BDI / Config.</span>
+              </button>
+            </div>
 
             <div className="w-px h-4 bg-slate-200 self-center" />
 
