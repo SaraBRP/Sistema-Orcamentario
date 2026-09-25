@@ -498,15 +498,44 @@ export default function BancoProprioInsumos() {
 
     try {
       setLoading(true);
-      // 1. Obter informações do insumo que está prestes a ser deletado para checar se ele é subitem
+
+      // 1. Checar se o insumo está sendo utilizado em alguma composição
+      const { count: vincCount } = await supabase
+        .schema('engenharia')
+        .from('composicao_itens')
+        .select('id', { count: 'exact', head: true })
+        .eq('insumo_id', id);
+
+      if (vincCount && vincCount > 0) {
+        const confirmVinc = window.confirm(
+          `Atenção: O insumo ${codigo} está sendo utilizado em ${vincCount} composição(ões).\n\n` +
+          `Ao continuar, o insumo será removido dessas composições e excluído do Banco Próprio.\n\n` +
+          `Deseja realmente prosseguir com a exclusão?`
+        );
+        if (!confirmVinc) {
+          setLoading(false);
+          return;
+        }
+
+        // Remover os vínculos na tabela composicao_itens antes de excluir o insumo
+        const { error: delVincErr } = await supabase
+          .schema('engenharia')
+          .from('composicao_itens')
+          .delete()
+          .eq('insumo_id', id);
+
+        if (delVincErr) throw delVincErr;
+      }
+
+      // 2. Obter informações do insumo que está prestes a ser deletado para checar se ele é subitem
       const { data: insumoDeletado } = await supabase.schema('engenharia').from('insumos')
         .select('codigo_pai, subitem, codigo').eq('id', id).maybeSingle();
 
-      // 2. Deletar o insumo
+      // 3. Deletar o insumo
       const { error } = await supabase.schema('engenharia').from('insumos').delete().eq('id', id);
       if (error) throw error;
 
-      // 3. Se era um subitem, checar se restou apenas 1. Se sim, reverte para o formato normal
+      // 4. Se era um subitem, checar se restou apenas 1. Se sim, reverte para o formato normal
       if (insumoDeletado && insumoDeletado.codigo_pai) {
         const codigoPai = insumoDeletado.codigo_pai;
         const { data: restantes } = await supabase.schema('engenharia').from('insumos')

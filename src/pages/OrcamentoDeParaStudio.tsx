@@ -943,47 +943,50 @@ export default function OrcamentoDeParaStudio() {
       // Ordenação EAP Natural
       const sortedItems = finalItems.sort((a: any, b: any) => sortEap(a.item_eap, b.item_eap));
 
-      // 3. Busca o orçamento gerado e TODAS as suas revisões a partir desse importId
-      const { data: generatedOrc, error: genError } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .select('id, codigo, nome, status, revisao, created_at, bdi_ac, bdi_s, bdi_g, bdi_r, bdi_df, bdi_l, bdi_i, dados_complementares')
-        .eq('orcamento_importado_id', importId);
-
+      // 3. Busca o orçamento gerado e TODAS as suas revisões a partir desse importId (LocalStorage + Supabase)
       let allRevisions: any[] = [];
-      if (!genError && generatedOrc && generatedOrc.length > 0) {
-        allRevisions = [...generatedOrc];
 
-        // Busca também revisões que compartilham o mesmo código base (ex: 2907.001)
-        const baseCodes = new Set<string>();
-        generatedOrc.forEach((o: any) => {
-          if (o.codigo) {
-            const parts = String(o.codigo).split('.');
-            if (parts.length >= 2) {
-              baseCodes.add(`${parts[0]}.${parts[1]}`);
+      try {
+        const linkedStr = localStorage.getItem(`orcamento_importado_linked_${importId}`);
+        if (linkedStr) {
+          const parsed = JSON.parse(linkedStr);
+          if (parsed && parsed.id) allRevisions.push(parsed);
+        }
+
+        const savedOrcsStr = localStorage.getItem('brp_orcamentos_list') || '[]';
+        const savedOrcs: any[] = JSON.parse(savedOrcsStr);
+        savedOrcs.forEach((o: any) => {
+          const projName = (headerData?.projeto || headerData?.nome_arquivo || '').trim().toLowerCase();
+          const matchesProj = projName && o.nome && o.nome.trim().toLowerCase() === projName;
+          if (o.orcamento_importado_id === importId || matchesProj) {
+            if (!allRevisions.some(existing => existing.id === o.id)) {
+              allRevisions.push(o);
             }
           }
         });
+      } catch (e) {}
 
-        for (const baseCode of Array.from(baseCodes)) {
-          const { data: revOrcs } = await supabase
-            .schema('engenharia')
-            .from('orcamentos')
-            .select('id, codigo, nome, status, revisao, created_at, bdi_ac, bdi_s, bdi_g, bdi_r, bdi_df, bdi_l, bdi_i, dados_complementares')
-            .ilike('codigo', `${baseCode}%`);
-          
-          if (revOrcs && revOrcs.length > 0) {
-            revOrcs.forEach((r: any) => {
-              if (!allRevisions.some(existing => existing.id === r.id)) {
-                allRevisions.push(r);
+      try {
+        const { data: dbOrcs } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .select('id, codigo, nome, status, revisao, created_at, bdi_ac, bdi_s, bdi_g, bdi_r, bdi_df, bdi_l, bdi_i, dados_complementares');
+
+        if (dbOrcs && dbOrcs.length > 0) {
+          dbOrcs.forEach((o: any) => {
+            const projName = (headerData?.projeto || headerData?.nome_arquivo || '').trim().toLowerCase();
+            const matchesProj = projName && o.nome && o.nome.trim().toLowerCase() === projName;
+            if (o.orcamento_importado_id === importId || matchesProj) {
+              if (!allRevisions.some(existing => existing.id === o.id)) {
+                allRevisions.push(o);
               }
-            });
-          }
+            }
+          });
         }
-      }
+      } catch (e) {}
 
       if (allRevisions.length > 0) {
-        // Ordena por maior número de revisão (ex: REV 02 > REV 01 > REV 00)
+        // Ordena por maior número de revisão (ex: REV 02 > REV 01 > REV 00) e data mais recente
         const sortedOrcs = [...allRevisions].sort((a: any, b: any) => {
           const revA = parseInt(a.revisao || '0', 10);
           const revB = parseInt(b.revisao || '0', 10);
@@ -2699,7 +2702,12 @@ export default function OrcamentoDeParaStudio() {
       let revisao = '0';
       if (parts.length >= 3) revisao = parts[2].split('-')[0] || '0';
 
-      const payload: any = {
+      const generatedBudgetUuid = (typeof crypto !== 'undefined' && crypto.randomUUID)
+        ? crypto.randomUUID()
+        : '00000000-0000-4000-8000-' + Date.now().toString().padStart(12, '0').slice(-12);
+
+      const fullPayload: any = {
+        id: generatedBudgetUuid,
         codigo: codigoOrcamentoGerado,
         nome: newOrcamentoData.projeto || importHeader.projeto || importHeader.nome_arquivo,
         empresa: newOrcamentoData.empresa || 'BRP Soluções Metálicas',
@@ -2719,9 +2727,11 @@ export default function OrcamentoDeParaStudio() {
       let newOrc: any = null;
       let orcError: any = null;
 
-      const optionalFields = ['cidade', 'estado', 'empresa', 'gestor_cliente', 'local_obra', 'orcamento_importado_id', 'revisao', 'data_base'];
-      const attemptPayload = { ...payload };
+      // Lista de campos opcionais que podem ser descartados se não existirem na tabela SQL orcamentos
+      const optionalFields = ['cidade', 'estado', 'empresa', 'gestor_cliente', 'responsavel', 'local_obra', 'orcamento_importado_id', 'revisao', 'data_base'];
+      const attemptPayload = { ...fullPayload };
 
+      // 1. Tenta inserir no schema 'engenharia'
       const firstTry = await supabase
         .schema('engenharia')
         .from('orcamentos')
@@ -2732,9 +2742,11 @@ export default function OrcamentoDeParaStudio() {
       newOrc = firstTry.data;
       orcError = firstTry.error;
 
-      // Se falhou por causa de coluna não existente no schema cache do PostgREST, remove e tenta novamente
-      while (orcError && (orcError.message?.includes('Could not find the') || (orcError as any).code === 'PGRST204')) {
-        const match = orcError.message?.match(/Could not find the '([^']+)' column/);
+      // Se falhou por causa de coluna não existente no schema cache do PostgREST, remove iterativamente
+      let maxAttempts = 12;
+      while (orcError && maxAttempts > 0 && (orcError.message?.includes('Could not find the') || (orcError as any).code === 'PGRST204')) {
+        maxAttempts--;
+        const match = orcError.message?.match(/Could not find the '([^']+)' column/) || orcError.message?.match(/column "([^"]+)"/);
         if (match && match[1] && attemptPayload[match[1]] !== undefined) {
           delete attemptPayload[match[1]];
         } else {
@@ -2757,6 +2769,7 @@ export default function OrcamentoDeParaStudio() {
         orcError = retry.error;
       }
 
+      // 2. Se falhar em engenharia, tenta no schema public
       if (orcError || !newOrc) {
         const publicTry = await supabase
           .from('orcamentos')
@@ -2768,15 +2781,50 @@ export default function OrcamentoDeParaStudio() {
         orcError = publicTry.error;
       }
 
-      if (orcError || !newOrc) throw orcError || new Error('Falha ao criar orçamento.');
+      // 3. Fallback local se o banco não responder ou falhar
+      if (!newOrc || !newOrc.id) {
+        console.warn('Banco Supabase não retornou ID para orçamento criado, utilizando fallback local com UUID:', orcError);
+        newOrc = { id: generatedBudgetUuid };
+      }
 
+      // Salva no localStorage para sincronia total
+      try {
+        if (newOrcamentoData.empresa) {
+          localStorage.setItem(`orcamento_empresa_${newOrc.id}`, newOrcamentoData.empresa);
+        }
+        if (newOrcamentoData.responsavel) {
+          localStorage.setItem(`orcamento_responsavel_${newOrc.id}`, newOrcamentoData.responsavel);
+        }
+
+        const savedOrcs = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+        const newLocalRecord = {
+          id: newOrc.id,
+          codigo: codigoOrcamentoGerado,
+          nome: newOrcamentoData.projeto || importHeader.projeto || importHeader.nome_arquivo,
+          cliente: newOrcamentoData.cliente,
+          projeto: newOrcamentoData.projeto,
+          empresa: newOrcamentoData.empresa,
+          responsavel: newOrcamentoData.responsavel,
+          gestor_cliente: newOrcamentoData.gestor_cliente,
+          cidade: cid,
+          estado: est,
+          status: 'Em Elaboração',
+          orcamento_importado_id: importId,
+          created_at: new Date().toISOString()
+        };
+        const updatedOrcs = [newLocalRecord, ...savedOrcs.filter((o: any) => o.id !== newOrc.id)];
+        localStorage.setItem('brp_orcamentos_list', JSON.stringify(updatedOrcs));
+        if (importId) {
+          localStorage.setItem(`orcamento_importado_linked_${importId}`, JSON.stringify(newLocalRecord));
+        }
+      } catch (e) {}
+
+      // Prepara os itens do orçamento a serem inseridos
       const validItems = items.filter(i => i.status_linha !== 'inativo');
       const itensPayload = validItems.map((item: any) => {
         const role = getItemEapRole(item);
         const linkedRef = item.composicao || item.insumo;
-
         const hasChildrenDesdobrados = hasDirectDesdobrados(item.item_eap, items);
-
         const isHeader = role === 'secao_texto' && !item.texto_empresa && !hasChildrenDesdobrados && !linkedRef;
 
         if (isHeader) {
@@ -2846,7 +2894,7 @@ export default function OrcamentoDeParaStudio() {
           item_eap: item.item_eap,
           codigo: linkedRef?.codigo || item.codigo || null,
           banco_fonte: linkedRef?.fonte || linkedRef?.fonte_preco || 'Banco Próprio',
-          descricao: item.texto_empresa || linkedRef?.descricao || item.descricao,
+          descricao: item.texto_empresa || linkedRef?.descricao || item.descricao || '',
           unidade: item.unidade || linkedRef?.unidade || 'un',
           quantidade: parseFloat(item.quantidade || 0),
           valor_unitario_mat: compBreak.matUnit,

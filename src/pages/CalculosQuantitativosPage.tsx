@@ -527,7 +527,9 @@ export default function CalculosQuantitativosPage() {
     }
 
     const nomeOrcamento = formData.projeto || mem.nomeProjeto || `Orçamento - ${codigoOrcamentoGerado}`;
-    let targetOrcId = `orc-${Date.now()}`;
+    let targetOrcId = (typeof crypto !== 'undefined' && crypto.randomUUID) 
+      ? crypto.randomUUID() 
+      : '00000000-0000-4000-8000-' + Date.now().toString().padStart(12, '0').slice(-12);
     const cid = formData.cidade ? formatCidadeUpperNoAccents(formData.cidade).trim() : '';
     const est = formData.estado || 'GO';
     const localObra = [cid, est].filter(Boolean).join(' - ');

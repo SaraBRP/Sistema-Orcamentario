@@ -312,16 +312,27 @@ export function parseSpreadsheet(
 
     let currentComp: ParsedComposition | null = null;
     let currentSection: 'EQUIPAMENTO' | 'MAO_DE_OBRA' | 'MATERIAL' | 'GERAL' = 'GERAL';
+    let descColIdx = -1;
+    let undColIdx = -1;
+    let coefColIdx = -1;
+    let precoColIdx = -1;
+
+    const parseNum = (val: any): number => {
+      if (val === undefined || val === null || val === '' || val === '-') return 0;
+      const num = parseFloat(String(val).replace(',', '.'));
+      return isNaN(num) ? 0 : num;
+    };
 
     for (let i = 0; i < rows.length; i++) {
       const row = rows[i];
       if (!row) continue;
 
       const firstCell = row[0] ? String(row[0]).trim() : '';
+      const rowStr = row.map(c => String(c ?? '').trim()).join(' | ');
 
       // Check if it's the start of a composition
-      if (firstCell.startsWith('Serviço:')) {
-        const servicePart = firstCell.substring(8).trim();
+      if (firstCell.startsWith('Serviço:') || firstCell.startsWith('Servico:')) {
+        const servicePart = firstCell.substring(firstCell.indexOf(':') + 1).trim();
         const dashIdx = servicePart.indexOf('-');
         
         let codigo = '';
@@ -361,8 +372,18 @@ export function parseSpreadsheet(
         continue;
       }
 
+      // Detect table header columns if present
+      if (rowStr.includes('Código') || rowStr.includes('Codigo') || rowStr.includes('Consumo') || rowStr.includes('Quantidade')) {
+        row.forEach((cellVal, cIdx) => {
+          const str = String(cellVal || '').toLowerCase().trim();
+          if (str.includes('descri')) descColIdx = cIdx;
+          else if (str.includes('und') || str.includes('unidade')) undColIdx = cIdx;
+          else if (str.includes('consumo') || str.includes('quantid') || str.includes('coefici')) coefColIdx = cIdx;
+          else if (str.includes('preço') || str.includes('preco') || str.includes('unitário') || str.includes('unitario') || str.includes('custo hor')) precoColIdx = cIdx;
+        });
+      }
+
       // Check for section headers inside the composition
-      const rowStr = row.map(c => String(c ?? '').trim()).join(' | ');
       if (rowStr.includes('Mãos-de-obra') || rowStr.includes('Maos-de-obra') || rowStr.includes('Mão-de-obra')) {
         currentSection = 'MAO_DE_OBRA';
       } else if (rowStr.includes('Equipamento')) {
@@ -378,51 +399,85 @@ export function parseSpreadsheet(
           firstCell.includes('Total:') ||
           firstCell.includes('Custo direto total') ||
           firstCell.includes('BDI:') ||
-          firstCell.includes('Preço unitário')
+          firstCell.includes('Preço unitário') ||
+          firstCell.includes('Serviço:') ||
+          firstCell.includes('Servico:')
         ) {
           continue;
         }
 
         let codeClean = firstCell.trim();
         if (codeClean.length >= 1) {
-          const desc = row[3] ? String(row[3]).trim() : '';
-          const coefVal = row[14]; // Consumo column
-          
-          if (desc && coefVal !== undefined && coefVal !== null && coefVal !== '') {
-            const coef = parseFloat(String(coefVal).replace(',', '.'));
-            if (!isNaN(coef)) {
-              // Se for numérico puro e GOINFRA, padroniza com zeros à esquerda
-              if (fonteDefault === 'GOINFRA' && /^\d+$/.test(codeClean)) {
-                codeClean = codeClean.padStart(4, '0');
+          // Extrai Descrição de forma flexível
+          let desc = (descColIdx !== -1 && row[descColIdx]) ? String(row[descColIdx]).trim() : '';
+          if (!desc) {
+            for (const colIdx of [3, 2, 1, 4, 5]) {
+              const val = row[colIdx] ? String(row[colIdx]).trim() : '';
+              if (val && isNaN(Number(val.replace(',', '.'))) && val.length > 2 && !['h', 'un', 'm2', 'm3', 'kg', 't', 'm', 'mes', 'ut', 'l'].includes(val.toLowerCase())) {
+                desc = val;
+                break;
               }
-
-              const isSubComp = /^\d{6}$/.test(codeClean);
-              
-              const precoUnitRaw = row[8] ? parseFloat(String(row[8]).replace(',', '.')) : 0;
-              const precoUnit = isNaN(precoUnitRaw) ? 0 : precoUnitRaw;
-
-              let unidadeSugestao = 'un';
-              let tipoSugestao = 'Material';
-              if (currentSection === 'MAO_DE_OBRA') {
-                unidadeSugestao = 'h';
-                tipoSugestao = 'Mão de Obra';
-              } else if (currentSection === 'EQUIPAMENTO') {
-                unidadeSugestao = 'h';
-                tipoSugestao = 'Equipamento';
-              }
-
-              itens.push({
-                parent_codigo: currentComp.codigo,
-                child_codigo: codeClean,
-                tipo_item: isSubComp ? 'COMPOSICAO' : 'INSUMO',
-                coeficiente: coef,
-                perda_percentual: 0,
-                descricao_sugestao: desc,
-                unidade_sugestao: unidadeSugestao,
-                tipo_sugestao: tipoSugestao,
-                preco_unitario: precoUnit
-              });
             }
+          }
+
+          // Extrai Coeficiente / Consumo de forma flexível
+          let coef = 0;
+          if (coefColIdx !== -1 && row[coefColIdx] !== undefined) {
+            coef = parseNum(row[coefColIdx]);
+          }
+          if (!coef) {
+            for (const colIdx of [14, 5, 4, 6, 7, 10, 12, 3]) {
+              const n = parseNum(row[colIdx]);
+              if (n > 0) {
+                coef = n;
+                break;
+              }
+            }
+          }
+
+          if (desc && coef > 0) {
+            // Se for numérico puro e GOINFRA, padroniza com zeros à esquerda
+            if (fonteDefault === 'GOINFRA' && /^\d+$/.test(codeClean)) {
+              codeClean = codeClean.padStart(4, '0');
+            }
+
+            const isSubComp = /^\d{6}$/.test(codeClean);
+            
+            let precoUnit = 0;
+            if (precoColIdx !== -1 && row[precoColIdx] !== undefined) {
+              precoUnit = parseNum(row[precoColIdx]);
+            }
+            if (!precoUnit) {
+              for (const colIdx of [8, 7, 6, 9, 5]) {
+                const n = parseNum(row[colIdx]);
+                if (n > 0 && n !== coef) {
+                  precoUnit = n;
+                  break;
+                }
+              }
+            }
+
+            let unidadeSugestao = (undColIdx !== -1 && row[undColIdx]) ? String(row[undColIdx]).trim() : 'un';
+            let tipoSugestao = 'Material';
+            if (currentSection === 'MAO_DE_OBRA') {
+              if (unidadeSugestao === 'un') unidadeSugestao = 'h';
+              tipoSugestao = 'Mão de Obra';
+            } else if (currentSection === 'EQUIPAMENTO') {
+              if (unidadeSugestao === 'un') unidadeSugestao = 'h';
+              tipoSugestao = 'Equipamento';
+            }
+
+            itens.push({
+              parent_codigo: currentComp.codigo,
+              child_codigo: codeClean,
+              tipo_item: isSubComp ? 'COMPOSICAO' : 'INSUMO',
+              coeficiente: coef,
+              perda_percentual: 0,
+              descricao_sugestao: desc,
+              unidade_sugestao: unidadeSugestao,
+              tipo_sugestao: tipoSugestao,
+              preco_unitario: precoUnit
+            });
           }
         }
       }

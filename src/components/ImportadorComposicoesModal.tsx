@@ -299,11 +299,35 @@ export default function ImportadorComposicoesModal({ isOpen, onClose, onSuccess 
       setEtapaTexto('Etapa 1/5: Importando cabeçalhos de composições...');
       setProgresso(5);
 
+      // Deduplica composições por código e fonte para evitar erro de ON CONFLICT DO UPDATE em lote no PostgreSQL
+      const uniqueComposicoesMap = new Map<string, ParsedComposition>();
+      composicoes.forEach(c => {
+        const codigoTrim = c.codigo ? String(c.codigo).trim() : '';
+        if (!codigoTrim) return;
+        const key = `${codigoTrim}::${(c.fonte || fonteFinal).trim()}`;
+        if (!uniqueComposicoesMap.has(key)) {
+          uniqueComposicoesMap.set(key, { ...c, codigo: codigoTrim });
+        } else {
+          const existing = uniqueComposicoesMap.get(key)!;
+          uniqueComposicoesMap.set(key, {
+            ...existing,
+            ...c,
+            codigo: codigoTrim,
+            descricao: c.descricao || existing.descricao,
+            unidade: c.unidade || existing.unidade,
+            custo_sem_desoneracao: c.custo_sem_desoneracao ?? existing.custo_sem_desoneracao,
+            custo_desonerado: c.custo_desonerado ?? existing.custo_desonerado,
+            custo_sem_encargos: c.custo_sem_encargos ?? existing.custo_sem_encargos,
+          });
+        }
+      });
+      const composicoesUnicas = Array.from(uniqueComposicoesMap.values());
+
       const compBatchSize = 200;
       const compCodesToIdMap = new Map<string, string>();
 
-      for (let i = 0; i < composicoes.length; i += compBatchSize) {
-        const batch = composicoes.slice(i, i + compBatchSize).map(c => ({
+      for (let i = 0; i < composicoesUnicas.length; i += compBatchSize) {
+        const batch = composicoesUnicas.slice(i, i + compBatchSize).map(c => ({
           codigo: c.codigo,
           descricao: c.descricao,
           unidade: c.unidade,
@@ -332,7 +356,7 @@ export default function ImportadorComposicoesModal({ isOpen, onClose, onSuccess 
           data.forEach((r: any) => compCodesToIdMap.set(r.codigo, r.id));
         }
 
-        const compProg = Math.min(40, Math.round(((i + batch.length) / composicoes.length) * 40));
+        const compProg = Math.min(40, Math.round(((i + batch.length) / composicoesUnicas.length) * 40));
         setProgresso(compProg);
       }
 

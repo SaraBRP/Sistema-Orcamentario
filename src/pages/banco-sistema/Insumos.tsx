@@ -212,12 +212,14 @@ export default function BancoSistemaInsumos() {
           setBancoFiltro(final[0]);
         } else if (final.length === 0) {
           setBancoFiltro('');
+          setLoading(false);
         }
-      } else if (error) {
-        console.warn('View v_fontes_preco não encontrada ou erro na busca:', error.message);
+      } else {
+        setLoading(false);
       }
     } catch (err) {
       console.error('Erro ao buscar fontes da view:', err);
+      setLoading(false);
     }
   };
 
@@ -267,6 +269,12 @@ export default function BancoSistemaInsumos() {
   }, [bancoFiltro, page, debouncedSearch, filtroEstado, filtroTipo, sortColumn, sortOrder]);
 
   const fetchInsumos = async () => {
+    if (!bancoFiltro) {
+      setInsumos([]);
+      setTotalCount(0);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     try {
       let query = supabase

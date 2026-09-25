@@ -208,10 +208,14 @@ export default function BancoSistemaComposicoes() {
           setBancoFiltro(final[0]);
         } else if (final.length === 0) {
           setBancoFiltro('');
+          setLoading(false);
         }
+      } else {
+        setLoading(false);
       }
     } catch (err) {
       console.error('Erro ao carregar fontes de composição:', err);
+      setLoading(false);
     }
   };
 
@@ -254,6 +258,10 @@ export default function BancoSistemaComposicoes() {
   useEffect(() => {
     if (bancoFiltro) {
       fetchComposicoes();
+    } else {
+      setComposicoes([]);
+      setTotalCount(0);
+      setLoading(false);
     }
   }, [bancoFiltro, page, debouncedSearch, categoriaFiltro, sortField, sortDirection]);
 

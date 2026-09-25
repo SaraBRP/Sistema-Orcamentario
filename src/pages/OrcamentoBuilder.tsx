@@ -1982,7 +1982,8 @@ export default function OrcamentoBuilder() {
               descricao: '',
               cliente: foundLocal.cliente || '',
               projeto: foundLocal.nome || '',
-              status: foundLocal.status || 'Em Elaboração'
+              status: foundLocal.status || 'Em Elaboração',
+              orcamento_importado_id: foundLocal.orcamento_importado_id || undefined
             };
           }
         } catch (e) {}
@@ -1992,6 +1993,76 @@ export default function OrcamentoBuilder() {
         alert('Este orçamento não foi encontrado ou foi excluído.');
         navigate('/orcamentos/calculos');
         return;
+      }
+
+      // Tenta resolver orcamento_importado_id se não veio diretamente do banco
+      let effectiveImportId = orcData.orcamento_importado_id || (id ? localStorage.getItem(`orcamento_import_id_${id}`) : null);
+
+      if (!effectiveImportId && id) {
+        try {
+          const savedOrcs = JSON.parse(localStorage.getItem('brp_orcamentos_list') || '[]');
+          const matchLocal = savedOrcs.find((o: any) => String(o.id) === String(id));
+          if (matchLocal && matchLocal.orcamento_importado_id) {
+            effectiveImportId = matchLocal.orcamento_importado_id;
+          }
+        } catch (e) {}
+      }
+
+      if (!effectiveImportId && id) {
+        try {
+          for (let k = 0; k < localStorage.length; k++) {
+            const key = localStorage.key(k);
+            if (key && key.startsWith('orcamento_importado_linked_')) {
+              const impId = key.replace('orcamento_importado_linked_', '');
+              const linkedData = JSON.parse(localStorage.getItem(key) || '{}');
+              if (linkedData && String(linkedData.id) === String(id)) {
+                effectiveImportId = impId;
+                break;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (!effectiveImportId && (orcData.projeto || orcData.nome)) {
+        try {
+          const pName = (orcData.projeto || orcData.nome || '').trim().toLowerCase();
+          const localImports = JSON.parse(localStorage.getItem('brp_orcamentos_importados_locais') || '[]');
+          const matchImp = localImports.find((imp: any) => 
+            (imp.projeto && imp.projeto.trim().toLowerCase() === pName) ||
+            (imp.nome_arquivo && imp.nome_arquivo.trim().toLowerCase() === pName)
+          );
+          if (matchImp && matchImp.id) {
+            effectiveImportId = matchImp.id;
+          }
+        } catch (e) {}
+      }
+
+      if (!effectiveImportId && (orcData.projeto || orcData.nome)) {
+        try {
+          const pName = (orcData.projeto || orcData.nome || '').trim().toLowerCase();
+          const { data: dbImports } = await supabase
+            .schema('engenharia')
+            .from('orcamentos_importados')
+            .select('id, projeto, nome_arquivo');
+
+          if (dbImports && dbImports.length > 0) {
+            const matchImp = dbImports.find((imp: any) => 
+              (imp.projeto && imp.projeto.trim().toLowerCase() === pName) ||
+              (imp.nome_arquivo && imp.nome_arquivo.trim().toLowerCase() === pName)
+            );
+            if (matchImp && matchImp.id) {
+              effectiveImportId = matchImp.id;
+            }
+          }
+        } catch (e) {}
+      }
+
+      if (effectiveImportId) {
+        orcData.orcamento_importado_id = effectiveImportId;
+        if (id) {
+          try { localStorage.setItem(`orcamento_import_id_${id}`, effectiveImportId); } catch (e) {}
+        }
       }
 
       const localObs = id ? localStorage.getItem(`orcamento_obs_gestor_${id}`) : null;
@@ -2806,189 +2877,223 @@ export default function OrcamentoBuilder() {
         ? { items: rawDC, equipe_config: { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap } }
         : { ...(typeof rawDC === 'object' ? rawDC : {}), equipe_config: { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap } };
 
-      // 1. Atualizar cabeçalho se houver mudanças nas configs/BDI
-      const { error: orcError } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .update({
-          nome: configData.nome,
-          descricao: configData.descricao,
-          cliente: configData.cliente,
-          projeto: configData.projeto,
-          gestor_cliente: configData.gestor_cliente,
-          status: configData.status,
-          dados_complementares: updatedDCPayload,
-          bdi_ac: configData.bdi_ac / 100,
-          bdi_s: configData.bdi_s / 100,
-          bdi_g: configData.bdi_g / 100,
-          bdi_r: configData.bdi_r / 100,
-          bdi_df: configData.bdi_df / 100,
-          bdi_l: configData.bdi_l / 100,
-          bdi_i: configData.bdi_i / 100
-        })
-        .eq('id', id);
+      const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
 
-      if (orcError) throw orcError;
+      // 1. Atualizar cabeçalho se houver mudanças nas configs/BDI (somente se for UUID válido)
+      if (id && isUUID(id)) {
+        try {
+          const { error: orcError } = await supabase
+            .schema('engenharia')
+            .from('orcamentos')
+            .update({
+              nome: configData.nome,
+              descricao: configData.descricao,
+              cliente: configData.cliente,
+              projeto: configData.projeto,
+              gestor_cliente: configData.gestor_cliente,
+              status: configData.status,
+              dados_complementares: updatedDCPayload,
+              bdi_ac: configData.bdi_ac / 100,
+              bdi_s: configData.bdi_s / 100,
+              bdi_g: configData.bdi_g / 100,
+              bdi_r: configData.bdi_r / 100,
+              bdi_df: configData.bdi_df / 100,
+              bdi_l: configData.bdi_l / 100,
+              bdi_i: configData.bdi_i / 100
+            })
+            .eq('id', id);
+
+          if (orcError) {
+            console.warn('Erro ao atualizar cabeçalho em engenharia.orcamentos:', orcError);
+            await supabase
+              .from('orcamentos')
+              .update({
+                nome: configData.nome,
+                descricao: configData.descricao,
+                cliente: configData.cliente,
+                projeto: configData.projeto,
+                gestor_cliente: configData.gestor_cliente,
+                status: configData.status,
+                dados_complementares: updatedDCPayload,
+                bdi_ac: configData.bdi_ac / 100,
+                bdi_s: configData.bdi_s / 100,
+                bdi_g: configData.bdi_g / 100,
+                bdi_r: configData.bdi_r / 100,
+                bdi_df: configData.bdi_df / 100,
+                bdi_l: configData.bdi_l / 100,
+                bdi_i: configData.bdi_i / 100
+              })
+              .eq('id', id);
+          }
+        } catch (e) {
+          console.warn('Erro ao salvar cabeçalho no DB:', e);
+        }
+      }
 
       // 2. Deletar itens removidos
-      if (removedItemIds.length > 0) {
-        const { error: deleteError } = await supabase
-          .schema('engenharia')
-          .from('orcamento_itens')
-          .delete()
-          .in('id', removedItemIds);
-        if (deleteError) throw deleteError;
-        setRemovedItemIds([]);
+      if (removedItemIds.length > 0 && id && isUUID(id)) {
+        try {
+          const validRemoveIds = removedItemIds.filter(isUUID);
+          if (validRemoveIds.length > 0) {
+            await supabase
+              .schema('engenharia')
+              .from('orcamento_itens')
+              .delete()
+              .in('id', validRemoveIds);
+          }
+          setRemovedItemIds([]);
+        } catch (e) {
+          console.warn('Erro ao deletar itens removidos no DB:', e);
+        }
       }
 
       // 2.5 Sincronizar com a planilha do cliente (orcamento_importado_itens)
-      if (orcamento && orcamento.orcamento_importado_id) {
+      if (orcamento && orcamento.orcamento_importado_id && isUUID(orcamento.orcamento_importado_id)) {
         const importId = orcamento.orcamento_importado_id;
 
-        const { data: importRows, error: fetchImportError } = await supabase
-          .schema('engenharia')
-          .from('orcamento_importado_itens')
-          .select('*')
-          .eq('orcamento_importado_id', importId);
-
-        if (fetchImportError) throw fetchImportError;
-
-        const importRowsMap = new Map<string, any>();
-        if (importRows) {
-          importRows.forEach((r: any) => {
-            importRowsMap.set(r.item_eap, r);
-          });
-        }
-
-        const budgetItemsToSync = computedItens.filter(item => {
-          const hasValues = (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '';
-          if (!hasValues) return false;
-          const idx = itens.findIndex(x => x.id === item.id);
-          const isChild = idx !== -1 ? isChildOfComposition(idx, itens) : false;
-          
-          let parentIsLinked = false;
-          if (isChild && item.item_eap.includes('.')) {
-            const parts = item.item_eap.split('.');
-            const parentEap = parts.slice(0, -1).join('.');
-            const parentItem = computedItens.find(x => x.item_eap === parentEap);
-            if (parentItem && parentItem.composicao_id) {
-              parentIsLinked = true;
-            }
-          }
-
-          const existsInClient = importRowsMap.has(item.item_eap);
-          return !isChild || existsInClient || parentIsLinked;
-        });
-
-        const importItemsToUpsert: any[] = [];
-        const importEapsToKeep = new Set<string>();
-
-        const insumoCodigos = budgetItemsToSync
-          .filter(item => item.codigo && !item.composicao_id)
-          .map(item => item.codigo);
-
-        const insumoMap: Record<string, string> = {};
-        if (insumoCodigos.length > 0) {
-          const { data: insumosDB } = await supabase
+        try {
+          const { data: importRows } = await supabase
             .schema('engenharia')
-            .from('insumos')
-            .select('id, codigo')
-            .in('codigo', insumoCodigos);
-          if (insumosDB) {
-            insumosDB.forEach(i => {
-              insumoMap[i.codigo] = i.id;
+            .from('orcamento_importado_itens')
+            .select('*')
+            .eq('orcamento_importado_id', importId);
+
+          const importRowsMap = new Map<string, any>();
+          if (importRows) {
+            importRows.forEach((r: any) => {
+              importRowsMap.set(r.item_eap, r);
             });
           }
-        }
 
-        const usedImportIds = new Set<string>();
+          const budgetItemsToSync = computedItens.filter(item => {
+            const hasValues = (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '';
+            if (!hasValues) return false;
+            const idx = itens.findIndex(x => x.id === item.id);
+            const isChild = idx !== -1 ? isChildOfComposition(idx, itens) : false;
+            
+            let parentIsLinked = false;
+            if (isChild && item.item_eap.includes('.')) {
+              const parts = item.item_eap.split('.');
+              const parentEap = parts.slice(0, -1).join('.');
+              const parentItem = computedItens.find(x => x.item_eap === parentEap);
+              if (parentItem && parentItem.composicao_id) {
+                parentIsLinked = true;
+              }
+            }
 
-        for (const bItem of budgetItemsToSync) {
-          const existingImportRow = importRowsMap.get(bItem.item_eap);
-          importEapsToKeep.add(bItem.item_eap);
+            const existsInClient = importRowsMap.has(item.item_eap);
+            return !isChild || existsInClient || parentIsLinked;
+          });
 
-          const insumoId = bItem.codigo && !bItem.composicao_id ? (insumoMap[bItem.codigo] || null) : null;
-          const tipoVinculo = bItem.codigo ? (bItem.composicao_id ? 'composicao' : 'insumo') : 'texto';
+          const importItemsToUpsert: any[] = [];
+          const importEapsToKeep = new Set<string>();
 
-          const payload: any = {
-            orcamento_importado_id: importId,
-            item_eap: bItem.item_eap,
-            descricao: existingImportRow ? existingImportRow.descricao : bItem.descricao,
-            unidade: existingImportRow ? existingImportRow.unidade : (bItem.isSummary ? '' : bItem.unidade),
-            quantidade: existingImportRow ? existingImportRow.quantidade : (bItem.isSummary ? 0 : bItem.quantidade),
-            valor_unitario_empresa: bItem.isSummary ? 0 : bItem.valor_unitario,
-            total_empresa: bItem.total,
-            tipo_vinculo: tipoVinculo,
-            composicao_id: bItem.composicao_id || null,
-            insumo_id: insumoId,
-            status_linha: existingImportRow?.status_linha || 'inserido_empresa'
-          };
+          const insumoCodigos = budgetItemsToSync
+            .filter(item => item.codigo && !item.composicao_id)
+            .map(item => item.codigo);
 
-          if (existingImportRow && !usedImportIds.has(existingImportRow.id)) {
-            payload.id = existingImportRow.id;
-            payload.valor_unitario_orig = existingImportRow.valor_unitario_orig;
-            payload.total_orig = existingImportRow.total_orig;
-            usedImportIds.add(existingImportRow.id);
-          } else {
-            payload.id = (typeof crypto !== 'undefined' && crypto.randomUUID)
-              ? crypto.randomUUID()
-              : `inserted-imp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-            payload.valor_unitario_orig = 0;
-            payload.total_orig = 0;
-          }
-
-          importItemsToUpsert.push(payload);
-        }
-
-        if (importItemsToUpsert.length > 0) {
-          const { error: upsertImportError } = await supabase
-            .schema('engenharia')
-            .from('orcamento_importado_itens')
-            .upsert(importItemsToUpsert);
-          if (upsertImportError) {
-            console.warn('Erro ao sincronizar orcamento_importado_itens no schema engenharia, tentando fallback public:', upsertImportError);
-            const { error: pubErr } = await supabase
-              .from('orcamento_importado_itens')
-              .upsert(importItemsToUpsert);
-            if (pubErr) throw upsertImportError;
-          }
-        }
-
-        const importRowsToDelete: string[] = [];
-        const importRowsToUnlink: string[] = [];
-
-        importRowsMap.forEach((row, eap) => {
-          if (!importEapsToKeep.has(eap)) {
-            if (row.status_linha === 'inserido_empresa' || row.status_linha === 'desdobrado') {
-              importRowsToDelete.push(row.id);
-            } else {
-              importRowsToUnlink.push(row.id);
+          const insumoMap: Record<string, string> = {};
+          if (insumoCodigos.length > 0) {
+            const { data: insumosDB } = await supabase
+              .schema('engenharia')
+              .from('insumos')
+              .select('id, codigo')
+              .in('codigo', insumoCodigos);
+            if (insumosDB) {
+              insumosDB.forEach(i => {
+                insumoMap[i.codigo] = i.id;
+              });
             }
           }
-        });
 
-        if (importRowsToDelete.length > 0) {
-          const { error: deleteImportError } = await supabase
-            .schema('engenharia')
-            .from('orcamento_importado_itens')
-            .delete()
-            .in('id', importRowsToDelete);
-          if (deleteImportError) throw deleteImportError;
-        }
+          const usedImportIds = new Set<string>();
 
-        if (importRowsToUnlink.length > 0) {
-          const { error: unlinkImportError } = await supabase
-            .schema('engenharia')
-            .from('orcamento_importado_itens')
-            .update({
-              composicao_id: null,
-              insumo_id: null,
-              tipo_vinculo: null,
-              valor_unitario_empresa: 0,
-              total_empresa: 0
-            })
-            .in('id', importRowsToUnlink);
-          if (unlinkImportError) throw unlinkImportError;
+          for (const bItem of budgetItemsToSync) {
+            const existingImportRow = importRowsMap.get(bItem.item_eap);
+            importEapsToKeep.add(bItem.item_eap);
+
+            const insumoId = bItem.codigo && !bItem.composicao_id ? (insumoMap[bItem.codigo] || null) : null;
+            const tipoVinculo = bItem.codigo ? (bItem.composicao_id ? 'composicao' : 'insumo') : 'texto';
+
+            const payload: any = {
+              orcamento_importado_id: importId,
+              item_eap: bItem.item_eap,
+              descricao: existingImportRow ? existingImportRow.descricao : bItem.descricao,
+              unidade: existingImportRow ? existingImportRow.unidade : (bItem.isSummary ? '' : bItem.unidade),
+              quantidade: existingImportRow ? existingImportRow.quantidade : (bItem.isSummary ? 0 : bItem.quantidade),
+              valor_unitario_empresa: bItem.isSummary ? 0 : bItem.valor_unitario,
+              total_empresa: bItem.total,
+              tipo_vinculo: tipoVinculo,
+              composicao_id: bItem.composicao_id || null,
+              insumo_id: insumoId,
+              status_linha: existingImportRow?.status_linha || 'inserido_empresa'
+            };
+
+            if (existingImportRow && !usedImportIds.has(existingImportRow.id)) {
+              payload.id = existingImportRow.id;
+              payload.valor_unitario_orig = existingImportRow.valor_unitario_orig;
+              payload.total_orig = existingImportRow.total_orig;
+              usedImportIds.add(existingImportRow.id);
+            } else {
+              payload.id = (typeof crypto !== 'undefined' && crypto.randomUUID)
+                ? crypto.randomUUID()
+                : `inserted-imp-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+              payload.valor_unitario_orig = 0;
+              payload.total_orig = 0;
+            }
+
+            importItemsToUpsert.push(payload);
+          }
+
+          if (importItemsToUpsert.length > 0) {
+            const { error: upsertImportError } = await supabase
+              .schema('engenharia')
+              .from('orcamento_importado_itens')
+              .upsert(importItemsToUpsert);
+            if (upsertImportError) {
+              console.warn('Erro ao sincronizar orcamento_importado_itens no schema engenharia, tentando fallback public:', upsertImportError);
+              await supabase
+                .from('orcamento_importado_itens')
+                .upsert(importItemsToUpsert);
+            }
+          }
+
+          const importRowsToDelete: string[] = [];
+          const importRowsToUnlink: string[] = [];
+
+          importRowsMap.forEach((row, eap) => {
+            if (!importEapsToKeep.has(eap)) {
+              if (row.status_linha === 'inserido_empresa' || row.status_linha === 'desdobrado') {
+                importRowsToDelete.push(row.id);
+              } else {
+                importRowsToUnlink.push(row.id);
+              }
+            }
+          });
+
+          if (importRowsToDelete.length > 0) {
+            await supabase
+              .schema('engenharia')
+              .from('orcamento_importado_itens')
+              .delete()
+              .in('id', importRowsToDelete);
+          }
+
+          if (importRowsToUnlink.length > 0) {
+            await supabase
+              .schema('engenharia')
+              .from('orcamento_importado_itens')
+              .update({
+                composicao_id: null,
+                insumo_id: null,
+                tipo_vinculo: null,
+                valor_unitario_empresa: 0,
+                total_empresa: 0
+              })
+              .in('id', importRowsToUnlink);
+          }
+        } catch (e) {
+          console.warn('Erro ao sincronizar planilha do cliente no DB:', e);
         }
       }
 
@@ -2998,12 +3103,17 @@ export default function OrcamentoBuilder() {
 
       const { cleanList: cleanComputedItens, deletedIds: extraDeletedIds } = deduplicateBudgetItems(computedItens);
 
-      if (extraDeletedIds.length > 0) {
-        await supabase
-          .schema('engenharia')
-          .from('orcamento_itens')
-          .delete()
-          .in('id', extraDeletedIds);
+      if (extraDeletedIds.length > 0 && id && isUUID(id)) {
+        try {
+          const validExtraDeletedIds = extraDeletedIds.filter(isUUID);
+          if (validExtraDeletedIds.length > 0) {
+            await supabase
+              .schema('engenharia')
+              .from('orcamento_itens')
+              .delete()
+              .in('id', validExtraDeletedIds);
+          }
+        } catch (e) {}
       }
 
       cleanComputedItens
@@ -3040,9 +3150,7 @@ export default function OrcamentoBuilder() {
                       : []))
           };
 
-          const isValidUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
-
-          if (item.id && isValidUUID(item.id)) {
+          if (item.id && isUUID(item.id)) {
             payload.id = item.id;
             itemsToUpdate.push(payload);
           } else {
@@ -3050,30 +3158,52 @@ export default function OrcamentoBuilder() {
           }
         });
 
-      if (itemsToUpdate.length > 0) {
-        const { error: upsertError } = await supabase
-          .schema('engenharia')
-          .from('orcamento_itens')
-          .upsert(itemsToUpdate);
+      if (id && isUUID(id)) {
+        if (itemsToUpdate.length > 0) {
+          try {
+            const { error: upsertError } = await supabase
+              .schema('engenharia')
+              .from('orcamento_itens')
+              .upsert(itemsToUpdate);
 
-        if (upsertError) throw upsertError;
-      }
+            if (upsertError) {
+              await supabase.from('orcamento_itens').upsert(itemsToUpdate);
+            }
+          } catch (e) {
+            console.warn('Erro ao atualizar itens no DB:', e);
+          }
+        }
 
-      if (itemsToInsert.length > 0) {
-        const { data: insertedData, error: insertError } = await supabase
-          .schema('engenharia')
-          .from('orcamento_itens')
-          .insert(itemsToInsert)
-          .select('id, item_eap');
+        if (itemsToInsert.length > 0) {
+          try {
+            const { data: insertedData, error: insertError } = await supabase
+              .schema('engenharia')
+              .from('orcamento_itens')
+              .insert(itemsToInsert)
+              .select('id, item_eap');
 
-        if (insertError) throw insertError;
-
-        if (insertedData && insertedData.length > 0) {
-          const insertedMap = new Map(insertedData.map((d: any) => [d.item_eap, d.id]));
-          setItens(prev => prev.map(item => {
-            const newId = insertedMap.get(item.item_eap);
-            return newId ? { ...item, id: newId } : item;
-          }));
+            if (insertError) {
+              const { data: pubInserted } = await supabase
+                .from('orcamento_itens')
+                .insert(itemsToInsert)
+                .select('id, item_eap');
+              if (pubInserted && pubInserted.length > 0) {
+                const insertedMap = new Map(pubInserted.map((d: any) => [d.item_eap, d.id]));
+                setItens(prev => prev.map(item => {
+                  const newId = insertedMap.get(item.item_eap);
+                  return newId ? { ...item, id: newId } : item;
+                }));
+              }
+            } else if (insertedData && insertedData.length > 0) {
+              const insertedMap = new Map(insertedData.map((d: any) => [d.item_eap, d.id]));
+              setItens(prev => prev.map(item => {
+                const newId = insertedMap.get(item.item_eap);
+                return newId ? { ...item, id: newId } : item;
+              }));
+            }
+          } catch (e) {
+            console.warn('Erro ao inserir novos itens no DB:', e);
+          }
         }
       }
 
@@ -3545,12 +3675,13 @@ export default function OrcamentoBuilder() {
 
               {orcamento?.orcamento_importado_id && (
                 <button
+                  type="button"
                   onClick={() => navigate(`/orcamentos/depara/${orcamento.orcamento_importado_id}`)}
-                  className="bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold px-2 py-0.5 rounded border border-purple-100 text-[10px] cursor-pointer flex items-center gap-1 transition-all shrink-0"
-                  title="Acessar a planilha importada original e o Studio De-Para"
+                  className="bg-purple-100 hover:bg-purple-200 text-purple-800 font-bold px-2.5 py-1 rounded-lg border border-purple-200 text-[11px] cursor-pointer flex items-center gap-1.5 transition-all shrink-0 shadow-2xs hover:scale-[1.02]"
+                  title="Acessar o Studio De-Para e a Planilha Importada do Cliente"
                 >
-                  <FileSpreadsheet className="w-3 h-3 text-purple-600" />
-                  <span>Ver Importada</span>
+                  <FileSpreadsheet className="w-3.5 h-3.5 text-purple-700" />
+                  <span>Planilha do Cliente (De-Para)</span>
                 </button>
               )}
             </div>

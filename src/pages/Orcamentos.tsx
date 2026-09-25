@@ -466,14 +466,37 @@ export default function Orcamentos() {
   const fetchOrcamentos = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .select('*')
-        .order('created_at', { ascending: false });
-        
-      if (error) throw error;
-      const formatted = (data || []).map((o: any) => {
+      let dbOrcs: any[] = [];
+      try {
+        const { data, error } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .select('*')
+          .order('created_at', { ascending: false });
+
+        if (!error && data) {
+          dbOrcs = data;
+        }
+      } catch (e) {}
+
+      // Busca e mescla com os orçamentos salvos no LocalStorage
+      const savedOrcsStr = localStorage.getItem('brp_orcamentos_list') || '[]';
+      let localOrcs: any[] = [];
+      try { localOrcs = JSON.parse(savedOrcsStr); } catch (e) {}
+
+      const combinedMap = new Map<string, any>();
+      dbOrcs.forEach((o: any) => combinedMap.set(String(o.id), o));
+      localOrcs.forEach((o: any) => {
+        if (!combinedMap.has(String(o.id))) {
+          combinedMap.set(String(o.id), o);
+        }
+      });
+
+      const allOrcs = Array.from(combinedMap.values()).sort((a: any, b: any) => 
+        new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
+      );
+
+      const formatted = allOrcs.map((o: any) => {
         const savedEmp = localStorage.getItem(`orcamento_empresa_${o.id}`);
         return {
           ...o,
@@ -621,31 +644,85 @@ export default function Orcamentos() {
 
       setImportadosStats(stats);
 
-      // Busca quais planilhas importadas já geraram um Orçamento Nativo da Empresa
-      const { data: createdOrcs } = await supabase
-        .schema('engenharia')
-        .from('orcamentos')
-        .select('*')
-        .not('orcamento_importado_id', 'is', null);
+      // Busca quais planilhas importadas já geraram um Orçamento Nativo da Empresa (LocalStorage + Supabase)
+      const createdMap: Record<string, any> = {};
 
-      if (createdOrcs) {
-        const map: Record<string, any> = {};
-        createdOrcs.forEach((o: any) => {
-          const impId = o.orcamento_importado_id;
-          if (impId) {
-            if (!map[impId]) {
-              map[impId] = o;
-            } else {
-              const existingRev = parseInt(map[impId].revisao || '0', 10);
-              const currentRev = parseInt(o.revisao || '0', 10);
-              if (currentRev > existingRev || (currentRev === existingRev && new Date(o.created_at || 0) > new Date(map[impId].created_at || 0))) {
-                map[impId] = o;
-              }
-            }
+      try {
+        const savedOrcsStr = localStorage.getItem('brp_orcamentos_list') || '[]';
+        const localOrcs: any[] = JSON.parse(savedOrcsStr);
+        localOrcs.forEach((o: any) => {
+          if (o.orcamento_importado_id) {
+            createdMap[o.orcamento_importado_id] = o;
           }
         });
-        setCreatedImportadosMap(map);
-      }
+      } catch (e) {}
+
+      list.forEach((imp: any) => {
+        try {
+          const linkedStr = localStorage.getItem(`orcamento_importado_linked_${imp.id}`);
+          if (linkedStr) {
+            const parsed = JSON.parse(linkedStr);
+            if (parsed && parsed.id) {
+              createdMap[imp.id] = parsed;
+            }
+          }
+        } catch (e) {}
+      });
+
+      try {
+        const { data: createdOrcs } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .select('*');
+
+        if (createdOrcs) {
+          createdOrcs.forEach((o: any) => {
+            if (o.orcamento_importado_id) {
+              createdMap[o.orcamento_importado_id] = o;
+            } else {
+              const matchedImp = list.find((imp: any) => 
+                (imp.projeto && o.nome && imp.projeto.trim().toLowerCase() === o.nome.trim().toLowerCase()) ||
+                (imp.nome_arquivo && o.nome && imp.nome_arquivo.trim().toLowerCase() === o.nome.trim().toLowerCase())
+              );
+              if (matchedImp && !createdMap[matchedImp.id]) {
+                createdMap[matchedImp.id] = o;
+              }
+            }
+          });
+        }
+      } catch (e) {}
+
+      // Valida se o orçamento gerado REALMENTE existe na lista de orçamentos ativos (em DB ou LocalStorage)
+      const savedOrcsStr = localStorage.getItem('brp_orcamentos_list') || '[]';
+      let activeOrcs: any[] = [];
+      try { activeOrcs = JSON.parse(savedOrcsStr); } catch (e) {}
+
+      try {
+        const { data: dbAllOrcs } = await supabase
+          .schema('engenharia')
+          .from('orcamentos')
+          .select('id, codigo, nome');
+        if (dbAllOrcs) {
+          dbAllOrcs.forEach(o => {
+            if (!activeOrcs.some(a => String(a.id) === String(o.id))) {
+              activeOrcs.push(o);
+            }
+          });
+        }
+      } catch (e) {}
+
+      const validCreatedMap: Record<string, any> = {};
+      Object.keys(createdMap).forEach(impId => {
+        const candidate = createdMap[impId];
+        if (candidate && candidate.id) {
+          const exists = activeOrcs.some(a => String(a.id) === String(candidate.id));
+          if (exists) {
+            validCreatedMap[impId] = candidate;
+          }
+        }
+      });
+
+      setCreatedImportadosMap(validCreatedMap);
     } catch (err) {
       console.error('Erro ao buscar orçamentos importados:', err);
     }
@@ -974,10 +1051,25 @@ export default function Orcamentos() {
         localStorage.removeItem(`orcamento_header_${idDel}`);
         localStorage.removeItem(`orcamento_dados_comp_${idDel}`);
         localStorage.removeItem(`brp_orcamento_itens_${idDel}`);
+        localStorage.removeItem(`orcamento_import_id_${idDel}`);
       });
 
+      // Remove links de orcamento_importado_linked_<importId> no LocalStorage
+      try {
+        for (let k = localStorage.length - 1; k >= 0; k--) {
+          const key = localStorage.key(k);
+          if (key && key.startsWith('orcamento_importado_linked_')) {
+            const linkedData = JSON.parse(localStorage.getItem(key) || '{}');
+            if (linkedData && idsToDelete.includes(String(linkedData.id))) {
+              localStorage.removeItem(key);
+            }
+          }
+        }
+      } catch (e) {}
+
       setDeleteModal(null);
-      fetchOrcamentos();
+      await fetchOrcamentos();
+      await fetchImportados();
     } catch (err: any) {
       console.error(err);
       alert('Erro ao excluir orçamento: ' + (err.message || err));
