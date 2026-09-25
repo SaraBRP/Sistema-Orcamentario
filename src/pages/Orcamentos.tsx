@@ -1678,7 +1678,7 @@ export default function Orcamentos() {
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {filteredImportados.map((imp) => {
-                      const stats = importadosStats[imp.id] || { total: 0, linked: 0, percent: 0 };
+                      const stats: { total: number; linked: number; percent?: number } = importadosStats[imp.id] || { total: 0, linked: 0, percent: 0 };
                       const percent = stats.percent !== undefined ? stats.percent : (stats.total > 0 ? Math.round((stats.linked / stats.total) * 100) : 0);
                       const createdOrc = createdImportadosMap[imp.id];
                       const { label: statusLabel, badgeCls } = getImportadoEffectiveStatusInfo(imp, stats, createdOrc);

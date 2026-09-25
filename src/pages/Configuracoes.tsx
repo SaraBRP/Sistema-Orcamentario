@@ -54,7 +54,7 @@ import {
 } from '../lib/empresas';
 
 type Tab = 'usuarios' | 'permissoes' | 'empresas' | 'clientes';
-type SubTabUsuarios = 'lista' | 'pendentes';
+type SubTabUsuarios = 'lista' | 'pendentes' | 'permissoes';
 
 interface Profile {
   id: string;
