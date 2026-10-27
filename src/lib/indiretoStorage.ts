@@ -219,7 +219,9 @@ export function generateEapItemsFromIndiretos(
   specificGrupoId?: string
 ): any[] {
   const result: any[] = [];
-  const rawGrupos = (config && Array.isArray(config.grupos)) ? config.grupos : [];
+  // Recalcular config para garantir que todos os valorTotal e encargos estejam 100% atualizados
+  const configRecalc = recalculateIndiretoConfig(config);
+  const rawGrupos = (configRecalc && Array.isArray(configRecalc.grupos)) ? configRecalc.grupos : [];
   const grupos = rawGrupos.map((g, idx) => ({ ...g, numero: idx + 1 }));
 
   const gruposParaProcessar = specificGrupoId
@@ -267,9 +269,10 @@ export function generateEapItemsFromIndiretos(
       const isMaoDeObra = grupo.id === 'g1' || grupo.id === 'g11' ||
         grupo.nome.toLowerCase().includes('mão de obra') ||
         grupo.nome.toLowerCase().includes('equipe técnica') ||
-        item.descricao.toLowerCase().includes('engenheiro') ||
-        item.descricao.toLowerCase().includes('técnico') ||
-        item.descricao.toLowerCase().includes('encarregado');
+        (item.descricao || '').toLowerCase().includes('engenheiro') ||
+        (item.descricao || '').toLowerCase().includes('técnico') ||
+        (item.descricao || '').toLowerCase().includes('encarregado') ||
+        (item.descricao || '').toLowerCase().includes('topografo');
       const matTot = isMaoDeObra ? 0 : (item.valorTotal || 0);
       const moTot = isMaoDeObra ? (item.valorTotal || 0) : 0;
 
@@ -283,7 +286,7 @@ export function generateEapItemsFromIndiretos(
     if (mode === 'sintetico') {
       // ── MODO SINTÉTICO: 1 linha única por grupo com valor total ──
       result.push({
-        id: `indireto-sint-${grupo.id}-${orcamentoId}`,
+        id: `indireto-sint__${grupo.id}__${orcamentoId}`,
         orcamento_id: orcamentoId,
         item_eap: subCapEap,
         codigo: `IND-GRP-${grupo.numero}`,
@@ -300,12 +303,13 @@ export function generateEapItemsFromIndiretos(
         total: totalGeralGrupo,
         isSecao: false,
         is_secao: false,
-        level: specificGrupoId ? 0 : 1
+        level: specificGrupoId ? 0 : 1,
+        indireto_grupo_id: grupo.id
       });
     } else {
       // ── MODO DETALHADO: Seção do Grupo + Insumos Filhos ──
       result.push({
-        id: `indireto-subcap-${grupo.id}-${orcamentoId}`,
+        id: `indireto-subcap__${grupo.id}__${orcamentoId}`,
         orcamento_id: orcamentoId,
         item_eap: subCapEap,
         codigo: '',
@@ -322,7 +326,8 @@ export function generateEapItemsFromIndiretos(
         total: totalGeralGrupo,
         isSecao: true,
         is_secao: true,
-        level: specificGrupoId ? 0 : 1
+        level: specificGrupoId ? 0 : 1,
+        indireto_grupo_id: grupo.id
       });
 
       itensGrupo.forEach((item, itemIdx) => {
@@ -336,20 +341,20 @@ export function generateEapItemsFromIndiretos(
           (item.descricao || '').toLowerCase().includes('topografo');
         
         const q = (item.quantidadeTotal && item.quantidadeTotal > 0) ? item.quantidadeTotal : 1;
-        const unitTotal = Math.round(((item.valorTotal || 0) / q) * 100) / 100;
+        const unitTotal = q > 0 ? Math.round(((item.valorTotal || 0) / q) * 100) / 100 : (item.valorTotal || 0);
         const matU = isMaoDeObra ? 0 : unitTotal;
         const moU = isMaoDeObra ? unitTotal : 0;
         const matTot = isMaoDeObra ? 0 : (item.valorTotal || 0);
         const moTot = isMaoDeObra ? (item.valorTotal || 0) : 0;
 
         result.push({
-          id: `indireto-item-${item.id}-${orcamentoId}`,
+          id: `indireto-item__${grupo.id}__${item.id}__${orcamentoId}`,
           orcamento_id: orcamentoId,
           item_eap: itemEap,
           codigo: item.codigo || `IND-${item.id.toUpperCase()}`,
           banco_fonte: 'Própria',
           descricao: item.descricao,
-          unidade: item.unidade,
+          unidade: item.unidade || 'un',
           quantidade: q,
           valor_unitario_mat: matU,
           valor_unitario_mo: moU,
@@ -360,7 +365,9 @@ export function generateEapItemsFromIndiretos(
           total: item.valorTotal || 0,
           isSecao: false,
           is_secao: false,
-          level: specificGrupoId ? 1 : 2
+          level: specificGrupoId ? 1 : 2,
+          indireto_grupo_id: grupo.id,
+          indireto_item_id: item.id
         });
       });
     }
@@ -380,7 +387,8 @@ export function updateSyncedEapItemsWithNewConfig(
 ): any[] {
   if (!currentItens || currentItens.length === 0) return currentItens;
 
-  const rawGrupos = (config && Array.isArray(config.grupos)) ? config.grupos : [];
+  const configRecalc = recalculateIndiretoConfig(config);
+  const rawGrupos = (configRecalc && Array.isArray(configRecalc.grupos)) ? configRecalc.grupos : [];
   if (rawGrupos.length === 0) return currentItens;
   const grupos = rawGrupos.map((g, idx) => ({ ...g, numero: idx + 1 }));
 
@@ -462,6 +470,14 @@ export function updateSyncedEapItemsWithNewConfig(
   let hasChanges = false;
   const matchedItemIds = new Set<string>();
 
+  // Mapa EAP -> Item para pesquisa de hierarquia
+  const eapToItemMap = new Map<string, any>();
+  currentItens.forEach(it => {
+    if (it && it.item_eap) {
+      eapToItemMap.set(String(it.item_eap).trim(), it);
+    }
+  });
+
   // Filtra seções ou itens pertencentes a grupos que foram excluídos dos custos indiretos
   const filteredItens = currentItens.filter(eapItem => {
     if (!eapItem) return false;
@@ -469,15 +485,26 @@ export function updateSyncedEapItemsWithNewConfig(
     const itemDesc = String(eapItem.descricao || '').trim().toLowerCase();
     const itemEap = (eapItem.item_eap || '').trim();
 
-    if (itemIdStr.startsWith('indireto-subcap-') || itemIdStr.startsWith('indireto-sec-g-') || itemIdStr.startsWith('indireto-sint-')) {
-      const match = itemIdStr.match(/^(?:indireto-subcap-|indireto-sec-g-|indireto-sint-)(.+?)-/);
-      const gId = match ? match[1] : null;
-      if (gId && !grupos.some(g => g.id === gId)) return false;
+    // Seções
+    if (
+      itemIdStr.startsWith('indireto-subcap__') ||
+      itemIdStr.startsWith('indireto-sint__') ||
+      itemIdStr.startsWith('indireto-subcap-') || 
+      itemIdStr.startsWith('indireto-sec-g-') || 
+      itemIdStr.startsWith('indireto-sint-')
+    ) {
+      const belongsToAnyGrupo = grupos.some(g => itemIdStr.includes(g.id));
+      if (!belongsToAnyGrupo) return false;
     }
-    if (itemIdStr.startsWith('indireto-det-i-') || itemIdStr.startsWith('indireto-item-')) {
-      const match = itemIdStr.match(/^(?:indireto-det-i-|indireto-item-)(.+?)-/);
-      const iId = match ? match[1] : null;
-      if (iId && !itemByIdMap.has(iId)) return false;
+
+    // Itens
+    if (
+      itemIdStr.startsWith('indireto-item__') ||
+      itemIdStr.startsWith('indireto-det-i-') || 
+      itemIdStr.startsWith('indireto-item-')
+    ) {
+      const belongsToAnyItem = Array.from(itemByIdMap.keys()).some(itId => itemIdStr.includes(itId));
+      if (!belongsToAnyItem) return false;
     }
 
     // Se estiver sob o capítulo de indiretos e for uma seção com descrição que não existe mais em nenhum grupo
@@ -506,6 +533,7 @@ export function updateSyncedEapItemsWithNewConfig(
     const itemCode = String(eapItem.codigo || '').trim().toLowerCase();
     const itemDesc = String(eapItem.descricao || '').trim().toLowerCase();
     const itemEap = (eapItem.item_eap || '').trim();
+    const isSectionItem = Boolean(eapItem.isSecao || (eapItem as any).is_secao || (!eapItem.codigo && (!eapItem.quantidade || eapItem.quantidade === 0)));
 
     // 1. Linha do Capítulo Geral
     if (
@@ -525,12 +553,30 @@ export function updateSyncedEapItemsWithNewConfig(
       };
     }
 
+    // Identifica se este item tem uma seção pai na hierarquia EAP do orçamento
+    let parentGrupoFromHierarchy: IndiretoGrupo | undefined;
+    if (itemEap.includes('.')) {
+      const parentEap = itemEap.split('.').slice(0, -1).join('.');
+      const parentRow = eapToItemMap.get(parentEap);
+      if (parentRow) {
+        const pDesc = String(parentRow.descricao || '').trim().toLowerCase();
+        const pId = String(parentRow.id || '');
+        parentGrupoFromHierarchy = grupos.find(g => 
+          pId.includes(g.id) || g.nome.trim().toLowerCase() === pDesc
+        );
+      }
+    }
+
     // 2. Linha de Seção / Subcapítulo do Grupo
     let matchedGrupoForSection: IndiretoGrupo | undefined;
-    if (itemIdStr.startsWith('indireto-subcap-') || itemIdStr.startsWith('indireto-sec-g-') || itemIdStr.startsWith('indireto-sint-')) {
-      const match = itemIdStr.match(/^(?:indireto-subcap-|indireto-sec-g-|indireto-sint-)(.+?)-/);
-      const gId = match ? match[1] : null;
-      if (gId) matchedGrupoForSection = grupos.find(g => g.id === gId);
+    if (
+      itemIdStr.startsWith('indireto-subcap__') ||
+      itemIdStr.startsWith('indireto-sint__') ||
+      itemIdStr.startsWith('indireto-subcap-') || 
+      itemIdStr.startsWith('indireto-sec-g-') || 
+      itemIdStr.startsWith('indireto-sint-')
+    ) {
+      matchedGrupoForSection = grupos.find(g => itemIdStr.includes(g.id));
     }
 
     if (!matchedGrupoForSection && capEap !== '' && itemEap.startsWith(capEap + '.')) {
@@ -542,13 +588,13 @@ export function updateSyncedEapItemsWithNewConfig(
       }
     }
 
-    if (!matchedGrupoForSection && (eapItem.isSecao || (eapItem as any).is_secao || itemDesc.length > 0)) {
+    if (!matchedGrupoForSection && isSectionItem) {
       matchedGrupoForSection = grupos.find(g => g.nome.trim().toLowerCase() === itemDesc);
     }
 
     if (matchedGrupoForSection) {
       const gTot = grupoTotaisMap.get(matchedGrupoForSection.id) || { mat: 0, mo: 0, total: 0 };
-      const isSintetico = itemIdStr.startsWith('indireto-sint-') || (eapItem.unidade && eapItem.unidade.toLowerCase() === 'verba');
+      const isSintetico = itemIdStr.includes('sint') || (eapItem.unidade && eapItem.unidade.toLowerCase() === 'verba');
       const expectedEap = capEap ? `${capEap}.${matchedGrupoForSection.numero}` : eapItem.item_eap;
       const expectedCodigo = isSintetico ? `IND-GRP-${matchedGrupoForSection.numero}` : (eapItem.codigo || '');
 
@@ -580,18 +626,41 @@ export function updateSyncedEapItemsWithNewConfig(
     }
 
     // 3. Linha de Insumo Filho / Detalhado
+    // Verifica se este item pertence aos Custos Indiretos
+    const isIndiretoId = itemIdStr.startsWith('indireto-');
+    const isUnderChapter = capEap !== '' && itemEap.startsWith(capEap + '.');
+    const belongsToIndiretos = isIndiretoId || isUnderChapter || Boolean(parentGrupoFromHierarchy);
+
+    if (!belongsToIndiretos) {
+      return eapItem; // Item normal de custos diretos, não mexe
+    }
+
     let matchedItemInfo: { item: IndiretoItem; grupo: IndiretoGrupo } | undefined;
 
-    // A. Match direto por ID no prefixo
-    if (itemIdStr.startsWith('indireto-det-i-') || itemIdStr.startsWith('indireto-item-')) {
-      const match = itemIdStr.match(/^(?:indireto-det-i-|indireto-item-)(.+?)-/);
-      const iId = match ? match[1] : null;
-      if (iId && itemByIdMap.has(iId)) {
-        matchedItemInfo = itemByIdMap.get(iId);
+    // A. Match direto por ID no mapa de itens
+    for (const [itId, info] of itemByIdMap.entries()) {
+      if (itemIdStr.includes(itId)) {
+        matchedItemInfo = info;
+        break;
       }
     }
 
-    // B. Match posicional pela hierarquia EAP (ex: cap = 3, item = 3.1.1 -> grupo 1, filho 0)
+    // B. Match priorizando itens dentro da seção pai da hierarquia (ex: se pai é TOPOGRAFIA, busca apenas em TOPOGRAFIA)
+    if (!matchedItemInfo && parentGrupoFromHierarchy) {
+      const activeItens = (parentGrupoFromHierarchy.itens || []).filter(i => i.ativo && i.destino !== 'bdi');
+      // Por código dentro do grupo pai
+      if (itemCode) {
+        const found = activeItens.find(i => i.codigo && i.codigo.trim().toLowerCase() === itemCode && !matchedItemIds.has(i.id));
+        if (found) matchedItemInfo = { item: found, grupo: parentGrupoFromHierarchy };
+      }
+      // Por descrição dentro do grupo pai
+      if (!matchedItemInfo && itemDesc) {
+        const found = activeItens.find(i => i.descricao && i.descricao.trim().toLowerCase() === itemDesc && !matchedItemIds.has(i.id));
+        if (found) matchedItemInfo = { item: found, grupo: parentGrupoFromHierarchy };
+      }
+    }
+
+    // C. Match posicional pela hierarquia EAP (ex: cap = 3, item = 3.1.1 -> grupo 1, filho 0)
     if (!matchedItemInfo && capEap !== '' && itemEap.startsWith(capEap + '.')) {
       const parts = itemEap.split('.').filter(Boolean);
       const capParts = capEap.split('.').filter(Boolean);
@@ -607,7 +676,7 @@ export function updateSyncedEapItemsWithNewConfig(
       }
     }
 
-    // C. Match sequencial por código
+    // D. Match sequencial por código (global)
     if (!matchedItemInfo && itemCode && itemsByCodeQueue.has(itemCode)) {
       const queue = itemsByCodeQueue.get(itemCode)!;
       const candidate = queue.find(q => !matchedItemIds.has(q.item.id));
@@ -616,7 +685,7 @@ export function updateSyncedEapItemsWithNewConfig(
       }
     }
 
-    // D. Match sequencial por descrição
+    // E. Match sequencial por descrição (global)
     if (!matchedItemInfo && itemDesc && itemsByDescQueue.has(itemDesc)) {
       const queue = itemsByDescQueue.get(itemDesc)!;
       const candidate = queue.find(q => !matchedItemIds.has(q.item.id));
@@ -638,7 +707,7 @@ export function updateSyncedEapItemsWithNewConfig(
         (item.descricao || '').toLowerCase().includes('topografo');
 
       const q = (item.quantidadeTotal && item.quantidadeTotal > 0) ? item.quantidadeTotal : 1;
-      const unitTotal = Math.round(((item.valorTotal || 0) / q) * 100) / 100;
+      const unitTotal = q > 0 ? Math.round(((item.valorTotal || 0) / q) * 100) / 100 : (item.valorTotal || 0);
       const matU = isMaoDeObra ? 0 : unitTotal;
       const moU = isMaoDeObra ? unitTotal : 0;
       const matTot = isMaoDeObra ? 0 : (item.valorTotal || 0);
@@ -696,7 +765,7 @@ export function syncEapChangeToIndiretoConfig(
   const itemIdStr = String(modifiedEapItem.id || '');
   const itemEap = (modifiedEapItem.item_eap || '').trim();
 
-  // Encontra o capítulo raiz de indiretos
+  // Encontra o capítulo raiz de indiretos (se existir)
   const chapterItem = (allEapItems || []).find(item => {
     if (!item) return false;
     const idStr = String(item.id || '');
@@ -712,47 +781,68 @@ export function syncEapChangeToIndiretoConfig(
   const isUnderChapter = capEap !== '' && itemEap.startsWith(capEap + '.');
   const isIndiretoId = itemIdStr.startsWith('indireto-');
 
-  if (!isUnderChapter && !isIndiretoId) {
-    return null; // Não é um item de custos indiretos
-  }
-
-  let matchedGrupo: IndiretoGrupo | undefined;
-  let matchedItem: IndiretoItem | undefined;
-
-  // A. Match por ID no prefixo
-  if (itemIdStr.startsWith('indireto-item-') || itemIdStr.startsWith('indireto-det-i-')) {
-    const match = itemIdStr.match(/^(?:indireto-item-|indireto-det-i-)(.+?)-/);
-    const iId = match ? match[1] : null;
-    if (iId) {
-      for (const g of config.grupos) {
-        const found = (g.itens || []).find(it => it.id === iId);
-        if (found) {
-          matchedGrupo = g;
-          matchedItem = found;
-          break;
-        }
-      }
+  // Encontra a seção pai na hierarquia EAP
+  let parentGrupo: IndiretoGrupo | undefined;
+  if (itemEap.includes('.')) {
+    const parentEap = itemEap.split('.').slice(0, -1).join('.');
+    const parentItem = (allEapItems || []).find(it => (it.item_eap || '').trim() === parentEap);
+    if (parentItem) {
+      const pDesc = String(parentItem.descricao || '').trim().toLowerCase();
+      const pId = String(parentItem.id || '');
+      parentGrupo = config.grupos.find(g => 
+        pId.includes(g.id) || g.nome.trim().toLowerCase() === pDesc
+      );
     }
   }
 
-  // B. Match posicional pela hierarquia EAP (ex: cap = 3, item = 3.1.2 -> grupo 1, filho 1)
+  if (!isUnderChapter && !isIndiretoId && !parentGrupo) {
+    return null; // Não é um item de custos indiretos
+  }
+
+  let matchedGrupo: IndiretoGrupo | undefined = parentGrupo;
+  let matchedItem: IndiretoItem | undefined;
+
+  // A. Match por ID no prefixo ou contido no ID
+  for (const g of config.grupos) {
+    const found = (g.itens || []).find(it => 
+      itemIdStr.includes(it.id) || (modifiedEapItem.id && modifiedEapItem.id === it.id)
+    );
+    if (found) {
+      matchedGrupo = g;
+      matchedItem = found;
+      break;
+    }
+  }
+
+  // B. Se tiver parentGrupo, busca primeiro dentro de parentGrupo.itens por código ou descrição
+  if (!matchedItem && matchedGrupo) {
+    const code = String(modifiedEapItem.codigo || '').trim().toLowerCase();
+    const desc = String(modifiedEapItem.descricao || '').trim().toLowerCase();
+    matchedItem = (matchedGrupo.itens || []).find(it => 
+      (code && it.codigo && it.codigo.trim().toLowerCase() === code) ||
+      (desc && it.descricao && it.descricao.trim().toLowerCase() === desc)
+    );
+  }
+
+  // C. Match posicional pela hierarquia EAP (ex: cap = 3, item = 3.1.2 -> grupo 1, filho 1)
   if (!matchedItem && capEap !== '' && itemEap.startsWith(capEap + '.')) {
     const parts = itemEap.split('.').filter(Boolean);
     const capParts = capEap.split('.').filter(Boolean);
     if (parts.length === capParts.length + 2) {
       const groupNum = parseInt(parts[capParts.length], 10);
       const childIdx = parseInt(parts[capParts.length + 1], 10) - 1;
-      matchedGrupo = config.grupos.find(g => g.numero === groupNum);
-      if (matchedGrupo) {
-        const activeItens = (matchedGrupo.itens || []).filter(it => it.ativo && it.destino !== 'bdi');
+      const grp = config.grupos.find(g => g.numero === groupNum);
+      if (grp) {
+        const activeItens = (grp.itens || []).filter(it => it.ativo && it.destino !== 'bdi');
         if (childIdx >= 0 && childIdx < activeItens.length) {
+          matchedGrupo = grp;
           matchedItem = activeItens[childIdx];
         }
       }
     }
   }
 
-  // C. Fallback por código ou descrição
+  // D. Fallback global por código ou descrição
   if (!matchedItem) {
     const code = String(modifiedEapItem.codigo || '').trim().toLowerCase();
     const desc = String(modifiedEapItem.descricao || '').trim().toLowerCase();
@@ -823,4 +913,5 @@ export function syncEapChangeToIndiretoConfig(
 
   return null;
 }
+
 

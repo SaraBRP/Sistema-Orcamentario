@@ -5120,22 +5120,116 @@ export default function OrcamentoBuilder() {
                 const nonBlankRows = prev.filter(i => (i.item_eap && i.item_eap.trim() !== '') || (i.descricao && i.descricao.trim() !== ''));
                 const finalNonBlank = [...nonBlankRows];
 
+                let currentParentSectionIdx = -1;
+
                 novosItensEap.forEach(novoItem => {
-                  const idx = finalNonBlank.findIndex(i => 
-                    i.id === novoItem.id ||
-                    (novoItem.codigo && i.codigo && String(novoItem.codigo).trim().toLowerCase() === String(i.codigo).trim().toLowerCase()) ||
-                    (novoItem.descricao && i.descricao && String(novoItem.descricao).trim().toLowerCase() === String(i.descricao).trim().toLowerCase() && (
-                      Boolean(novoItem.isSecao) === Boolean(i.isSecao || (i as any).is_secao)
-                    ))
-                  );
-                  if (idx >= 0) {
-                    finalNonBlank[idx] = {
-                      ...finalNonBlank[idx],
-                      ...novoItem,
-                      id: finalNonBlank[idx].id
-                    };
+                  const isNovoSecao = Boolean(novoItem.isSecao || (novoItem as any).is_secao || (!novoItem.codigo && (!novoItem.quantidade || novoItem.quantidade === 0)));
+                  const novoDesc = String(novoItem.descricao || '').trim().toLowerCase();
+                  const novoCod = String(novoItem.codigo || '').trim().toLowerCase();
+                  const novoItemId = String(novoItem.id || '');
+                  const rawItemId = (novoItem as any).indireto_item_id || '';
+                  const rawGrupoId = (novoItem as any).indireto_grupo_id || '';
+
+                  let matchedIdx = -1;
+
+                  if (isNovoSecao) {
+                    // Match de seção no orçamento
+                    matchedIdx = finalNonBlank.findIndex(i => {
+                      const isSec = Boolean(i.isSecao || (i as any).is_secao || (!i.codigo && (!i.quantidade || i.quantidade === 0)));
+                      if (!isSec) return false;
+                      const iDesc = String(i.descricao || '').trim().toLowerCase();
+                      const iId = String(i.id || '');
+                      return iId === novoItemId ||
+                        (rawGrupoId && iId.includes(rawGrupoId)) ||
+                        iDesc === novoDesc;
+                    });
+
+                    if (matchedIdx >= 0) {
+                      currentParentSectionIdx = matchedIdx;
+                      finalNonBlank[matchedIdx] = {
+                        ...finalNonBlank[matchedIdx],
+                        ...novoItem,
+                        id: finalNonBlank[matchedIdx].id,
+                        item_eap: finalNonBlank[matchedIdx].item_eap
+                      };
+                    } else {
+                      finalNonBlank.push(novoItem);
+                      currentParentSectionIdx = finalNonBlank.length - 1;
+                    }
                   } else {
-                    finalNonBlank.push(novoItem);
+                    // Item filho / folha
+                    // 1. Procura primeiro dentro dos filhos da seção pai identificada
+                    if (currentParentSectionIdx >= 0) {
+                      for (let k = currentParentSectionIdx + 1; k < finalNonBlank.length; k++) {
+                        const candidate = finalNonBlank[k];
+                        const candSec = Boolean(candidate.isSecao || (candidate as any).is_secao || (!candidate.codigo && (!candidate.quantidade || candidate.quantidade === 0)));
+                        if (candSec) {
+                          // Encontrou a próxima seção
+                          break;
+                        }
+                        const candDesc = String(candidate.descricao || '').trim().toLowerCase();
+                        const candCod = String(candidate.codigo || '').trim().toLowerCase();
+                        const candId = String(candidate.id || '');
+
+                        const idMatch = candId === novoItemId || (rawItemId && candId.includes(rawItemId));
+                        const codMatch = Boolean(novoCod && candCod && novoCod === candCod);
+                        const descMatch = Boolean(novoDesc && candDesc && novoDesc === candDesc);
+
+                        if (idMatch || codMatch || descMatch) {
+                          matchedIdx = k;
+                          break;
+                        }
+                      }
+                    }
+
+                    // 2. Se não encontrou sob a seção atual, busca globalmente
+                    if (matchedIdx === -1) {
+                      matchedIdx = finalNonBlank.findIndex(i => {
+                        const iDesc = String(i.descricao || '').trim().toLowerCase();
+                        const iCod = String(i.codigo || '').trim().toLowerCase();
+                        const iId = String(i.id || '');
+                        const isSec = Boolean(i.isSecao || (i as any).is_secao);
+                        if (isSec) return false;
+                        return iId === novoItemId ||
+                          (rawItemId && iId.includes(rawItemId)) ||
+                          (novoCod && iCod && novoCod === iCod) ||
+                          (novoDesc && iDesc && novoDesc === iDesc);
+                      });
+                    }
+
+                    if (matchedIdx >= 0) {
+                      finalNonBlank[matchedIdx] = {
+                        ...finalNonBlank[matchedIdx],
+                        ...novoItem,
+                        id: finalNonBlank[matchedIdx].id,
+                        item_eap: finalNonBlank[matchedIdx].item_eap,
+                        quantidade: novoItem.quantidade,
+                        valor_unitario_mat: novoItem.valor_unitario_mat,
+                        valor_unitario_mo: novoItem.valor_unitario_mo,
+                        valor_unitario: novoItem.valor_unitario,
+                        valor_unitario_com_bdi: novoItem.valor_unitario_com_bdi,
+                        total_mat: novoItem.total_mat,
+                        total_mo: novoItem.total_mo,
+                        total: novoItem.total,
+                        unidade: novoItem.unidade,
+                        isSecao: false,
+                        is_secao: false
+                      };
+                    } else {
+                      // Se não existe, insere logo após o último filho da seção pai ou no final
+                      if (currentParentSectionIdx >= 0) {
+                        let insertPos = currentParentSectionIdx + 1;
+                        while (insertPos < finalNonBlank.length) {
+                          const cand = finalNonBlank[insertPos];
+                          const isCandSec = Boolean(cand.isSecao || (cand as any).is_secao || (!cand.codigo && (!cand.quantidade || cand.quantidade === 0)));
+                          if (isCandSec) break;
+                          insertPos++;
+                        }
+                        finalNonBlank.splice(insertPos, 0, novoItem);
+                      } else {
+                        finalNonBlank.push(novoItem);
+                      }
+                    }
                   }
                 });
 
