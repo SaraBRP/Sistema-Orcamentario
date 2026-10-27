@@ -2310,10 +2310,13 @@ export default function OrcamentoBuilder() {
       const effectiveResponsavel = localResponsavel || orcData.responsavel || '';
 
       const localDC = id ? localStorage.getItem(`orcamento_dados_comp_${id}`) : null;
-      let effectiveDC = orcData.dadosComplementares || orcData.dados_complementares || [];
+      let rawDC = orcData.dadosComplementares || orcData.dados_complementares || [];
       if (localDC) {
-        try { effectiveDC = JSON.parse(localDC); } catch (e) {}
+        try { rawDC = JSON.parse(localDC); } catch (e) {}
       }
+      const effectiveDC = Array.isArray(rawDC)
+        ? rawDC
+        : (rawDC && typeof rawDC === 'object' && Array.isArray((rawDC as any).items) ? (rawDC as any).items : []);
 
       // Restaura mapeamento da distribuição de equipe do localStorage ou do banco de dados
       const localEquipe = id ? localStorage.getItem(`orcamento_equipe_${id}`) : null;
@@ -3150,6 +3153,9 @@ export default function OrcamentoBuilder() {
       }
 
       const rawDC = orcamento?.dadosComplementares || [];
+      const dcItems = Array.isArray(rawDC)
+        ? rawDC
+        : (rawDC && typeof rawDC === 'object' && Array.isArray((rawDC as any).items) ? (rawDC as any).items : []);
       const cronConfig = { predecessoras: cronogramaPredecessorasMap, dataInicio: cronogramaDataInicio };
       const eqConfig = { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap };
       let indiretoConfig = null;
@@ -3158,9 +3164,12 @@ export default function OrcamentoBuilder() {
         if (rawInd) indiretoConfig = JSON.parse(rawInd);
       } catch (e) {}
 
-      const updatedDCPayload = Array.isArray(rawDC)
-        ? { items: rawDC, equipe_config: eqConfig, cronograma_config: cronConfig, indireto_config: indiretoConfig }
-        : { ...(typeof rawDC === 'object' ? rawDC : {}), equipe_config: eqConfig, cronograma_config: cronConfig, indireto_config: indiretoConfig };
+      const updatedDCPayload = {
+        items: dcItems,
+        equipe_config: eqConfig,
+        cronograma_config: cronConfig,
+        indireto_config: indiretoConfig
+      };
 
       const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
 
@@ -4920,27 +4929,33 @@ export default function OrcamentoBuilder() {
             objeto: '',
             local: '',
             trecho: '',
-            dadosComplementares: orcamento?.dadosComplementares || (orcamento as any)?.dados_complementares || []
+            dadosComplementares: (() => {
+              const dc = orcamento?.dadosComplementares || (orcamento as any)?.dados_complementares;
+              if (Array.isArray(dc)) return dc;
+              if (dc && typeof dc === 'object' && Array.isArray((dc as any).items)) return (dc as any).items;
+              return [];
+            })()
           }}
           onChangeHeader={(newHeader) => {
-            if (orcamento) {
-              const updatedDC = newHeader.dadosComplementares || [];
-              if (id) {
-                localStorage.setItem(`orcamento_dados_comp_${id}`, JSON.stringify(updatedDC));
-              }
-              setOrcamento({
-                ...orcamento,
-                projeto: newHeader.nomeProjeto || orcamento.projeto,
-                nome: newHeader.nomeProjeto || orcamento.nome,
-                cliente: newHeader.cliente,
-                gestor_cliente: newHeader.gestorCliente,
-                responsavel: newHeader.responsavel,
-                cidade: newHeader.cidade,
-                estado: newHeader.estado,
-                dadosComplementares: updatedDC
-              });
-              setHasUnsavedChanges(true);
+            const rawDC = newHeader.dadosComplementares;
+            const updatedDC = Array.isArray(rawDC)
+              ? rawDC
+              : (rawDC && typeof rawDC === 'object' && Array.isArray((rawDC as any).items) ? (rawDC as any).items : []);
+            if (id) {
+              localStorage.setItem(`orcamento_dados_comp_${id}`, JSON.stringify(updatedDC));
             }
+            setOrcamento(prev => prev ? ({
+              ...prev,
+              projeto: newHeader.nomeProjeto || prev.projeto,
+              nome: newHeader.nomeProjeto || prev.nome,
+              cliente: newHeader.cliente,
+              gestor_cliente: newHeader.gestorCliente,
+              responsavel: newHeader.responsavel,
+              cidade: newHeader.cidade,
+              estado: newHeader.estado,
+              dadosComplementares: updatedDC
+            }) : prev);
+            setHasUnsavedChanges(true);
           }}
           itens={computedItens
             .filter((i: any) => {

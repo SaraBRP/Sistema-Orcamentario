@@ -578,6 +578,14 @@ export function isCobertoPorRowSpanMemoria(index: number, list: ItemMemoriaOfici
   return !isInicioBlocoFilhos(index, list);
 }
 
+export function extractDadosComplementaresArray(headerObj: any): DadoComplementarItem[] {
+  if (!headerObj) return [];
+  const raw = headerObj.dadosComplementares || headerObj.dados_complementares || headerObj;
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === 'object' && Array.isArray(raw.items)) return raw.items;
+  return [];
+}
+
 interface DocumentoMemorialOficialProps {
   header: DadosComplementaresHeader;
   onChangeHeader: (h: DadosComplementaresHeader) => void;
@@ -597,6 +605,10 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   onVoltar,
   highlightedEap
 }) => {
+  const dadosComplementaresList: DadoComplementarItem[] = React.useMemo(() => {
+    return extractDadosComplementaresArray(header);
+  }, [header?.dadosComplementares, (header as any)?.dados_complementares]);
+
   const [editingItemModal, setEditingItemModal] = useState<ItemMemoriaOficial | null>(null);
   const [editingItemIndex, setEditingItemIndex] = useState<number | null>(null);
   const [targetBindingItemId, setTargetBindingItemId] = useState<string | null>(null);
@@ -810,8 +822,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     }));
 
     // Parâmetros globais (header.dadosComplementares)
-    const rawGlobals = header.dadosComplementares || (header as any)?.dados_complementares || [];
-    const globalList = (rawGlobals as any[]).map((gp: any) => ({
+    const rawGlobals = dadosComplementaresList;
+    const globalList = rawGlobals.map((gp: any) => ({
       nome: String(gp.parametro || gp.nome || gp.descricao || '').trim(),
       valor: parseV(gp.valor ?? gp.value),
       unidade: String(gp.unidade || '').trim(),
@@ -878,7 +890,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       result: mathResult,
       unit,
     };
-  }, [customTextLiteral, customParamsList, header.dadosComplementares, (header as any)?.dados_complementares]);
+  }, [customTextLiteral, customParamsList, dadosComplementaresList]);
 
 
 
@@ -895,7 +907,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     const evalResult = evaluateCustomFormula(
       customTextLiteral,
       latestParams,
-      header.dadosComplementares || (header as any)?.dados_complementares || []
+      dadosComplementaresList
     );
 
     console.log('[Calcular] latestParams:', latestParams.map(p => ({ nome: p.nome, valor: p.valor })));
@@ -1251,8 +1263,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     const accumulated: Array<{ itemEap: string; param: ParametroLinhaItem }> = [];
 
     // 1. INCLUI PRIMEIRO OS PARÂMETROS GLOBAIS DA OBRA (da seção de dados complementares do header)
-    if (header.dadosComplementares && header.dadosComplementares.length > 0) {
-      header.dadosComplementares.forEach(dc => {
+    if (dadosComplementaresList && dadosComplementaresList.length > 0) {
+      dadosComplementaresList.forEach(dc => {
         if (dc.parametro && dc.parametro.trim()) {
           const keyClean = dc.parametro.trim().toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '');
           const valNum = typeof dc.valor === 'number' ? dc.valor : (parseFloat(String(dc.valor || '0').replace(',', '.')) || 0);
@@ -1290,15 +1302,15 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
     });
 
     return accumulated;
-  }, [header.dadosComplementares]);
+  }, [dadosComplementaresList]);
 
   // Autocomplete & Lista Dinâmica de Campos / Variáveis da Obra com Herança EAP
   const variaveisAutoComplete = React.useMemo(() => {
     const list: { key: string; label: string; valorStr?: string; unidade?: string; categoria: string }[] = [];
 
     // 1. Dados Complementares do Header da Obra
-    if (header.dadosComplementares && header.dadosComplementares.length > 0) {
-      header.dadosComplementares.forEach(dc => {
+    if (dadosComplementaresList && dadosComplementaresList.length > 0) {
+      dadosComplementaresList.forEach(dc => {
         if (dc.parametro && dc.parametro.trim()) {
           const keyClean = dc.parametro.trim().replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_]/g, '');
           list.push({
@@ -3364,16 +3376,19 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
       }
     }
 
+    const refTipo = novoGlobalTipo || getListaParametrosRefSistema()[0]?.label || 'Personalizado';
+    const refUnidade = novoGlobalUnidade || getListaParametrosRefSistema()[0]?.unidade || 'un';
+
     const novo: DadoComplementarItem = {
       id: `dc-${Date.now()}`,
       parametro: novoGlobalNome.trim(),
-      parametroNome: novoGlobalTipo,
+      parametroNome: refTipo,
       valor: valNum,
-      unidade: novoGlobalUnidade,
+      unidade: refUnidade,
       itemId: novoGlobalItemId || undefined,
       itemDescricao: linkedItemDesc || undefined
     };
-    const atual = [...(header.dadosComplementares || []), novo];
+    const atual = [...dadosComplementaresList, novo];
     onChangeHeader({ ...header, dadosComplementares: atual });
 
     const syncedItens = syncGlobalParametersToItens(atual, itens);
@@ -3385,7 +3400,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   };
 
   const handleUpdateDadoComplementar = (index: number, campo: keyof DadoComplementarItem, val: any) => {
-    const atual = [...(header.dadosComplementares || [])];
+    const atual = [...dadosComplementaresList];
     const item = { ...atual[index], [campo]: val };
     if (campo === 'parametroNome') {
       const found = getListaParametrosRefSistema().find(c => c.label === val);
@@ -3399,7 +3414,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   };
 
   const handleRemoveDadoComplementar = (index: number) => {
-    const atual = (header.dadosComplementares || []).filter((_, i) => i !== index);
+    const atual = dadosComplementaresList.filter((_, i) => i !== index);
     onChangeHeader({ ...header, dadosComplementares: atual });
     if (selectedGlobalParamIndex >= atual.length) {
       setSelectedGlobalParamIndex(Math.max(0, atual.length - 1));
@@ -3409,7 +3424,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   };
 
   const handleToggleItemLinkToParam = (paramIndex: number, itemIdToToggle: string) => {
-    const atual = [...(header.dadosComplementares || [])];
+    const atual = [...dadosComplementaresList];
     if (!atual[paramIndex]) return;
 
     const param = { ...atual[paramIndex] };
@@ -3483,7 +3498,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-[11px] font-medium text-slate-500">
-                  ({(header.dadosComplementares || []).length} cadastrados no orçamento)
+                  ({dadosComplementaresList.length} cadastrados no orçamento)
                 </span>
                 <button
                   type="button"
@@ -3519,6 +3534,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                       placeholder="Ex: Área Cobertura Bloco A"
                       value={novoGlobalNome}
                       onChange={(e) => setNovoGlobalNome(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === 'Enter') handleAddDadoComplementar(); }}
                       className="w-full p-2 border border-slate-300 rounded-lg text-xs outline-none focus:border-blue-500 font-medium"
                     />
                   </div>
@@ -3552,6 +3568,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                         placeholder="0,00"
                         value={novoGlobalValor}
                         onChange={(e) => setNovoGlobalValor(e.target.value === '' ? '' : parseFloat(e.target.value))}
+                        onKeyDown={(e) => { if (e.key === 'Enter') handleAddDadoComplementar(); }}
                         className="w-full p-2 border border-slate-300 rounded-lg text-xs font-mono font-bold outline-none text-blue-900"
                       />
                     </div>
@@ -3579,7 +3596,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
             )}
 
             {/* VINCULAÇÃO DE ITENS AOS PARÂMETROS GLOBAIS (POSICIONADA ACIMA DA TABELA) */}
-            {(header.dadosComplementares || []).length > 0 && !readonly && (
+            {dadosComplementaresList.length > 0 && !readonly && (
               <div className="bg-blue-50/70 p-3.5 rounded-xl border border-blue-200 space-y-3 shadow-2xs mt-3">
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 border-b border-blue-200/80 pb-2">
                   <div className="flex items-center gap-2">
@@ -3615,7 +3632,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                 </div>
 
                 {showVincularPanel && (() => {
-                  const paramList = header.dadosComplementares || [];
+                  const paramList = dadosComplementaresList;
                   const safeIdx = Math.min(selectedGlobalParamIndex, Math.max(0, paramList.length - 1));
                   const activeParam = paramList[safeIdx];
                   const activeLinkedIds = activeParam
@@ -3660,7 +3677,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                               const isChecked = activeLinkedIds.includes(it.id);
 
                               // Verifica se o item já possui vínculo com algum Parâmetro Global da Obra
-                              const linkedGlobalParam = (header.dadosComplementares || []).find(dc => {
+                              const linkedGlobalParam = dadosComplementaresList.find(dc => {
                                 const ids = dc.itemIds || (dc as any).itensVinculadosIds || (dc as any).linkedItemIds || (dc.itemId ? [dc.itemId] : []);
                                 return ids.includes(it.id) || (it as any).parametroGlobalId === dc.id;
                               });
@@ -3739,7 +3756,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
             )}
 
             {/* TABELA DE PARÂMETROS GLOBAIS DA OBRA CADASTRADOS */}
-            {(header.dadosComplementares || []).length > 0 && (
+            {dadosComplementaresList.length > 0 && (
               <div className="bg-white rounded-xl border border-slate-200 overflow-hidden shadow-2xs mt-2">
                 <table className="w-full text-left text-xs border-collapse">
                   <thead className="bg-slate-100/80 text-slate-700 font-bold border-b border-slate-200 text-[10px] uppercase tracking-wider">
@@ -3753,7 +3770,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {header.dadosComplementares!.map((dc, idx) => {
+                    {dadosComplementaresList.map((dc, idx) => {
                       const isEditingThisRow = editingGlobalIndex === idx;
 
                       return (
@@ -5074,7 +5091,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                   const evalResult = evaluateCustomFormula(
                                     customTextLiteral,
                                     nextList,
-                                    header.dadosComplementares || (header as any)?.dados_complementares || []
+                                    dadosComplementaresList
                                   );
                                   setCustomTextSubst(evalResult.substitutedNumeric);
                                   setCustomQtd(evalResult.mathResult);
@@ -5140,7 +5157,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                             const evalResult = evaluateCustomFormula(
                                               customTextLiteral,
                                               nextList,
-                                              header.dadosComplementares || (header as any)?.dados_complementares || []
+                                              dadosComplementaresList
                                             );
                                             setCustomTextSubst(evalResult.substitutedNumeric);
                                             setCustomQtd(evalResult.mathResult);
@@ -5193,7 +5210,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                               const evalResult = evaluateCustomFormula(
                                                 customTextLiteral,
                                                 nextList,
-                                                header.dadosComplementares || (header as any)?.dados_complementares || []
+                                                dadosComplementaresList
                                               );
                                               setCustomTextSubst(evalResult.substitutedNumeric);
                                               setCustomQtd(evalResult.mathResult);
@@ -5227,7 +5244,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                             const evalResult = evaluateCustomFormula(
                                               customTextLiteral,
                                               nextList,
-                                              header.dadosComplementares || (header as any)?.dados_complementares || []
+                                              dadosComplementaresList
                                             );
                                             setCustomTextSubst(evalResult.substitutedNumeric);
                                             setCustomQtd(evalResult.mathResult);
@@ -5279,7 +5296,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                               const evalResult = evaluateCustomFormula(
                                                 customTextLiteral,
                                                 nextList,
-                                                header.dadosComplementares || (header as any)?.dados_complementares || []
+                                                dadosComplementaresList
                                               );
                                               setCustomTextSubst(evalResult.substitutedNumeric);
                                               setCustomQtd(evalResult.mathResult);
@@ -5342,7 +5359,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                                   const evalResult = evaluateCustomFormula(
                                     val,
                                     customParamsList,
-                                    header.dadosComplementares || (header as any)?.dados_complementares || []
+                                    dadosComplementaresList
                                   );
                                   setCustomTextSubst(evalResult.substitutedNumeric);
                                   setCustomQtd(evalResult.mathResult);
@@ -5355,7 +5372,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                               <div className="absolute top-full left-0 right-0 mt-1 bg-white border border-slate-300 rounded-xl shadow-xl z-50 overflow-hidden animate-in fade-in zoom-in-95 duration-100">
                                 <div className="max-h-56 overflow-y-auto divide-y divide-slate-100">
                                   {(() => {
-                                    const rawGlobalList = header.dadosComplementares || (header as any)?.dados_complementares || [];
+                                    const rawGlobalList = dadosComplementaresList;
                                     const globalParamsAsCustom = rawGlobalList.map((dc: any, idx: number) => ({
                                       id: dc.id || `global-${idx}`,
                                       nome: dc.parametro || dc.nome || dc.descricao || `Parâmetro Global ${idx + 1}`,
