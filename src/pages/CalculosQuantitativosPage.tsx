@@ -1,11 +1,9 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { Rocket, FileText, Sparkles, ArrowLeft, Plus, Sliders, X } from 'lucide-react';
+import { Rocket, FileText, ArrowLeft, Plus, X } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemorialOficial';
-import { GerenciadorFormulas } from '../components/calculos/GerenciadorFormulas';
 import { TabelaMemoriaisCalculo, type MemorialCalculoRecord } from '../components/calculos/TabelaMemoriaisCalculo';
-import { TabelaParametrosCadastro } from '../components/calculos/TabelaParametrosCadastro';
 import { ClienteSelect } from '../components/ClienteSelect';
 import { getUsuariosCadastrados } from '../lib/usuarios';
 import { generateOfficialOrcamentoCode } from '../lib/orcamentoCodeGenerator';
@@ -23,44 +21,17 @@ const formatCidadeUpperNoAccents = (text: string) => {
 
 export default function CalculosQuantitativosPage() {
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
+  const [searchParams] = useSearchParams();
 
-  const initialMainTab = useMemo<'memorial' | 'formulas' | 'parametros'>(() => {
-    const tabFromUrl = searchParams.get('tab') as any;
-    if (tabFromUrl === 'memorial' || tabFromUrl === 'formulas' || tabFromUrl === 'parametros') {
-      return tabFromUrl;
-    }
-    try {
-      const saved = localStorage.getItem('brp_calculos_tab') as any;
-      if (saved === 'memorial' || saved === 'formulas' || saved === 'parametros') {
-        return saved;
-      }
-    } catch {}
-    return 'memorial';
-  }, [searchParams]);
-
-  const [activeMainTabState, setActiveMainTabState] = useState<'memorial' | 'formulas' | 'parametros'>(initialMainTab);
-
+  // Redireciona links antigos para o novo local em Configurações > Medidas
   useEffect(() => {
-    const tabFromUrl = searchParams.get('tab') as any;
-    if (tabFromUrl && (tabFromUrl === 'memorial' || tabFromUrl === 'formulas' || tabFromUrl === 'parametros')) {
-      setActiveMainTabState(tabFromUrl);
+    const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl === 'formulas') {
+      navigate('/configuracoes?tab=medidas&sub=formulas', { replace: true });
+    } else if (tabFromUrl === 'parametros') {
+      navigate('/configuracoes?tab=medidas&sub=parametros', { replace: true });
     }
-  }, [searchParams]);
-
-  const activeMainTab = activeMainTabState;
-
-  const setActiveMainTab = (tab: 'memorial' | 'formulas' | 'parametros') => {
-    setActiveMainTabState(tab);
-    try {
-      localStorage.setItem('brp_calculos_tab', tab);
-    } catch {}
-    setSearchParams((prev) => {
-      const p = new URLSearchParams(prev);
-      p.set('tab', tab);
-      return p;
-    }, { replace: true });
-  };
+  }, [searchParams, navigate]);
   
   const [memoriaisList, setMemoriaisList] = useState<MemorialCalculoRecord[]>(() => {
     try {
@@ -703,11 +674,11 @@ export default function CalculosQuantitativosPage() {
           <h1 className="text-xl font-bold text-slate-900 tracking-tight flex items-center gap-2">
             Memória de Cálculo & Levantamento Quantitativo
           </h1>
-          <p className="text-xs text-slate-500 mt-0.5">Gerencie cadernos de medição do projeto e cadastre fórmulas para vinculação direta nos serviços.</p>
+          <p className="text-xs text-slate-500 mt-0.5">Gerencie cadernos de medição do projeto e levantamentos quantitativos.</p>
         </div>
 
         <div className="flex items-center gap-2">
-          {activeMemorialId && activeMainTab === 'memorial' && (
+          {activeMemorialId ? (
             <>
               <button
                 type="button"
@@ -727,9 +698,7 @@ export default function CalculosQuantitativosPage() {
                 <span>Gerar Orçamento a partir deste Memorial</span>
               </button>
             </>
-          )}
-
-          {!activeMemorialId && activeMainTab === 'memorial' && (
+          ) : (
             <button
               type="button"
               onClick={handleOpenCreateMemorialModal}
@@ -742,52 +711,31 @@ export default function CalculosQuantitativosPage() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2 border-b border-slate-200 pb-3">
-        <button type="button" onClick={() => setActiveMainTab('memorial')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${activeMainTab === 'memorial' ? 'bg-slate-900 text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>
-          <FileText className="w-4 h-4" />
-          <span>1. Memórias de Cálculo ({memoriaisList.length})</span>
-        </button>
-        <button type="button" onClick={() => setActiveMainTab('formulas')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${activeMainTab === 'formulas' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>
-          <Sparkles className="w-4 h-4 text-blue-300" />
-          <span>2. Central & Cadastro de Fórmulas</span>
-        </button>
-        <button type="button" onClick={() => setActiveMainTab('parametros')} className={`px-4 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${activeMainTab === 'parametros' ? 'bg-blue-600 text-white shadow-xs' : 'bg-white text-slate-600 hover:bg-slate-100 border border-slate-200'}`}>
-          <Sliders className="w-4 h-4 text-blue-300" />
-          <span>3. Cadastro de Parâmetros</span>
-        </button>
-      </div>
-
-      {activeMainTab === 'memorial' ? (
-        activeMemorialId && activeMemorial ? (
-          <DocumentoMemorialOficial
-            header={activeMemorial.header}
-            onChangeHeader={handleUpdateActiveHeader}
-            itens={activeMemorial.itens}
-            onChangeItens={handleUpdateActiveItens}
-            onVoltar={() => setActiveMemorialId(null)}
-          />
-        ) : (
-          <TabelaMemoriaisCalculo
-            memoriais={memoriaisList}
-            onSelectMemorial={(m) => {
-              if (m.isOrcamentoNativo && m.orcamentoId) {
-                navigate(`/orcamentos/${m.orcamentoId}?aba=memoria_calculo`);
-                return;
-              }
-              if (m.isImportado) {
-                navigate('/orcamentos?tab=importados');
-                return;
-              }
-              setActiveMemorialId(m.id);
-            }}
-            onDeleteMemorial={handleDeleteMemorial}
-            onGerarOrcamento={handleOpenGerarOrcamentoModal}
-          />
-        )
-      ) : activeMainTab === 'formulas' ? (
-        <GerenciadorFormulas />
+      {activeMemorialId && activeMemorial ? (
+        <DocumentoMemorialOficial
+          header={activeMemorial.header}
+          onChangeHeader={handleUpdateActiveHeader}
+          itens={activeMemorial.itens}
+          onChangeItens={handleUpdateActiveItens}
+          onVoltar={() => setActiveMemorialId(null)}
+        />
       ) : (
-        <TabelaParametrosCadastro />
+        <TabelaMemoriaisCalculo
+          memoriais={memoriaisList}
+          onSelectMemorial={(m) => {
+            if (m.isOrcamentoNativo && m.orcamentoId) {
+              navigate(`/orcamentos/${m.orcamentoId}?aba=memoria_calculo`);
+              return;
+            }
+            if (m.isImportado) {
+              navigate('/orcamentos?tab=importados');
+              return;
+            }
+            setActiveMemorialId(m.id);
+          }}
+          onDeleteMemorial={handleDeleteMemorial}
+          onGerarOrcamento={handleOpenGerarOrcamentoModal}
+        />
       )}
 
       {isCreateModalOpen && (

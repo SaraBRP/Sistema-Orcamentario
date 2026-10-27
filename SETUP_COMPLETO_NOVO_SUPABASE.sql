@@ -73,6 +73,7 @@ CREATE TABLE IF NOT EXISTS engenharia.insumos (
   valor_desonerado               NUMERIC(15,6),
   valor_nao_desonerado           NUMERIC(15,6),
   valor_sem_encargos             NUMERIC(15,6),
+  tipo_uso                       TEXT DEFAULT 'direto',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW(),
   CONSTRAINT insumos_codigo_fonte_estado_key UNIQUE (codigo, fonte_preco, estado)

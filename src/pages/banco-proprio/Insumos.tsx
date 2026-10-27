@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, Fragment } from 'react';
+import { useState, useEffect, useRef, useMemo, Fragment } from 'react';
 import { supabase } from '../../lib/supabase';
 import { Plus, Search, Edit2, Trash2, FileSpreadsheet, Copy, ChevronRight, ChevronDown } from 'lucide-react';
 import { clsx } from 'clsx';
@@ -108,12 +108,50 @@ const renderPrecoContabil = (insumo: any) => {
 };
 
 
+export const INDIRETO_TIPOS = [
+  'Aluguel',
+  'Administração',
+  'Verba',
+  'Taxas',
+  'Serviços de Terceiros',
+  'Transporte e Logística'
+];
+
+export const DIRETO_TIPOS = [
+  'Material',
+  'Mão de Obra',
+  'Equipamento',
+  'Equipamento para Aquisição Permanente',
+  'Outros'
+];
+
+export const ALL_TIPOS_INSUMO = [
+  'Todos',
+  'Equipamento',
+  'Equipamento para Aquisição Permanente',
+  'Mão de Obra',
+  'Material',
+  'Taxas',
+  'Administração',
+  'Aluguel',
+  'Verba',
+  'Transporte e Logística',
+  'Outros'
+];
+
+interface BancoProprioInsumosProps {
+  embedded?: boolean;
+  initialTipoFiltro?: string;
+  scope?: 'direto' | 'indireto' | 'todos';
+}
+
 // Insumos do Banco PRÓPRIO da empresa (cadastrados pela BRP, por estado, cotações etc.)
-export default function BancoProprioInsumos() {
+export default function BancoProprioInsumos({ embedded = false, initialTipoFiltro, scope = 'direto' }: BancoProprioInsumosProps = {}) {
   const [insumos, setInsumos] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
-  const [tipoFiltro, setTipoFiltro] = useState('Todos');
+  const [tipoFiltro, setTipoFiltro] = useState(initialTipoFiltro || 'Todos');
+  const [usoFiltro, setUsoFiltro] = useState<string>(scope === 'indireto' ? 'indireto' : scope === 'direto' ? 'direto' : 'Todos');
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [insumoToEdit, setInsumoToEdit] = useState<any | null>(null);
   const [isCopyMode, setIsCopyMode] = useState(false);
@@ -308,8 +346,6 @@ export default function BancoProprioInsumos() {
     estado_registro: 100,
   });
 
-  const TIPOS = ['Todos', 'Material', 'Mão de Obra', 'Equipamento', 'Transporte e Logística', 'Verba', 'Aluguel', 'Administração', 'Taxas', 'Outros'];
-
   const fetchEstadosDisponiveis = async () => {
     try {
       const { data, error } = await supabase.schema('engenharia')
@@ -345,8 +381,18 @@ export default function BancoProprioInsumos() {
   }, [searchTerm]);
 
   useEffect(() => {
+    if (scope === 'indireto') {
+      setUsoFiltro('indireto');
+    } else if (scope === 'direto') {
+      setUsoFiltro('direto');
+    } else {
+      setUsoFiltro('Todos');
+    }
+  }, [scope]);
+
+  useEffect(() => {
     fetchInsumos();
-  }, [page, debouncedSearch, filtroEstado, tipoFiltro, sortColumn, sortOrder]);
+  }, [page, debouncedSearch, filtroEstado, tipoFiltro, usoFiltro, sortColumn, sortOrder, scope]);
 
   const limparSubitensOrfaos = async (items: any[]) => {
     const subitensNaLista = items.filter(item => item.subitem && item.codigo_pai);
@@ -380,42 +426,71 @@ export default function BancoProprioInsumos() {
   const fetchInsumos = async () => {
     setLoading(true);
     try {
-      let query = supabase
-        .schema('engenharia')
-        .from('insumos')
-        .select('*', { count: 'exact' })
-        .in('fonte_preco', ['Cotação', 'Histórico']);
+      const buildQuery = (useTipoUsoColumn: boolean) => {
+        let query = supabase
+          .schema('engenharia')
+          .from('insumos')
+          .select('*', { count: 'exact' })
+          .in('fonte_preco', ['Cotação', 'Histórico']);
 
-      if (debouncedSearch.trim()) {
-        query = query.or(`descricao.ilike.%${debouncedSearch.trim()}%,codigo.ilike.%${debouncedSearch.trim()}%`);
-      }
-
-      if (filtroEstado) {
-        query = query.eq('estado', filtroEstado);
-      }
-
-      if (tipoFiltro !== 'Todos') {
-        if (tipoFiltro === 'Outros') {
-          query = query.not('tipo', 'in', '("Material","Mão de Obra","Equipamento","Transporte e Logística","Verba","Aluguel","Administração","Taxas")');
-        } else {
-          query = query.eq('tipo', tipoFiltro);
+        if (debouncedSearch.trim()) {
+          query = query.or(`descricao.ilike.%${debouncedSearch.trim()}%,codigo.ilike.%${debouncedSearch.trim()}%`);
         }
+
+        if (filtroEstado) {
+          query = query.eq('estado', filtroEstado);
+        }
+
+        if (useTipoUsoColumn) {
+          if (usoFiltro === 'direto') {
+            query = query.or('tipo_uso.in.("direto","ambos"),tipo_uso.is.null');
+          } else if (usoFiltro === 'indireto') {
+            query = query.or('tipo_uso.in.("indireto","ambos")');
+          } else if (usoFiltro === 'ambos') {
+            query = query.eq('tipo_uso', 'ambos');
+          } else if (scope === 'indireto') {
+            query = query.or('tipo_uso.in.("indireto","ambos")');
+          } else if (scope === 'direto') {
+            query = query.or('tipo_uso.in.("direto","ambos"),tipo_uso.is.null');
+          }
+        } else {
+          // Fallback usando categorias legadas se a coluna tipo_uso não existir no DB
+          if (usoFiltro === 'indireto' || scope === 'indireto') {
+            query = query.in('tipo', INDIRETO_TIPOS);
+          } else if (usoFiltro === 'direto' || scope === 'direto') {
+            query = query.not('tipo', 'in', `("${INDIRETO_TIPOS.join('","')}")`);
+          }
+        }
+
+        // Filtro específico de tipo de insumo selecionado no dropdown
+        if (tipoFiltro !== 'Todos') {
+          if (tipoFiltro === 'Outros') {
+            query = query.not('tipo', 'in', '("Material","Mão de Obra","Equipamento","Equipamento para Aquisição Permanente","Transporte e Logística","Verba","Aluguel","Administração","Taxas")');
+          } else {
+            query = query.eq('tipo', tipoFiltro);
+          }
+        }
+
+        const from = (page - 1) * pageSize;
+        const to = from + pageSize - 1;
+
+        return query
+          .order(sortColumn, { ascending: sortOrder === 'asc' })
+          .range(from, to);
+      };
+
+      let res = await buildQuery(true);
+      if (res.error && res.error.code === '42703') {
+        res = await buildQuery(false);
       }
 
-      const from = (page - 1) * pageSize;
-      const to = from + pageSize - 1;
-
-      const { data, count, error } = await query
-        .order(sortColumn, { ascending: sortOrder === 'asc' })
-        .range(from, to);
-
-      if (error) {
-        console.error(error);
+      if (res.error) {
+        console.error(res.error);
       } else {
-        setInsumos(data || []);
-        setTotalCount(count || 0);
-        if (data && data.length > 0) {
-          limparSubitensOrfaos(data);
+        setInsumos(res.data || []);
+        setTotalCount(res.count || 0);
+        if (res.data && res.data.length > 0) {
+          limparSubitensOrfaos(res.data);
         }
       }
     } catch (err) {
@@ -684,49 +759,97 @@ export default function BancoProprioInsumos() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
-        <div>
-          <div className="flex items-center gap-2 mb-1">
-            <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide">
-              Banco Próprio
-            </span>
+      {!embedded ? (
+        <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+          <div>
+            <div className="flex items-center gap-2 mb-1">
+              <span className="bg-blue-100 text-blue-800 text-xs font-bold px-2.5 py-1 rounded-full uppercase tracking-wide">
+                Banco Próprio
+              </span>
+            </div>
+            <h2 className="text-2xl font-bold text-slate-800">Insumos Próprios</h2>
+            <p className="text-slate-500 text-sm">Materiais, mão de obra e equipamentos cadastrados pela BRP</p>
           </div>
-          <h2 className="text-2xl font-bold text-slate-800">Insumos Próprios</h2>
-          <p className="text-slate-500 text-sm">Materiais, mão de obra e equipamentos cadastrados pela BRP</p>
+          <div className="flex items-center gap-3">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImportarArquivo}
+              accept=".xlsx,.xls"
+              className="hidden"
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm whitespace-nowrap"
+              disabled={importandoHistorico}
+            >
+              <FileSpreadsheet className="w-5 h-5" />
+              Importar Histórico
+            </button>
+             <button 
+               onClick={handleLimparHistorico}
+               className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm whitespace-nowrap"
+               disabled={importandoHistorico}
+             >
+               <Trash2 className="w-5 h-5" />
+               Limpar Histórico
+             </button>
+             <button
+               onClick={() => { setInsumoToEdit(null); setIsCopyMode(false); setIsModalOpen(true); }}
+               className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm"
+             >
+               <Plus className="w-5 h-5" />
+               Novo Insumo
+             </button>
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <input
-            type="file"
-            ref={fileInputRef}
-            onChange={handleImportarArquivo}
-            accept=".xlsx,.xls"
-            className="hidden"
-          />
-          <button 
-            onClick={() => fileInputRef.current?.click()}
-            className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm whitespace-nowrap"
-            disabled={importandoHistorico}
-          >
-            <FileSpreadsheet className="w-5 h-5" />
-            Importar Histórico
-          </button>
-           <button 
-             onClick={handleLimparHistorico}
-             className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm whitespace-nowrap"
-             disabled={importandoHistorico}
-           >
-             <Trash2 className="w-5 h-5" />
-             Limpar Histórico
-           </button>
-           <button
-             onClick={() => { setInsumoToEdit(null); setIsCopyMode(false); setIsModalOpen(true); }}
-             className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium flex items-center gap-2 transition-colors shadow-sm"
-           >
-             <Plus className="w-5 h-5" />
-             Novo Insumo
-           </button>
+      ) : (
+        <div className="flex flex-wrap items-center justify-between gap-3 bg-white p-4 rounded-xl border border-slate-200 shadow-2xs">
+          <div>
+            <h2 className="text-base font-bold text-slate-900 flex items-center gap-2">
+              Insumos do Banco Próprio
+              <span className="px-2 py-0.5 text-[10px] font-semibold bg-blue-50 text-blue-800 rounded border border-blue-200">
+                Cadastro Geral
+              </span>
+            </h2>
+            <p className="text-xs text-slate-500">
+              Gerencie, pesquise e cadastre insumos no banco próprio da BRP.
+            </p>
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="file"
+              ref={fileInputRef}
+              onChange={handleImportarArquivo}
+              accept=".xlsx,.xls"
+              className="hidden"
+            />
+            <button 
+              onClick={() => fileInputRef.current?.click()}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs whitespace-nowrap"
+              disabled={importandoHistorico}
+            >
+              <FileSpreadsheet className="w-4 h-4" />
+              Importar Excel
+            </button>
+            <button 
+              onClick={handleLimparHistorico}
+              className="bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 px-3 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs whitespace-nowrap"
+              disabled={importandoHistorico}
+            >
+              <Trash2 className="w-4 h-4" />
+              Limpar Base
+            </button>
+            <button
+              onClick={() => { setInsumoToEdit(null); setIsCopyMode(false); setIsModalOpen(true); }}
+              className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-1.5 rounded-lg text-xs font-bold flex items-center gap-1.5 transition-colors shadow-2xs"
+            >
+              <Plus className="w-4 h-4" />
+              Novo Insumo
+            </button>
+          </div>
         </div>
-      </div>
+      )}
 
       <div className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {/* Filtros */}
@@ -745,17 +868,30 @@ export default function BancoProprioInsumos() {
             <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
               <select
                 value={tipoFiltro}
-                onChange={(e) => setTipoFiltro(e.target.value)}
+                onChange={(e) => { setTipoFiltro(e.target.value); setPage(1); }}
                 className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-normal text-slate-900 min-w-[160px]"
               >
-                <option value="Todos" className="text-slate-900 bg-white font-normal">Todos os Tipos</option>
-                {TIPOS.filter(t => t !== 'Todos').map(tipo => (
-                  <option key={tipo} value={tipo} className="text-slate-900 bg-white font-normal">{tipo}</option>
+                {ALL_TIPOS_INSUMO.map(tipo => (
+                  <option key={tipo} value={tipo} className="text-slate-900 bg-white font-normal">
+                    {tipo === 'Todos' ? 'Todos os Tipos' : tipo}
+                  </option>
                 ))}
               </select>
+
+              <select
+                value={usoFiltro}
+                onChange={(e) => { setUsoFiltro(e.target.value); setPage(1); }}
+                className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-normal text-slate-900 min-w-[140px]"
+              >
+                <option value="Todos" className="text-slate-900 bg-white font-normal">Todos os Usos</option>
+                <option value="direto" className="text-slate-900 bg-white font-normal">Direto</option>
+                <option value="indireto" className="text-slate-900 bg-white font-normal">Indireto</option>
+                <option value="ambos" className="text-slate-900 bg-white font-normal">Ambos</option>
+              </select>
+
               <select
                 value={filtroEstado}
-                onChange={(e) => setFiltroEstado(e.target.value)}
+                onChange={(e) => { setFiltroEstado(e.target.value); setPage(1); }}
                 className="w-full sm:w-auto px-3 py-2 border border-slate-300 rounded-lg bg-white focus:ring-2 focus:ring-blue-500 outline-none text-sm font-normal text-slate-900 min-w-[150px]"
               >
                 <option value="" className="text-slate-900 bg-white font-normal">Todos os Estados</option>
@@ -824,9 +960,21 @@ export default function BancoProprioInsumos() {
                       <td style={{ width: colWidths.descricao, minWidth: colWidths.descricao, maxWidth: colWidths.descricao }} className="px-4 py-3 truncate font-medium text-slate-800" title={insumo.descricao}>{insumo.descricao}</td>
                       <td style={{ width: colWidths.unidade, minWidth: colWidths.unidade, maxWidth: colWidths.unidade }} className="px-4 py-3 text-slate-500 truncate">{insumo.unidade}</td>
                       <td style={{ width: colWidths.tipo, minWidth: colWidths.tipo, maxWidth: colWidths.tipo }} className="px-4 py-3 truncate">
-                        <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600">
-                          {insumo.tipo}
-                        </span>
+                        <div className="flex flex-col gap-0.5 items-start">
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-md text-xs font-medium bg-slate-100 text-slate-600">
+                            {insumo.tipo}
+                          </span>
+                          {insumo.tipo_uso && (
+                            <span className={clsx(
+                              'inline-flex items-center px-1.5 py-0.2 text-[9px] font-bold rounded uppercase tracking-wider',
+                              insumo.tipo_uso === 'indireto' ? 'bg-amber-100 text-amber-800 border border-amber-200' :
+                              insumo.tipo_uso === 'ambos' ? 'bg-purple-100 text-purple-800 border border-purple-200' :
+                              'bg-blue-50 text-blue-700 border border-blue-200'
+                            )}>
+                              {insumo.tipo_uso}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ width: colWidths.estado, minWidth: colWidths.estado, maxWidth: colWidths.estado }} className="px-4 py-3 text-slate-500 font-mono text-xs truncate">
                         {hasChildren ? (
@@ -995,6 +1143,7 @@ export default function BancoProprioInsumos() {
         isCopyMode={isCopyMode}
         onSuccess={handleDatabaseChange}
         bancoProprio
+        defaultTipo={scope === 'indireto' ? 'Aluguel' : 'Material'}
       />
 
       {importandoHistorico && (

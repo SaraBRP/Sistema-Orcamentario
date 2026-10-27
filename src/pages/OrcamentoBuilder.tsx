@@ -6,17 +6,21 @@ import {
   ArrowLeft, ArrowRight, Save, Plus, Search, Trash2, Import, Calculator, 
   Settings2, FileSpreadsheet, Layers, X, Check, ChevronDown, ChevronRight,
   Indent, Outdent, GripVertical, AlertCircle, Send, Lock, CheckCircle2, XCircle, Clock, ChevronUp, MessageSquare, AlertTriangle, BarChart3, Users,
-  Download, FileText, Undo2, Redo2, RefreshCw, Package, Calendar
+  Download, FileText, Undo2, Redo2, RefreshCw, Package, Calendar, Building2, CheckSquare
 } from 'lucide-react';
 import { clsx } from 'clsx';
 
 import { DocumentoMemorialOficial } from '../components/calculos/DocumentoMemorialOficial';
 import DistribuiçãoEquipeTab from '../components/calculos/DistribuiçãoEquipeTab';
 import ListaMateriaisTab from '../components/calculos/ListaMateriaisTab';
+import CronogramaTab from '../components/calculos/CronogramaTab';
+import CustosIndiretosTab from '../components/calculos/CustosIndiretosTab';
 import type { CalculoItem } from '../types/calculos';
 import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
 import { resolveCidadeEstadoFromCliente } from '../lib/clientes';
 import { downloadMsProjectXML } from '../lib/msprojectExport';
+import { updateSyncedEapItemsWithNewConfig, syncEapChangeToIndiretoConfig, loadIndiretoConfig } from '../lib/indiretoStorage';
+import { calculateCronogramaTotalDuration } from '../lib/cronogramaUtils';
 
 type OrcamentoItem = {
   id: string;
@@ -140,9 +144,16 @@ const computeHierarchicalTotals = (itensList: OrcamentoItem[]): (OrcamentoItem &
     item.effectiveMultiplier = multiplier;
   }
 
-  // Passo 2: calcula totais BOTTOM-UP (de trás para frente)
-  // Pais somam filhos diretos já calculados corretamente
-  for (let i = computed.length - 1; i >= 0; i--) {
+  // Passo 2: calcula totais BOTTOM-UP (ordenado por profundidade decrescente na EAP)
+  // Pais somam filhos diretos já calculados corretamente, independentemente da ordem física no array
+  const indicesByDepth = computed
+    .map((item, idx) => ({
+      idx,
+      depth: (item.item_eap || '').split('.').filter(Boolean).length
+    }))
+    .sort((a, b) => b.depth - a.depth);
+
+  for (const { idx: i } of indicesByDepth) {
     const item = computed[i];
     const eap = (item.item_eap || '').trim();
     if (!eap) continue;
@@ -440,23 +451,25 @@ export default function OrcamentoBuilder() {
   const [itens, setItens] = useState<OrcamentoItem[]>([]);
   const [calculos, setCalculos] = useState<CalculoItem[]>([]);
 
-  const initialSubTab = useMemo<'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais'>(() => {
+  type SubTabType = 'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais' | 'cronograma' | 'custos_indiretos';
+
+  const initialSubTab = useMemo<SubTabType>(() => {
     const tabParam = searchParams.get('aba');
-    if (tabParam === 'planilha' || tabParam === 'memoria_calculo' || tabParam === 'distribuicao_equipe' || tabParam === 'lista_materiais') {
-      return tabParam;
+    if (tabParam === 'planilha' || tabParam === 'memoria_calculo' || tabParam === 'distribuicao_equipe' || tabParam === 'lista_materiais' || tabParam === 'cronograma' || tabParam === 'custos_indiretos') {
+      return tabParam as SubTabType;
     }
     if (id) {
       const savedTab = localStorage.getItem(`orc_tab_${id}`);
-      if (savedTab === 'planilha' || savedTab === 'memoria_calculo' || savedTab === 'distribuicao_equipe' || savedTab === 'lista_materiais') {
-        return savedTab as 'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais';
+      if (savedTab === 'planilha' || savedTab === 'memoria_calculo' || savedTab === 'distribuicao_equipe' || savedTab === 'lista_materiais' || savedTab === 'cronograma' || savedTab === 'custos_indiretos') {
+        return savedTab as SubTabType;
       }
     }
     return 'planilha';
   }, [id, searchParams]);
 
-  const [activeSubTab, setActiveSubTabState] = useState<'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais'>(initialSubTab);
+  const [activeSubTab, setActiveSubTabState] = useState<SubTabType>(initialSubTab);
 
-  const setActiveSubTab = (tab: 'planilha' | 'memoria_calculo' | 'distribuicao_equipe' | 'lista_materiais') => {
+  const setActiveSubTab = (tab: SubTabType) => {
     setActiveSubTabState(tab);
     if (id) {
       localStorage.setItem(`orc_tab_${id}`, tab);
@@ -466,6 +479,20 @@ export default function OrcamentoBuilder() {
       p.set('aba', tab);
       return p;
     }, { replace: true });
+
+    if (tab === 'planilha') {
+      try {
+        const latestConfig = loadIndiretoConfig(id || 'temp', cronogramaDuracaoInfo.totalMonths || 6);
+        setItens(prev => {
+          const updated = updateSyncedEapItemsWithNewConfig(prev, latestConfig, id || 'temp');
+          if (updated === prev) return prev;
+          const rebuilt = rebuildEapCodes(updated);
+          return ensureSingleTrailingBlankRow(rebuilt, id || 'temp');
+        });
+      } catch (e) {
+        console.error('Erro ao sincronizar indiretos ao abrir planilha:', e);
+      }
+    }
   };
   const [higherRevisionObj, setHigherRevisionObj] = useState<any>(null);
   const [showStatusEnvioModal, setShowStatusEnvioModal] = useState(false);
@@ -777,6 +804,7 @@ export default function OrcamentoBuilder() {
 
   const [selectedRowIndex, setSelectedRowIndex] = useState<number | null>(null);
   const [selectedRowIndices, setSelectedRowIndices] = useState<Set<number>>(new Set());
+  const selectionAnchorIndexRef = useRef<number | null>(null);
   const [highlightedEap, setHighlightedEap] = useState<string | null>(null);
   const [draggedRowIndex, setDraggedRowIndex] = useState<number | null>(null);
   const [dropTarget, setDropTarget] = useState<{ index: number; position: 'above' | 'below' } | null>(null);
@@ -801,6 +829,35 @@ export default function OrcamentoBuilder() {
     }
     return {};
   });
+
+  const [cronogramaPredecessorasMap, setCronogramaPredecessorasMap] = useState<Record<string, string>>(() => {
+    if (id) {
+      try {
+        const saved = localStorage.getItem(`orcamento_cronograma_${id}`);
+        if (saved) return JSON.parse(saved).predecessoras || {};
+      } catch (e) {}
+    }
+    return {};
+  });
+
+  const [cronogramaDataInicio, setCronogramaDataInicio] = useState<string>(() => {
+    if (id) {
+      try {
+        const saved = localStorage.getItem(`orcamento_cronograma_${id}`);
+        if (saved && JSON.parse(saved).dataInicio) return JSON.parse(saved).dataInicio;
+      } catch (e) {}
+    }
+    return new Date().toISOString().split('T')[0];
+  });
+
+  const cronogramaDuracaoInfo = useMemo(() => {
+    return calculateCronogramaTotalDuration(
+      computedItens,
+      equipeDuracoesMap,
+      cronogramaPredecessorasMap,
+      cronogramaDataInicio
+    );
+  }, [computedItens, equipeDuracoesMap, cronogramaPredecessorasMap, cronogramaDataInicio]);
 
   // Estados do Salvamento Automático & Histórico Desfazer / Refazer
   const [autoSaveStatus, setAutoSaveStatus] = useState<'saved' | 'saving' | 'error'>('saved');
@@ -991,6 +1048,12 @@ export default function OrcamentoBuilder() {
     if (!item || isReadOnly) return false;
     const itemIndex = itens.findIndex(x => x.id === item.id);
     const isChild = itemIndex !== -1 ? isChildOfComposition(itemIndex, itens) : false;
+    const isSecao = Boolean(
+      (item as any).isTextLine || 
+      (item as any).isSecao || 
+      (item as any).is_secao || 
+      getEapLevel(item.item_eap) === 0
+    );
 
     switch (colIndex) {
       case 0: // item_eap
@@ -999,54 +1062,75 @@ export default function OrcamentoBuilder() {
         if (isChild) return false;
         return !item.codigo;
       case 2: // unidade
-        if (isChild) return false;
-        return !item.isSummary && !item.codigo;
+        if (isChild || isSecao || item.isSummary) return false;
+        return !item.codigo;
       case 3: // quantidade
-        return !item.isSummary;
+        if (isSecao || item.isSummary) return false;
+        return true;
       case 4: // valor_unitario_mat
-        return !exibirBdiParam && !item.isSummary;
+        if (isSecao || item.isSummary) return false;
+        return !exibirBdiParam;
       case 5: // valor_unitario_mo
-        return !exibirBdiParam && !item.isSummary;
+        if (isSecao || item.isSummary) return false;
+        return !exibirBdiParam;
       default:
         return false;
     }
   };
 
-  const checkCurrentQuantityValid = (rowIndex: number): boolean => {
-    const item = computedItens[rowIndex];
-    if (!item) return true;
-    const hasValues = (item.item_eap || '').trim() !== '' || (item.descricao || '').trim() !== '';
-    if (!hasValues) return true;
-    if (isCellEditable(item, 3, exibirBdi)) {
-      return item.quantidade > 0;
-    }
-    return true;
-  };
+  const selectRows = useCallback((index: number, e: { ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean }) => {
+    setSelectedRowIndices(prev => {
+      const copy = new Set(prev);
+
+      if (e.ctrlKey || e.metaKey) {
+        // Alterna seleção desta linha individualmente (Ctrl)
+        if (copy.has(index)) {
+          copy.delete(index);
+          if (selectionAnchorIndexRef.current === index) {
+            selectionAnchorIndexRef.current = copy.size > 0 ? Array.from(copy)[0] : null;
+          }
+        } else {
+          copy.add(index);
+          selectionAnchorIndexRef.current = index;
+        }
+        setSelectedRowIndex(index);
+      } else if (e.shiftKey) {
+        // Seleção de intervalo contínuo (Shift) a partir da âncora
+        const anchor = selectionAnchorIndexRef.current !== null 
+          ? selectionAnchorIndexRef.current 
+          : (selectedRowIndex !== null ? selectedRowIndex : index);
+        
+        copy.clear();
+        const start = Math.min(anchor, index);
+        const end = Math.max(anchor, index);
+        for (let i = start; i <= end; i++) {
+          copy.add(i);
+        }
+        setSelectedRowIndex(index);
+      } else {
+        // Seleção simples sem modificadores
+        copy.clear();
+        copy.add(index);
+        selectionAnchorIndexRef.current = index;
+        setSelectedRowIndex(index);
+      }
+
+      return copy;
+    });
+  }, [selectedRowIndex]);
 
   const handleCellClick = (rowIndex: number, colIndex: number, e: React.MouseEvent) => {
-    if (e.ctrlKey || e.metaKey || e.shiftKey) return;
-    if (activeCell && activeCell.rowIndex !== rowIndex) {
-      if (!checkCurrentQuantityValid(activeCell.rowIndex)) {
-        setIsEditingCell(true);
-        return;
-      }
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      // Já manipulado no onMouseDown (handleRowMouseDown) para evitar conflitos de foco e dupla alternância
+      return;
     }
     setActiveCell({ rowIndex, colIndex });
-    setSelectedRowIndex(rowIndex);
-    setSelectedRowIndices(new Set([rowIndex]));
+    selectRows(rowIndex, { ctrlKey: false, shiftKey: false });
     setIsEditingCell(false);
   };
 
   const navigateCell = (deltaRow: number, deltaCol: number) => {
     if (computedItens.length === 0) return;
-
-    // Se o item atual estiver com quantidade zerada, bloqueia mudar de linha até preencher!
-    if (activeCell && deltaRow !== 0) {
-      if (!checkCurrentQuantityValid(activeCell.rowIndex)) {
-        setIsEditingCell(true);
-        return;
-      }
-    }
 
     setActiveCell(prev => {
       let currentRow = prev ? prev.rowIndex : 0;
@@ -1099,7 +1183,7 @@ export default function OrcamentoBuilder() {
   useEffect(() => {
     if (!activeCell) return;
     if (isEditingCell) {
-      const input = document.getElementById(`cell-input-${activeCell.rowIndex}-${activeCell.colIndex}`) as HTMLInputElement | null;
+      let input = document.getElementById(`cell-input-${activeCell.rowIndex}-${activeCell.colIndex}`) as HTMLInputElement | null;
       if (input) {
         input.focus();
         if (shouldSelectAll) {
@@ -1114,6 +1198,23 @@ export default function OrcamentoBuilder() {
           }
           setShouldSelectAll(false);
         }
+      } else {
+        requestAnimationFrame(() => {
+          const retryInput = document.getElementById(`cell-input-${activeCell.rowIndex}-${activeCell.colIndex}`) as HTMLInputElement | null;
+          if (retryInput) {
+            retryInput.focus();
+            if (shouldSelectAll) {
+              try {
+                if (retryInput.type === 'text' && retryInput.setSelectionRange) {
+                  retryInput.setSelectionRange(0, retryInput.value.length);
+                } else if (retryInput.select) {
+                  retryInput.select();
+                }
+              } catch (err) {}
+              setShouldSelectAll(false);
+            }
+          }
+        });
       }
     } else {
       const td = document.getElementById(`cell-td-${activeCell.rowIndex}-${activeCell.colIndex}`);
@@ -1121,13 +1222,147 @@ export default function OrcamentoBuilder() {
         td.focus();
       }
     }
-  }, [activeCell, isEditingCell, shouldSelectAll]);
+  }, [activeCell, isEditingCell, shouldSelectAll, itens.length]);
+
+  const handleEnterKeyOnCell = (rowIndex: number, colIndex: number) => {
+    // 1. Determina a próxima linha visível
+    let nextRow = rowIndex + 1;
+    while (nextRow < computedItens.length && isRowHidden(computedItens[nextRow]?.item_eap)) {
+      nextRow++;
+    }
+
+    // Se estiver na última linha ou além do fim da tabela, adiciona uma nova linha automaticamente
+    if (nextRow >= computedItens.length) {
+      const currentItem = computedItens[rowIndex];
+      const currentEap = (currentItem?.item_eap || '').trim();
+      const isCurrentSecao = Boolean(
+        (currentItem as any)?.isSecao || 
+        (currentItem as any)?.is_secao || 
+        (currentItem as any)?.isTextLine || 
+        getEapLevel(currentEap) === 0
+      );
+
+      // Se o item atual for uma seção de nível 0 (ex: "2 SAPATAS"), o próximo item filho padrão é "2.1"
+      let nextEap = '';
+      let nextLevel = 1;
+      if (isCurrentSecao && currentEap) {
+        const root = currentEap.split('.')[0];
+        nextEap = `${root}.1`;
+        nextLevel = 1;
+      } else if (currentEap) {
+        const parts = currentEap.split('.').filter(Boolean);
+        const lastNum = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastNum)) {
+          parts[parts.length - 1] = String(lastNum + 1);
+          nextEap = parts.join('.');
+        } else {
+          nextEap = `${currentEap}.1`;
+        }
+        nextLevel = Math.max(0, parts.length - 1);
+      } else {
+        nextEap = '1.0';
+        nextLevel = 0;
+      }
+
+      const newRow = createBlankRow(id || 'temp', itens.length + 1);
+      newRow.item_eap = nextEap;
+      (newRow as any).level = nextLevel;
+
+      setItens(prev => {
+        const copy = [...prev];
+        copy.push(newRow);
+        const rebuilt = rebuildEapCodes(copy);
+        return ensureSingleTrailingBlankRow(rebuilt, id || 'temp');
+      });
+
+      setHasUnsavedChanges(true);
+      nextRow = computedItens.length;
+    } else {
+      // Se a próxima linha já existe mas o EAP estiver vazio (linha em branco prévia), atribui o sequencial
+      const nextItem = computedItens[nextRow];
+      if (!nextItem?.item_eap || nextItem.item_eap.trim() === '') {
+        const currentItem = computedItens[rowIndex];
+        const currentEap = (currentItem?.item_eap || '').trim();
+        const isCurrentSecao = Boolean(
+          (currentItem as any)?.isSecao || 
+          (currentItem as any)?.is_secao || 
+          (currentItem as any)?.isTextLine || 
+          getEapLevel(currentEap) === 0
+        );
+
+        let assignedEap = '';
+        let assignedLevel = 1;
+        if (isCurrentSecao && currentEap) {
+          const root = currentEap.split('.')[0];
+          assignedEap = `${root}.1`;
+          assignedLevel = 1;
+        } else if (currentEap) {
+          const parts = currentEap.split('.').filter(Boolean);
+          const lastNum = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(lastNum)) {
+            parts[parts.length - 1] = String(lastNum + 1);
+            assignedEap = parts.join('.');
+          } else {
+            assignedEap = `${currentEap}.1`;
+          }
+          assignedLevel = Math.max(0, parts.length - 1);
+        }
+
+        if (assignedEap) {
+          setItens(prev => {
+            const copy = [...prev];
+            if (copy[nextRow]) {
+              copy[nextRow] = {
+                ...copy[nextRow],
+                item_eap: assignedEap,
+                level: assignedLevel
+              } as any;
+              return ensureSingleTrailingBlankRow(rebuildEapCodes(copy), id || 'temp');
+            }
+            return prev;
+          });
+        }
+      }
+    }
+
+    // Define qual coluna focar: se estava editando quantidade ou valor e a próxima for editável nesse campo, mantém.
+    // Caso contrário (ou se estava na descrição), foca na Descrição (colIndex 1) da linha debaixo.
+    const nextItem = computedItens[nextRow];
+    const targetCol = (colIndex !== 1 && nextItem && isCellEditable(nextItem, colIndex, exibirBdi))
+      ? colIndex
+      : 1;
+
+    setSelectedRowIndex(nextRow);
+    setSelectedRowIndices(new Set([nextRow]));
+    setActiveCell({ rowIndex: nextRow, colIndex: targetCol });
+    setIsEditingCell(true);
+    setShouldSelectAll(true);
+  };
 
   const handleTdKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
     if (isEditingCell) return;
 
     const item = computedItens[rowIndex];
     const editable = item ? isCellEditable(item, colIndex, exibirBdi) : false;
+
+    if (e.shiftKey && (e.key === 'ArrowUp' || e.key === 'ArrowDown')) {
+      e.preventDefault();
+      const delta = e.key === 'ArrowUp' ? -1 : 1;
+      const targetRow = Math.max(0, Math.min(computedItens.length - 1, rowIndex + delta));
+      selectRows(targetRow, { shiftKey: true });
+      navigateCell(delta, 0);
+      return;
+    }
+
+    if (selectedRowIndices.size > 1 && e.key === 'Tab') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        outdentMultipleRows();
+      } else {
+        indentMultipleRows();
+      }
+      return;
+    }
 
     if (e.key === 'ArrowUp') {
       e.preventDefault();
@@ -1150,7 +1385,7 @@ export default function OrcamentoBuilder() {
         setShouldSelectAll(true);
         setIsEditingCell(true);
       } else {
-        navigateCell(1, 0);
+        handleEnterKeyOnCell(rowIndex, colIndex);
       }
     } else if (e.key === 'Escape') {
       e.preventDefault();
@@ -1176,12 +1411,11 @@ export default function OrcamentoBuilder() {
     }
   };
 
-  const handleInputKeyDownInCell = (e: React.KeyboardEvent, rowIndex: number, _colIndex: number) => {
+  const handleInputKeyDownInCell = (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
     e.stopPropagation();
     if (e.key === 'Enter') {
       e.preventDefault();
-      setIsEditingCell(false);
-      navigateCell(1, 0);
+      handleEnterKeyOnCell(rowIndex, colIndex);
     } else if (e.key === 'Tab') {
       e.preventDefault();
       setIsEditingCell(false);
@@ -1408,7 +1642,7 @@ export default function OrcamentoBuilder() {
     const isEditingInput = activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA');
 
     const item = itens[index];
-    if (!item || isEditingInput || ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '')) {
+    if (!item || isEditingInput || e.ctrlKey || e.metaKey || e.shiftKey || ((item.item_eap || '').trim() === '' && (item.descricao || '').trim() === '')) {
       e.preventDefault();
       return;
     }
@@ -1622,40 +1856,31 @@ export default function OrcamentoBuilder() {
     return result;
   };
 
+  const handleRowMouseDown = (index: number, e: React.MouseEvent) => {
+    if (e.button !== 0) return;
+    const target = e.target as HTMLElement;
+    if (target.closest('button') || target.closest('a')) return;
+
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      e.preventDefault();
+      if (document.activeElement instanceof HTMLElement) {
+        document.activeElement.blur();
+      }
+      setIsEditingCell(false);
+      selectRows(index, e);
+    }
+  };
+
   const handleRowClick = (index: number, e: React.MouseEvent) => {
     const target = e.target as HTMLElement;
     if (target.closest('button') || target.closest('a')) return;
 
-    if (activeCell && activeCell.rowIndex !== index) {
-      if (!checkCurrentQuantityValid(activeCell.rowIndex)) {
-        setIsEditingCell(true);
-        return;
-      }
+    if (e.ctrlKey || e.metaKey || e.shiftKey) {
+      // Já manipulado no onMouseDown (handleRowMouseDown) para evitar conflitos de foco e dupla alternância
+      return;
     }
 
-    setSelectedRowIndex(index);
-
-    setSelectedRowIndices(prev => {
-      const copy = new Set(prev);
-      if (e.ctrlKey || e.metaKey) {
-        if (copy.has(index)) {
-          copy.delete(index);
-        } else {
-          copy.add(index);
-        }
-      } else if (e.shiftKey && selectedRowIndex !== null) {
-        copy.clear();
-        const start = Math.min(selectedRowIndex, index);
-        const end = Math.max(selectedRowIndex, index);
-        for (let i = start; i <= end; i++) {
-          copy.add(i);
-        }
-      } else {
-        copy.clear();
-        copy.add(index);
-      }
-      return copy;
-    });
+    selectRows(index, e);
   };
 
   const canItemBeParent = (item: OrcamentoItem | null | undefined): boolean => {
@@ -1746,9 +1971,11 @@ export default function OrcamentoBuilder() {
   const handleInputFocus = (index: number, colIndex: number = 1) => {
     setSelectedRowIndex(index);
     setSelectedRowIndices(prev => {
+      if (prev.has(index) && prev.size > 1) return prev;
       if (prev.has(index) && prev.size === 1) return prev;
       return new Set([index]);
     });
+    selectionAnchorIndexRef.current = index;
     setActiveCell({ rowIndex: index, colIndex });
   };
 
@@ -2094,6 +2321,29 @@ export default function OrcamentoBuilder() {
         if (dbEquipe.jornadas) setEquipeJornadasMap(dbEquipe.jornadas);
       }
 
+      // Restaura mapeamento do cronograma (predecessoras e data inicio)
+      const localCron = id ? localStorage.getItem(`orcamento_cronograma_${id}`) : null;
+      let dbCron = (orcData.dados_complementares as any)?.cronograma_config || null;
+      if (localCron) {
+        try {
+          const parsed = JSON.parse(localCron);
+          if (parsed.predecessoras) setCronogramaPredecessorasMap(parsed.predecessoras);
+          if (parsed.dataInicio) setCronogramaDataInicio(parsed.dataInicio);
+        } catch (e) {}
+      } else if (dbCron) {
+        if (dbCron.predecessoras) setCronogramaPredecessorasMap(dbCron.predecessoras);
+        if (dbCron.dataInicio) setCronogramaDataInicio(dbCron.dataInicio);
+      }
+
+      // Restaura mapeamento dos custos indiretos do banco de dados se não estiver no localStorage
+      const localIndireto = id ? localStorage.getItem(`brp_indireto_config_${id}`) : null;
+      let dbIndireto = (orcData.dados_complementares as any)?.indireto_config || null;
+      if (!localIndireto && dbIndireto && id) {
+        try {
+          localStorage.setItem(`brp_indireto_config_${id}`, JSON.stringify(dbIndireto));
+        } catch (e) {}
+      }
+
       const clientName = orcData.cliente || orcData.cliente_nome || '';
       const resolvedLocation = resolveCidadeEstadoFromCliente(
         clientName,
@@ -2227,7 +2477,14 @@ export default function OrcamentoBuilder() {
       }
 
       const rebuilt = rebuildEapCodes(cleanList);
-      setItens(ensureSingleTrailingBlankRow(rebuilt, id!));
+      let initialItensList = rebuilt;
+      try {
+        const activeIndiretoConfig = loadIndiretoConfig(id || 'temp');
+        initialItensList = updateSyncedEapItemsWithNewConfig(rebuilt, activeIndiretoConfig, id || 'temp');
+      } catch (e) {
+        console.error('Erro ao sincronizar indiretos no carregamento inicial:', e);
+      }
+      setItens(ensureSingleTrailingBlankRow(initialItensList, id!));
 
       // Carrega memórias de cálculo associadas do LocalStorage
       if (id) {
@@ -2380,6 +2637,14 @@ export default function OrcamentoBuilder() {
       item.total = (item.quantidade || 0) * item.valor_unitario;
 
       copy[index] = item;
+
+      // Sincroniza bidirecionalmente com custos indiretos se o item pertencer a esse grupo
+      try {
+        syncEapChangeToIndiretoConfig(id || 'temp', item, String(field), value, copy);
+      } catch (e) {
+        console.error('Erro ao sincronizar célula com custos indiretos:', e);
+      }
+
       const rebuilt = rebuildEapCodes(copy);
       return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
@@ -2868,14 +3133,26 @@ export default function OrcamentoBuilder() {
             duracoes: equipeDuracoesMap,
             jornadas: equipeJornadasMap
           }));
+          localStorage.setItem(`orcamento_cronograma_${id}`, JSON.stringify({
+            predecessoras: cronogramaPredecessorasMap,
+            dataInicio: cronogramaDataInicio
+          }));
           localStorage.setItem(`brp_orcamento_itens_${id}`, JSON.stringify(itens));
         } catch (e) {}
       }
 
       const rawDC = orcamento?.dadosComplementares || [];
+      const cronConfig = { predecessoras: cronogramaPredecessorasMap, dataInicio: cronogramaDataInicio };
+      const eqConfig = { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap };
+      let indiretoConfig = null;
+      try {
+        const rawInd = id ? localStorage.getItem(`brp_indireto_config_${id}`) : null;
+        if (rawInd) indiretoConfig = JSON.parse(rawInd);
+      } catch (e) {}
+
       const updatedDCPayload = Array.isArray(rawDC)
-        ? { items: rawDC, equipe_config: { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap } }
-        : { ...(typeof rawDC === 'object' ? rawDC : {}), equipe_config: { duracoes: equipeDuracoesMap, jornadas: equipeJornadasMap } };
+        ? { items: rawDC, equipe_config: eqConfig, cronograma_config: cronConfig, indireto_config: indiretoConfig }
+        : { ...(typeof rawDC === 'object' ? rawDC : {}), equipe_config: eqConfig, cronograma_config: cronConfig, indireto_config: indiretoConfig };
 
       const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
 
@@ -3515,6 +3792,53 @@ export default function OrcamentoBuilder() {
     }, { mat: 0, mo: 0, total: 0 });
   }, [computedItens]);
 
+  // Custo Direto da Planilha Orçamentária (excluindo linhas de custos indiretos que já estejam na EAP)
+  const custoDiretoPlanilha = useMemo(() => {
+    const isIndireto = (item: any) => {
+      const d = (item.descricao || '').toUpperCase();
+      return (
+        d.includes('ADMINISTRAÇÃO LOCAL') || 
+        d.includes('CANTEIRO DE OBRA') || 
+        (item.id && String(item.id).startsWith('indireto-'))
+      );
+    };
+
+    // 1. Seções Nível 0 (1, 2, 3...)
+    const secaoRows = computedItens.filter(item => {
+      const eap = (item.item_eap || '').trim();
+      if (!eap) return false;
+      const parts = eap.split('.').filter(Boolean);
+      return parts.length === 1 || (parts.length === 2 && parts[1] === '0');
+    });
+
+    if (secaoRows.length > 0) {
+      return secaoRows.reduce((acc, item) => {
+        if (isIndireto(item)) return acc;
+        return acc + (item.total || 0);
+      }, 0);
+    }
+
+    // 2. Se não houver seções Nível 0, soma itens Nível 1 diretos
+    const eapSet = new Set(computedItens.map(i => (i.item_eap || '').trim()).filter(Boolean));
+    return computedItens.reduce((acc, item) => {
+      const eap = (item.item_eap || '').trim();
+      if (!eap) return acc;
+      if (isIndireto(item)) return acc;
+
+      const parts = eap.split('.').filter(Boolean);
+      let isRootLevel1 = false;
+      if (parts.length === 2) {
+        isRootLevel1 = true;
+      } else if (parts.length > 2) {
+        const parentEap = parts.slice(0, parts.length - 1).join('.');
+        if (!eapSet.has(parentEap)) {
+          isRootLevel1 = true;
+        }
+      }
+      return isRootLevel1 ? acc + (item.total || 0) : acc;
+    }, 0);
+  }, [computedItens]);
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-500">
@@ -3713,75 +4037,83 @@ export default function OrcamentoBuilder() {
           {/* Sub-Linha 1 (CIMA): BDI Empilhado, Curva ABC, Exportar, Salvar & Workflow */}
           <div className="flex items-center gap-1.5 flex-wrap justify-end">
             {/* Botões BDI Lado a Lado (Proporcionais, Visíveis e Alinhados) */}
-            <button 
-              type="button"
-              onClick={() => setExibirBdi(!exibirBdi)}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs whitespace-nowrap",
-                exibirBdi 
-                  ? "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100" 
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-              )}
-              title={exibirBdi ? 'Ocultar BDI na planilha' : 'Exibir BDI na planilha'}
-            >
-              <Calculator className="w-3.5 h-3.5 text-emerald-600" />
-              <span>{exibirBdi ? 'COM BDI' : 'SEM BDI'}</span>
-            </button>
+            {['planilha', 'memoria_calculo'].includes(activeSubTab) && (
+              <>
+                <button 
+                  type="button"
+                  onClick={() => setExibirBdi(!exibirBdi)}
+                  className={clsx(
+                    "px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs whitespace-nowrap",
+                    exibirBdi 
+                      ? "bg-emerald-50 text-emerald-700 border-emerald-300 hover:bg-emerald-100" 
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  )}
+                  title={exibirBdi ? 'Ocultar BDI na planilha' : 'Exibir BDI na planilha'}
+                >
+                  <Calculator className="w-3.5 h-3.5 text-emerald-600" />
+                  <span>{exibirBdi ? 'COM BDI' : 'SEM BDI'}</span>
+                </button>
 
-            <button 
-              type="button"
-              onClick={() => setShowConfig(!showConfig)}
-              className={clsx(
-                "px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs whitespace-nowrap",
-                showConfig 
-                  ? "bg-blue-50 text-blue-700 border-blue-300" 
-                  : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
-              )}
-              title="Configurações do BDI"
-            >
-              <Settings2 className="w-3.5 h-3.5 text-slate-500" />
-              <span>BDI / Config.</span>
-            </button>
+                <button 
+                  type="button"
+                  onClick={() => setShowConfig(!showConfig)}
+                  className={clsx(
+                    "px-2.5 py-1.5 rounded-lg text-[11px] font-bold border transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs whitespace-nowrap",
+                    showConfig 
+                      ? "bg-blue-50 text-blue-700 border-blue-300" 
+                      : "bg-white text-slate-700 border-slate-200 hover:bg-slate-50"
+                  )}
+                  title="Configurações do BDI"
+                >
+                  <Settings2 className="w-3.5 h-3.5 text-slate-500" />
+                  <span>BDI / Config.</span>
+                </button>
 
-            <div className="w-px h-4 bg-slate-200 self-center" />
+                <div className="w-px h-4 bg-slate-200 self-center" />
 
-            {/* Curva ABC, Exportar & Salvar */}
-            <button 
-              type="button"
-              onClick={() => navigate(`/curva-abc?id=${id}`)}
-              className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Abrir a Curva ABC deste orçamento"
-            >
-              <BarChart3 className="w-3.5 h-3.5 text-purple-600" />
-              <span>Curva ABC</span>
-            </button>
+                {/* Curva ABC, Exportar & Salvar */}
+                <button 
+                  type="button"
+                  onClick={() => navigate(`/curva-abc?id=${id}`)}
+                  className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                  title="Abrir a Curva ABC deste orçamento"
+                >
+                  <BarChart3 className="w-3.5 h-3.5 text-purple-600" />
+                  <span>Curva ABC</span>
+                </button>
+              </>
+            )}
 
-            <button 
-              type="button"
-              onClick={() => setShowExportModal(true)}
-              className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Exportar Orçamento Completo ou por Aba (Excel .xlsx / PDF)"
-            >
-              <Download className="w-3.5 h-3.5 text-emerald-700" />
-              <span>Exportar</span>
-            </button>
+            {['planilha', 'memoria_calculo', 'distribuicao_equipe'].includes(activeSubTab) && (
+              <button 
+                type="button"
+                onClick={() => setShowExportModal(true)}
+                className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                title="Exportar Orçamento Completo ou por Aba (Excel .xlsx / PDF)"
+              >
+                <Download className="w-3.5 h-3.5 text-emerald-700" />
+                <span>Exportar</span>
+              </button>
+            )}
 
-            <button 
-              type="button"
-              onClick={() => {
-                downloadMsProjectXML({
-                  orcamentoInfo: orcamento,
-                  itens: computedItens,
-                  duracoesMap: equipeDuracoesMap,
-                  jornadasMap: equipeJornadasMap
-                });
-              }}
-              className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-              title="Exportar Cronograma para o MS Project (.xml / .mpp)"
-            >
-              <Calendar className="w-3.5 h-3.5 text-indigo-700" />
-              <span>Exportar Cronograma</span>
-            </button>
+            {activeSubTab === 'cronograma' && (
+              <button 
+                type="button"
+                onClick={() => {
+                  downloadMsProjectXML({
+                    orcamentoInfo: orcamento,
+                    itens: computedItens,
+                    duracoesMap: equipeDuracoesMap,
+                    jornadasMap: equipeJornadasMap
+                  });
+                }}
+                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
+                title="Exportar Cronograma para o MS Project (.xml / .mpp)"
+              >
+                <Calendar className="w-3.5 h-3.5 text-indigo-700" />
+                <span>Exportar Cronograma</span>
+              </button>
+            )}
 
             <button
               type="button"
@@ -3794,213 +4126,217 @@ export default function OrcamentoBuilder() {
               <span>{saving ? 'Salvando...' : 'Salvar'}</span>
             </button>
 
-            <div className="w-px h-4 bg-slate-200 self-center" />
+            {['planilha', 'memoria_calculo'].includes(activeSubTab) && (
+              <>
+                <div className="w-px h-4 bg-slate-200 self-center" />
 
-            {/* Ações de Workflow (Enviar & Cancelar LADO A LADO) */}
-            {(() => {
-              const rawStatus = (orcamento?.status || '').trim();
-              const isAgValidacao = rawStatus.toLowerCase().includes('valida');
-              const isEnviada = rawStatus.toLowerCase() === 'enviada';
-              const isCancelada = rawStatus.toLowerCase() === 'cancelada';
-              const isAprovado = orcamento?.aprovado === true;
-              const isRecusado = (orcamento?.decisao_gestor === 'recusar' || (id ? localStorage.getItem(`orcamento_decisao_${id}`) === 'recusar' : false)) && !isAprovado;
-              const isEmAndamento = !isAgValidacao && !isEnviada && !isCancelada;
+                {/* Ações de Workflow (Enviar & Cancelar LADO A LADO) */}
+                {(() => {
+                  const rawStatus = (orcamento?.status || '').trim();
+                  const isAgValidacao = rawStatus.toLowerCase().includes('valida');
+                  const isEnviada = rawStatus.toLowerCase() === 'enviada';
+                  const isCancelada = rawStatus.toLowerCase() === 'cancelada';
+                  const isAprovado = orcamento?.aprovado === true;
+                  const isRecusado = (orcamento?.decisao_gestor === 'recusar' || (id ? localStorage.getItem(`orcamento_decisao_${id}`) === 'recusar' : false)) && !isAprovado;
+                  const isEmAndamento = !isAgValidacao && !isEnviada && !isCancelada;
 
-              if (isAprovado && !isEnviada && !isCancelada) {
-                return (
-                  <div className="flex items-center gap-1">
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => setShowStatusEnvioModal(true)}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 border-emerald-400 text-emerald-800 bg-emerald-100 hover:bg-emerald-200 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <Send className="w-3 h-3" />
-                      <span>{updatingStatus ? 'Enviando...' : 'Enviar ao Cliente'}</span>
-                    </button>
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <XCircle className="w-3 h-3 text-rose-500" />
-                      <span>Cancelar</span>
-                    </button>
-                  </div>
-                );
-              }
+                  if (isAprovado && !isEnviada && !isCancelada) {
+                    return (
+                      <div className="flex items-center gap-1">
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => setShowStatusEnvioModal(true)}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 border-emerald-400 text-emerald-800 bg-emerald-100 hover:bg-emerald-200 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>{updatingStatus ? 'Enviando...' : 'Enviar ao Cliente'}</span>
+                        </button>
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) handleUpdateStatus('Cancelada'); }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <XCircle className="w-3 h-3 text-rose-500" />
+                          <span>Cancelar</span>
+                        </button>
+                      </div>
+                    );
+                  }
 
-              if (isAgValidacao && !isAprovado && !isCancelada) {
-                return (
-                  <div className="flex items-center gap-1">
-                    <span className="px-2 py-1 rounded-lg text-[10px] font-semibold border border-amber-200 text-amber-700 bg-amber-50 flex items-center gap-1 whitespace-nowrap">
-                      <Clock className="w-3 h-3 animate-pulse shrink-0 text-amber-600" />
-                      <span>Ag. aprovação</span>
-                    </span>
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => { if (window.confirm('Cancelar este orçamento e remover do fluxo de aprovação?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <XCircle className="w-3 h-3 text-rose-500" />
-                      <span>Cancelar</span>
-                    </button>
-                  </div>
-                );
-              }
+                  if (isAgValidacao && !isAprovado && !isCancelada) {
+                    return (
+                      <div className="flex items-center gap-1">
+                        <span className="px-2 py-1 rounded-lg text-[10px] font-semibold border border-amber-200 text-amber-700 bg-amber-50 flex items-center gap-1 whitespace-nowrap">
+                          <Clock className="w-3 h-3 animate-pulse shrink-0 text-amber-600" />
+                          <span>Ag. aprovação</span>
+                        </span>
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => { if (window.confirm('Cancelar este orçamento e remover do fluxo de aprovação?')) handleUpdateStatus('Cancelada'); }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <XCircle className="w-3 h-3 text-rose-500" />
+                          <span>Cancelar</span>
+                        </button>
+                      </div>
+                    );
+                  }
 
-              if (isRecusado && !isEnviada && !isCancelada) {
-                return (
-                  <div className="flex items-center gap-1">
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => { if (window.confirm('Enviar esta planilha revisada para nova validação do gestor?')) handleUpdateStatus('Ag. Validação'); }}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <Send className="w-3 h-3" />
-                      <span>{updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}</span>
-                    </button>
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento recusado?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <XCircle className="w-3 h-3 text-rose-500" />
-                      <span>Cancelar</span>
-                    </button>
-                  </div>
-                );
-              }
+                  if (isRecusado && !isEnviada && !isCancelada) {
+                    return (
+                      <div className="flex items-center gap-1">
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => { if (window.confirm('Enviar esta planilha revisada para nova validação do gestor?')) handleUpdateStatus('Ag. Validação'); }}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold border-2 border-amber-400 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>{updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}</span>
+                        </button>
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento recusado?')) handleUpdateStatus('Cancelada'); }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <XCircle className="w-3 h-3 text-rose-500" />
+                          <span>Cancelar</span>
+                        </button>
+                      </div>
+                    );
+                  }
 
-              if (isEmAndamento) {
-                const decisao = orcamento?.decisao_gestor || (id ? localStorage.getItem(`orcamento_decisao_${id}`) : null);
-                const isComPendencia = decisao === 'aprovar_pendencia';
+                  if (isEmAndamento) {
+                    const decisao = orcamento?.decisao_gestor || (id ? localStorage.getItem(`orcamento_decisao_${id}`) : null);
+                    const isComPendencia = decisao === 'aprovar_pendencia';
 
-                return (
-                  <div className="flex items-center gap-1">
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => { if (window.confirm('Enviar esta planilha para validação do gestor?')) handleUpdateStatus('Ag. Validação'); }}
-                      className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <Send className="w-3 h-3 text-amber-700" />
-                      <span>{updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}</span>
-                    </button>
+                    return (
+                      <div className="flex items-center gap-1">
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => { if (window.confirm('Enviar esta planilha para validação do gestor?')) handleUpdateStatus('Ag. Validação'); }}
+                          className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-amber-300 text-amber-800 bg-amber-50 hover:bg-amber-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <Send className="w-3 h-3 text-amber-700" />
+                          <span>{updatingStatus ? 'Enviando...' : 'Enviar p/ Validação'}</span>
+                        </button>
 
-                    {isComPendencia && (
-                      <button
-                        disabled={updatingStatus || isReadOnly}
-                        onClick={() => setShowStatusEnvioModal(true)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                      >
-                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                        <span>Confirmar Envio</span>
-                      </button>
-                    )}
+                        {isComPendencia && (
+                          <button
+                            disabled={updatingStatus || isReadOnly}
+                            onClick={() => setShowStatusEnvioModal(true)}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-emerald-300 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                          >
+                            <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                            <span>Confirmar Envio</span>
+                          </button>
+                        )}
 
-                    <button
-                      disabled={updatingStatus || isReadOnly}
-                      onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) handleUpdateStatus('Cancelada'); }}
-                      className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <XCircle className="w-3 h-3 text-rose-500" />
-                      <span>Cancelar</span>
-                    </button>
-                  </div>
-                );
-              }
+                        <button
+                          disabled={updatingStatus || isReadOnly}
+                          onClick={() => { if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) handleUpdateStatus('Cancelada'); }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-semibold border border-rose-200 text-rose-600 bg-rose-50 hover:bg-rose-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <XCircle className="w-3 h-3 text-rose-500" />
+                          <span>Cancelar</span>
+                        </button>
+                      </div>
+                    );
+                  }
 
-              if (isEnviada) {
-                return (
-                  <div className="flex items-center gap-1">
-                    <div className="relative">
-                      <button
-                        disabled={updatingStatus}
-                        onClick={() => setShowStatusEnvioMenu(p => !p)}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                      >
-                        <span>Status de Envio</span>
-                        {showStatusEnvioMenu ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-                      </button>
-                      {showStatusEnvioMenu && (
-                        <>
-                          <div className="fixed inset-0 z-30" onClick={() => setShowStatusEnvioMenu(false)} />
-                          <div className="absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-40 text-xs text-slate-700 font-medium">
-                            {STATUS_ENVIO_OPTIONS.map(opt => (
-                              <button
-                                key={opt}
-                                onClick={() => {
-                                  if (opt === 'Cancelado' || opt === 'Cancelada') {
-                                    handleUpdateStatus('Cancelado', 'Cancelado');
-                                  } else {
-                                    handleUpdateStatus('Enviada', opt);
-                                  }
-                                  setShowStatusEnvioMenu(false);
-                                }}
-                                className={clsx('w-full text-left px-4 py-2 hover:bg-slate-50 cursor-pointer transition-colors', orcamento?.status_envio === opt && 'bg-blue-50 text-blue-700 font-bold')}
-                              >
-                                {opt}
-                              </button>
-                            ))}
-                            <div className="border-t border-slate-100 my-1" />
-                            <button
-                              onClick={() => {
-                                if (window.confirm('Deseja retornar este orçamento para o status "Em andamento"?')) {
-                                  handleUpdateStatus('Em andamento', null);
-                                  setShowStatusEnvioMenu(false);
-                                }
-                              }}
-                              className="w-full text-left px-4 py-2 hover:bg-amber-50 text-amber-700 font-semibold cursor-pointer transition-colors flex items-center gap-1.5"
-                            >
-                              <ArrowLeft className="w-3.5 h-3.5" /> Voltar p/ Em andamento
-                            </button>
-                            <button
-                              onClick={() => {
-                                if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) {
-                                  handleUpdateStatus('Cancelada', 'Cancelada');
-                                  setShowStatusEnvioMenu(false);
-                                }
-                              }}
-                              className="w-full text-left px-4 py-2 hover:bg-rose-50 text-rose-600 font-semibold cursor-pointer transition-colors flex items-center gap-1.5"
-                            >
-                              <XCircle className="w-3.5 h-3.5 text-rose-500" /> Cancelar Orçamento
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
+                  if (isEnviada) {
+                    return (
+                      <div className="flex items-center gap-1">
+                        <div className="relative">
+                          <button
+                            disabled={updatingStatus}
+                            onClick={() => setShowStatusEnvioMenu(p => !p)}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-slate-200 text-slate-700 bg-white hover:bg-slate-50 transition-colors cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                          >
+                            <span>Status de Envio</span>
+                            {showStatusEnvioMenu ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
+                          </button>
+                          {showStatusEnvioMenu && (
+                            <>
+                              <div className="fixed inset-0 z-30" onClick={() => setShowStatusEnvioMenu(false)} />
+                              <div className="absolute right-0 mt-1.5 w-52 bg-white border border-slate-200 rounded-xl shadow-xl py-1.5 z-40 text-xs text-slate-700 font-medium">
+                                {STATUS_ENVIO_OPTIONS.map(opt => (
+                                  <button
+                                    key={opt}
+                                    onClick={() => {
+                                      if (opt === 'Cancelado' || opt === 'Cancelada') {
+                                        handleUpdateStatus('Cancelado', 'Cancelado');
+                                      } else {
+                                        handleUpdateStatus('Enviada', opt);
+                                      }
+                                      setShowStatusEnvioMenu(false);
+                                    }}
+                                    className={clsx('w-full text-left px-4 py-2 hover:bg-slate-50 cursor-pointer transition-colors', orcamento?.status_envio === opt && 'bg-blue-50 text-blue-700 font-bold')}
+                                  >
+                                    {opt}
+                                  </button>
+                                ))}
+                                <div className="border-t border-slate-100 my-1" />
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('Deseja retornar este orçamento para o status "Em andamento"?')) {
+                                      handleUpdateStatus('Em andamento', null);
+                                      setShowStatusEnvioMenu(false);
+                                    }
+                                  }}
+                                  className="w-full text-left px-4 py-2 hover:bg-amber-50 text-amber-700 font-semibold cursor-pointer transition-colors flex items-center gap-1.5"
+                                >
+                                  <ArrowLeft className="w-3.5 h-3.5" /> Voltar p/ Em andamento
+                                </button>
+                                <button
+                                  onClick={() => {
+                                    if (window.confirm('Tem certeza que deseja cancelar este orçamento?')) {
+                                      handleUpdateStatus('Cancelada', 'Cancelada');
+                                      setShowStatusEnvioMenu(false);
+                                    }
+                                  }}
+                                  className="w-full text-left px-4 py-2 hover:bg-rose-50 text-rose-600 font-semibold cursor-pointer transition-colors flex items-center gap-1.5"
+                                >
+                                  <XCircle className="w-3.5 h-3.5 text-rose-500" /> Cancelar Orçamento
+                                </button>
+                              </div>
+                            </>
+                          )}
+                        </div>
 
-                    {!isReadOnly && !higherRevisionObj && orcamento?.status_envio === 'Encerrada' && (
-                      <button
-                        disabled={updatingStatus}
-                        onClick={handleCreateRevisionFromCurrent}
-                        className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-100 transition-all cursor-pointer flex items-center gap-1 justify-center shadow-2xs whitespace-nowrap"
-                      >
-                        <Plus className="w-3 h-3" /> + Nova Revisão
-                      </button>
-                    )}
-                  </div>
-                );
-              }
+                        {!isReadOnly && !higherRevisionObj && orcamento?.status_envio === 'Encerrada' && (
+                          <button
+                            disabled={updatingStatus}
+                            onClick={handleCreateRevisionFromCurrent}
+                            className="px-2.5 py-1 rounded-lg text-[11px] font-bold border border-purple-300 text-purple-700 bg-purple-50 hover:bg-purple-100 transition-all cursor-pointer flex items-center gap-1 justify-center shadow-2xs whitespace-nowrap"
+                          >
+                            <Plus className="w-3 h-3" /> + Nova Revisão
+                          </button>
+                        )}
+                      </div>
+                    );
+                  }
 
-              if (isCancelada) {
-                return (
-                  <div className="flex items-center gap-1">
-                    <span className="px-2 py-1 rounded-lg text-[10px] font-bold border border-rose-200 text-rose-700 bg-rose-50 flex items-center gap-1 whitespace-nowrap">
-                      <XCircle className="w-3 h-3 text-rose-600 shrink-0" /> Cancelado
-                    </span>
-                    <button
-                      disabled={updatingStatus}
-                      onClick={() => { if (window.confirm('Reabrir este orçamento para o status "Em andamento"?')) handleUpdateStatus('Em andamento', null); }}
-                      className="px-2 py-1 rounded-lg text-[11px] font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
-                    >
-                      <ArrowLeft className="w-3.5 h-3.5" /> Reabrir
-                    </button>
-                  </div>
-                );
-              }
+                  if (isCancelada) {
+                    return (
+                      <div className="flex items-center gap-1">
+                        <span className="px-2 py-1 rounded-lg text-[10px] font-bold border border-rose-200 text-rose-700 bg-rose-50 flex items-center gap-1 whitespace-nowrap">
+                          <XCircle className="w-3 h-3 text-rose-600 shrink-0" /> Cancelado
+                        </span>
+                        <button
+                          disabled={updatingStatus}
+                          onClick={() => { if (window.confirm('Reabrir este orçamento para o status "Em andamento"?')) handleUpdateStatus('Em andamento', null); }}
+                          className="px-2 py-1 rounded-lg text-[11px] font-bold border border-blue-300 text-blue-700 bg-blue-50 hover:bg-blue-100 transition-all cursor-pointer flex items-center gap-1 disabled:opacity-50 shadow-2xs whitespace-nowrap"
+                        >
+                          <ArrowLeft className="w-3.5 h-3.5" /> Reabrir
+                        </button>
+                      </div>
+                    );
+                  }
 
-              return null;
-            })()}
+                  return null;
+                })()}
+              </>
+            )}
           </div>
 
           {/* Sub-Linha 2 (BAIXO): Ferramentas da Tabela (Exibidas apenas na aba Planilha Orçamentária) */}
@@ -4085,25 +4421,40 @@ export default function OrcamentoBuilder() {
               </div>
 
               {/* Indent / Outdent */}
-              <div className="flex border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shadow-2xs">
-                <button
-                  type="button"
-                  disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
-                  onClick={outdentMultipleRows}
-                  title="Recuar à Esquerda (Alt+Shift+←)"
-                  className="p-1 bg-white disabled:opacity-40 text-slate-600 hover:text-blue-600 rounded cursor-pointer transition-all border border-slate-200"
-                >
-                  <Outdent className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
-                  onClick={indentMultipleRows}
-                  title="Recuar à Direita (Alt+Shift+→)"
-                  className="p-1 bg-white disabled:opacity-40 text-slate-600 hover:text-blue-600 rounded cursor-pointer transition-all border border-slate-200"
-                >
-                  <Indent className="w-3 h-3" />
-                </button>
+              <div className="flex items-center gap-1.5">
+                <div className="flex border border-slate-200 rounded-lg p-0.5 bg-slate-50 gap-0.5 shadow-2xs">
+                  <button
+                    type="button"
+                    disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
+                    onClick={outdentMultipleRows}
+                    title={selectedRowIndices.size > 1 
+                      ? `Recuar ${selectedRowIndices.size} linhas selecionadas à Esquerda (Alt+Shift+← ou Shift+Tab)`
+                      : "Recuar à Esquerda (Alt+Shift+← ou Shift+Tab)"}
+                    className="px-2 py-1 bg-white disabled:opacity-40 text-slate-700 hover:text-blue-600 hover:border-blue-300 rounded cursor-pointer transition-all border border-slate-200 flex items-center gap-1 text-[11px] font-semibold"
+                  >
+                    <Outdent className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Recuar</span>
+                  </button>
+                  <button
+                    type="button"
+                    disabled={selectedRowIndices.size === 0 && selectedRowIndex === null}
+                    onClick={indentMultipleRows}
+                    title={selectedRowIndices.size > 1 
+                      ? `Avançar ${selectedRowIndices.size} linhas selecionadas à Direita (Alt+Shift+→ ou Tab)`
+                      : "Avançar à Direita (Alt+Shift+→ ou Tab)"}
+                    className="px-2 py-1 bg-white disabled:opacity-40 text-slate-700 hover:text-blue-600 hover:border-blue-300 rounded cursor-pointer transition-all border border-slate-200 flex items-center gap-1 text-[11px] font-semibold"
+                  >
+                    <Indent className="w-3.5 h-3.5 text-blue-600" />
+                    <span>Avançar</span>
+                  </button>
+                </div>
+
+                {selectedRowIndices.size > 1 && (
+                  <div className="px-2 py-0.5 bg-blue-50 border border-blue-200 text-blue-700 rounded-md text-[11px] font-bold flex items-center gap-1 animate-fadeIn shadow-2xs">
+                    <CheckSquare className="w-3 h-3 text-blue-600" />
+                    <span>{selectedRowIndices.size} linhas selecionadas</span>
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -4306,69 +4657,19 @@ export default function OrcamentoBuilder() {
 
       {/* ── Painel de Configurações / BDI ────────────────────────────────────── */}
       {showConfig && (
-        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6 space-y-6">
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-5 space-y-4">
           <div className="flex justify-between items-center pb-3 border-b border-slate-100">
             <h3 className="font-bold text-slate-900 flex items-center gap-2 text-base">
-              <Settings2 className="w-5 h-5 text-blue-600" />
-              Configurações e Parâmetros de BDI
+              <Calculator className="w-5 h-5 text-blue-600" />
+              Parâmetros e Composição de BDI
             </h3>
-            <button onClick={() => setShowConfig(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer">
+            <button onClick={() => setShowConfig(false)} className="text-slate-400 hover:text-slate-700 cursor-pointer" title="Fechar">
               <X className="w-5 h-5" />
             </button>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">Empresa Responsável</label>
-              <select
-                value={configData.empresa || 'BRP Soluções Metálicas'}
-                onChange={e => { setConfigData(p => ({ ...p, empresa: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-900 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
-              >
-                <option value="BRP Soluções Metálicas">BRP Soluções Metálicas</option>
-                <option value="BRP Engenharia">BRP Engenharia</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">Orçamentista / Responsável</label>
-              <input type="text" value={configData.responsavel || ''} 
-                onFocus={e => e.target.select()}
-                onChange={e => { setConfigData(p => ({ ...p, responsavel: e.target.value })); setHasUnsavedChanges(true); }}
-                placeholder="Nome do responsável"
-                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">Nome do Orçamento</label>
-              <input type="text" value={configData.nome} 
-                onFocus={e => e.target.select()}
-                onChange={e => { setConfigData(p => ({ ...p, nome: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">Nome do Projeto (Obra)</label>
-              <input type="text" value={configData.projeto} 
-                onFocus={e => e.target.select()}
-                onChange={e => { setConfigData(p => ({ ...p, projeto: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">Cliente</label>
-              <input type="text" value={configData.cliente} 
-                onFocus={e => e.target.select()}
-                onChange={e => { setConfigData(p => ({ ...p, cliente: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
-            </div>
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">Gestor do Cliente</label>
-              <input type="text" value={configData.gestor_cliente} 
-                onFocus={e => e.target.select()}
-                onChange={e => { setConfigData(p => ({ ...p, gestor_cliente: e.target.value })); setHasUnsavedChanges(true); }}
-                className="w-full px-3 py-1.5 border border-slate-300 bg-white rounded-lg text-sm font-semibold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
-            </div>
-          </div>
-
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
-            <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider mb-3">Composição do BDI (%)</h4>
+            <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider mb-3">Taxas de Composição (%)</h4>
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Adm. Central (AC)</label>
@@ -4447,67 +4748,114 @@ export default function OrcamentoBuilder() {
         </div>
       )}
 
-      {/* ── Sub-Abas do Orçamento (Planilha Orçamentária vs Memória de Cálculo vs Distribuição de Equipe) ── */}
-      <div className="shrink-0 flex items-center space-x-2 border-b border-slate-200 pb-2 overflow-x-auto">
-        <button
-          onClick={() => setActiveSubTab('planilha')}
-          className={clsx(
-            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0",
-            activeSubTab === 'planilha'
-              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-          )}
-        >
-          <FileSpreadsheet className="w-4 h-4" />
-          Planilha Orçamentária
-        </button>
-
-        <button
-          onClick={() => setActiveSubTab('memoria_calculo')}
-          className={clsx(
-            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
-            activeSubTab === 'memoria_calculo'
-              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-          )}
-        >
-          <Calculator className="w-4 h-4" />
-          Memória de Cálculo (Hub BRP)
-          {calculos.length > 0 && (
-            <span className={clsx(
-              "px-2 py-0.5 rounded-full text-[10px] font-extrabold",
-              activeSubTab === 'memoria_calculo' ? "bg-white text-blue-700" : "bg-blue-100 text-blue-700"
-            )}>
-              {calculos.length}
+      {/* ── Sub-Abas do Orçamento (Divididas em ORÇAMENTO vs PLANEJAMENTO) ── */}
+      <div className="shrink-0 flex items-center justify-between gap-4 border-b border-slate-200 pb-2.5 overflow-x-auto select-none">
+        <div className="flex items-center gap-4 min-w-max">
+          
+          {/* BLOCO 1: ORÇAMENTO (Planilha, Memória de Cálculo, Lista de Materiais) */}
+          <div className="flex items-center gap-1.5 p-1 bg-blue-50/70 rounded-2xl border border-blue-100/90 shadow-2xs">
+            <span className="px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wider text-blue-700/80 hidden sm:inline-block">
+              ORÇAMENTO
             </span>
-          )}
-        </button>
+            
+            <button
+              onClick={() => setActiveSubTab('planilha')}
+              className={clsx(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shrink-0",
+                activeSubTab === 'planilha'
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                  : "bg-white/80 text-blue-900 hover:bg-white hover:text-blue-700 border border-blue-200/60"
+              )}
+            >
+              <FileSpreadsheet className="w-3.5 h-3.5" />
+              Planilha Orçamentária
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('distribuicao_equipe')}
-          className={clsx(
-            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
-            activeSubTab === 'distribuicao_equipe'
-              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-          )}
-        >
-          <Users className="w-4 h-4" />
-          Distribuição de Equipe
-        </button>
+            <button
+              onClick={() => setActiveSubTab('memoria_calculo')}
+              className={clsx(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+                activeSubTab === 'memoria_calculo'
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                  : "bg-white/80 text-blue-900 hover:bg-white hover:text-blue-700 border border-blue-200/60"
+              )}
+            >
+              <Calculator className="w-3.5 h-3.5" />
+              Memória de Cálculo (Hub BRP)
+              {calculos.length > 0 && (
+                <span className={clsx(
+                  "px-1.5 py-0.2 rounded-full text-[9.5px] font-extrabold",
+                  activeSubTab === 'memoria_calculo' ? "bg-white text-blue-700" : "bg-blue-200/80 text-blue-800"
+                )}>
+                  {calculos.length}
+                </span>
+              )}
+            </button>
 
-        <button
-          onClick={() => setActiveSubTab('lista_materiais')}
-          className={clsx(
-            "px-4 py-2 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
-            activeSubTab === 'lista_materiais'
-              ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
-              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200"
-          )}
-        >
-          <Package className="w-4 h-4" />
-          Lista de Materiais
-        </button>
+            <button
+              onClick={() => setActiveSubTab('lista_materiais')}
+              className={clsx(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+                activeSubTab === 'lista_materiais'
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-500/20"
+                  : "bg-white/80 text-blue-900 hover:bg-white hover:text-blue-700 border border-blue-200/60"
+              )}
+            >
+              <Package className="w-3.5 h-3.5" />
+              Lista de Materiais
+            </button>
+          </div>
+
+          {/* Divisor Visual */}
+          <div className="h-6 w-px bg-slate-300/80 shrink-0" />
+
+          {/* BLOCO 2: PLANEJAMENTO (Distribuição de Equipe, Cronograma & Histogramas) */}
+          <div className="flex items-center gap-1.5 p-1 bg-emerald-50/70 rounded-2xl border border-emerald-100/90 shadow-2xs">
+            <span className="px-2 py-0.5 text-[9.5px] font-black uppercase tracking-wider text-emerald-700/80 hidden sm:inline-block">
+              PLANEJAMENTO
+            </span>
+
+            <button
+              onClick={() => setActiveSubTab('distribuicao_equipe')}
+              className={clsx(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+                activeSubTab === 'distribuicao_equipe'
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                  : "bg-white/80 text-emerald-900 hover:bg-white hover:text-emerald-700 border border-emerald-200/60"
+              )}
+            >
+              <Users className="w-3.5 h-3.5" />
+              Distribuição de Equipe
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab('cronograma')}
+              className={clsx(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+                activeSubTab === 'cronograma'
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                  : "bg-white/80 text-emerald-900 hover:bg-white hover:text-emerald-700 border border-emerald-200/60"
+              )}
+            >
+              <Calendar className="w-3.5 h-3.5" />
+              Cronograma & Histogramas
+            </button>
+
+            <button
+              onClick={() => setActiveSubTab('custos_indiretos')}
+              className={clsx(
+                "px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center gap-2 cursor-pointer relative shrink-0",
+                activeSubTab === 'custos_indiretos'
+                  ? "bg-emerald-600 text-white shadow-md shadow-emerald-500/20"
+                  : "bg-white/80 text-emerald-900 hover:bg-white hover:text-emerald-700 border border-emerald-200/60"
+              )}
+            >
+              <Building2 className="w-3.5 h-3.5" />
+              Custos Indiretos & Canteiro
+            </button>
+          </div>
+
+        </div>
       </div>
 
       {activeSubTab === 'memoria_calculo' ? (
@@ -4715,6 +5063,82 @@ export default function OrcamentoBuilder() {
             orcamentoInfo={orcamento} 
           />
         </div>
+      ) : activeSubTab === 'cronograma' ? (
+        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <CronogramaTab 
+            orcamentoId={id} 
+            itens={computedItens}
+            duracoesMap={equipeDuracoesMap}
+            predecessorasMap={cronogramaPredecessorasMap}
+            dataInicioObra={cronogramaDataInicio}
+            onChangeCronogramaConfig={(dur, pred, inicio) => {
+              setEquipeDuracoesMap(dur);
+              setCronogramaPredecessorasMap(pred);
+              setCronogramaDataInicio(inicio);
+              setHasUnsavedChanges(true);
+            }}
+          />
+        </div>
+      ) : activeSubTab === 'custos_indiretos' ? (
+        <div className="flex-1 overflow-auto min-h-0 bg-white rounded-2xl border border-slate-200 p-4 shadow-sm">
+          <CustosIndiretosTab
+            orcamentoId={id || 'temp'}
+            duracaoMesesPadrao={cronogramaDuracaoInfo.totalMonths || 6}
+            duracaoCronogramaDias={cronogramaDuracaoInfo.totalDays}
+            totalCustoDireto={custoDiretoPlanilha}
+            currentBdiAc={configData.bdi_ac}
+            onApplyBdi={(taxaPercent, modo) => {
+              pushUndoSnapshot();
+              setConfigData(prev => {
+                const novaAc = modo === 'somar' ? (prev.bdi_ac + taxaPercent) : taxaPercent;
+                return {
+                  ...prev,
+                  bdi_ac: Math.round(novaAc * 10000) / 10000
+                };
+              });
+              setHasUnsavedChanges(true);
+            }}
+            onChangeConfig={(newIndiretoConfig) => {
+              setItens(prev => {
+                const updated = updateSyncedEapItemsWithNewConfig(prev, newIndiretoConfig, id || 'temp');
+                if (updated === prev) return prev;
+                const rebuilt = rebuildEapCodes(updated);
+                return ensureSingleTrailingBlankRow(rebuilt, id || 'temp');
+              });
+              setHasUnsavedChanges(true);
+            }}
+            onSyncEap={(novosItensEap) => {
+              setItens(prev => {
+                const blankRows = prev.filter(i => (!i.item_eap || i.item_eap.trim() === '') && (!i.descricao || i.descricao.trim() === ''));
+                const nonBlankRows = prev.filter(i => (i.item_eap && i.item_eap.trim() !== '') || (i.descricao && i.descricao.trim() !== ''));
+                const finalNonBlank = [...nonBlankRows];
+
+                novosItensEap.forEach(novoItem => {
+                  const idx = finalNonBlank.findIndex(i => 
+                    i.id === novoItem.id ||
+                    (novoItem.codigo && i.codigo && String(novoItem.codigo).trim().toLowerCase() === String(i.codigo).trim().toLowerCase()) ||
+                    (novoItem.descricao && i.descricao && String(novoItem.descricao).trim().toLowerCase() === String(i.descricao).trim().toLowerCase() && (
+                      Boolean(novoItem.isSecao) === Boolean(i.isSecao || (i as any).is_secao)
+                    ))
+                  );
+                  if (idx >= 0) {
+                    finalNonBlank[idx] = {
+                      ...finalNonBlank[idx],
+                      ...novoItem,
+                      id: finalNonBlank[idx].id
+                    };
+                  } else {
+                    finalNonBlank.push(novoItem);
+                  }
+                });
+
+                const rebuilt = rebuildEapCodes(finalNonBlank);
+                return ensureSingleTrailingBlankRow(rebuilt, id || 'temp');
+              });
+              setHasUnsavedChanges(true);
+            }}
+          />
+        </div>
       ) : (
       /* ── Tabela Orçamentária ────────────────────────────────────────── */
       <div className="flex-1 flex flex-col min-h-0 bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -4731,7 +5155,7 @@ export default function OrcamentoBuilder() {
                     <span className="truncate w-full text-center">ITEM</span>
                     <div
                       onMouseDown={(e) => startColumnResize('item', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Item"
                     />
                   </div>
@@ -4746,7 +5170,7 @@ export default function OrcamentoBuilder() {
                     <span className="truncate w-full text-center">DESCRIÇÃO</span>
                     <div
                       onMouseDown={(e) => startColumnResize('descricao', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Descrição"
                     />
                   </div>
@@ -4761,7 +5185,7 @@ export default function OrcamentoBuilder() {
                     <span className="truncate w-full text-center">UND.</span>
                     <div
                       onMouseDown={(e) => startColumnResize('unidade', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Unidade"
                     />
                   </div>
@@ -4776,7 +5200,7 @@ export default function OrcamentoBuilder() {
                     <span className="truncate w-full text-center">QTDE.</span>
                     <div
                       onMouseDown={(e) => startColumnResize('quantidade', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura da coluna Quantidade"
                     />
                   </div>
@@ -4793,7 +5217,7 @@ export default function OrcamentoBuilder() {
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('matUnit', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4810,7 +5234,7 @@ export default function OrcamentoBuilder() {
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('moUnit', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4827,7 +5251,7 @@ export default function OrcamentoBuilder() {
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('unit', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4844,7 +5268,7 @@ export default function OrcamentoBuilder() {
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('matTotal', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4861,7 +5285,7 @@ export default function OrcamentoBuilder() {
                     </span>
                     <div
                       onMouseDown={(e) => startColumnResize('moTotal', e)}
-                      className="absolute right-0 top-0 bottom-0 w-1.5 cursor-col-resize bg-slate-300 hover:bg-blue-500 transition-colors z-30"
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
                       title="Arraste para ajustar a largura"
                     />
                   </div>
@@ -4876,6 +5300,11 @@ export default function OrcamentoBuilder() {
                     <span className="w-full text-center leading-tight whitespace-normal break-words text-[11px] font-extrabold text-blue-900">
                       TOTAL<br/><span className="text-[10px] text-blue-600 font-normal">(R$)</span>
                     </span>
+                    <div
+                      onMouseDown={(e) => startColumnResize('total', e)}
+                      className="absolute -right-1 top-0 bottom-0 w-2 cursor-col-resize bg-transparent hover:bg-blue-500/20 transition-colors z-30"
+                      title="Arraste para ajustar a largura"
+                    />
                   </div>
                 </th>
 
@@ -4917,7 +5346,7 @@ export default function OrcamentoBuilder() {
                     (itens[selectedRowIndex]?.item_eap || '').startsWith(item.item_eap + '.')
                   );
 
-                  const isSectionRow = Boolean((item as any).isTextLine || (item as any).isSecao || (!item.codigo && !item.composicao_id));
+                  const isSectionRow = Boolean((item as any).isTextLine || (item as any).isSecao || (item as any).is_secao || getEapLevel(item.item_eap) === 0);
                   const isHighlighted = Boolean(
                     highlightedEap && 
                     ((item.item_eap || '').trim() === highlightedEap.trim() || 
@@ -4949,13 +5378,14 @@ export default function OrcamentoBuilder() {
                         onDragOver={(e) => handleDragOver(e, index)}
                         onDrop={(e) => handleDrop(e, index)}
                         onDragEnd={handleDragEnd}
+                        onMouseDown={(e) => handleRowMouseDown(index, e)}
                         onClick={(e) => handleRowClick(index, e)}
                         style={isHighlighted ? { backgroundColor: '#fef08a', borderLeft: '6px solid #d97706', transition: 'all 0.3s ease' } : {}}
                         className={clsx(
                           "transition-all group select-text border-l-4",
                           styles.rowBgClass,
                           isHighlighted ? "!bg-amber-200 !border-l-amber-600 text-amber-950 font-bold" : "",
-                          selectedRowIndices.has(index) ? "!bg-blue-50/70 !border-l-blue-500" : ""
+                          selectedRowIndices.has(index) ? "!bg-blue-100/80 !border-l-blue-600 shadow-2xs font-medium" : ""
                         )}
                       >
                       {/* EAP Item */}
@@ -4974,12 +5404,32 @@ export default function OrcamentoBuilder() {
                         style={{ width: `${colWidths.item}px`, minWidth: `${colWidths.item}px`, maxWidth: `${colWidths.item}px` }}
                         className={clsx(
                           "border border-slate-300 p-0 relative outline-none",
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 0 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 0 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         <div className="flex items-center gap-0.5 px-1 w-full h-full bg-transparent overflow-hidden">
                           {hasValues ? (
-                            <GripVertical className="w-3.5 h-3.5 text-slate-300 cursor-grab active:cursor-grabbing hover:text-slate-500 transition-colors shrink-0" />
+                            <div
+                              className="cursor-pointer p-0.5 select-none"
+                              onMouseDown={(e) => {
+                                if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                                  e.preventDefault();
+                                }
+                              }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (!e.ctrlKey && !e.metaKey && !e.shiftKey) {
+                                  selectRows(index, e);
+                                }
+                              }}
+                              title="Clique com Ctrl ou Shift para selecionar múltiplas linhas"
+                            >
+                              <GripVertical className={clsx(
+                                "w-3.5 h-3.5 transition-colors shrink-0",
+                                selectedRowIndices.has(index) ? "text-blue-600 font-bold" : "text-slate-300 hover:text-slate-500 cursor-grab active:cursor-grabbing"
+                              )} />
+                            </div>
                           ) : (
                             <div className="w-3.5 h-3.5 shrink-0" />
                           )}
@@ -4988,11 +5438,16 @@ export default function OrcamentoBuilder() {
                             id={`cell-input-${index}-0`}
                             value={item.item_eap}
                             onFocus={() => handleInputFocus(index, 0)}
+                            onMouseDown={(e) => {
+                              if (e.ctrlKey || e.metaKey || e.shiftKey) {
+                                e.preventDefault();
+                              }
+                            }}
                             onKeyDown={(e) => handleInputKeyDownInCell(e, index, 0)}
                             onChange={(e) => handleCellChange(index, 'item_eap', e.target.value)}
                             className={clsx(
                               "w-full h-full bg-transparent py-2 outline-none border border-transparent focus:border-blue-500 focus:bg-white font-mono text-xs transition-all min-w-0 pr-1",
-                              styles.textClass,
+                              selectedRowIndices.has(index) ? "font-bold text-blue-900" : styles.textClass,
                               (item.isSummary || item.hasChildren) && hasValues ? "cursor-pointer" : ""
                             )}
                           />
@@ -5014,7 +5469,8 @@ export default function OrcamentoBuilder() {
                         }}
                         className={clsx(
                           "border border-slate-300 p-0 relative align-middle outline-none",
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 1 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 1 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                         style={{ width: `${colWidths.descricao}px`, minWidth: `${colWidths.descricao}px`, maxWidth: `${colWidths.descricao}px` }}
                       >
@@ -5042,6 +5498,7 @@ export default function OrcamentoBuilder() {
                               onFocus={() => handleInputFocus(index, 1)}
                               onMouseDown={(e) => { if (e.ctrlKey || e.metaKey || e.shiftKey) e.preventDefault(); }}
                               onDoubleClick={(e) => handleSelectAllText(e)}
+                              onKeyDown={(e) => handleInputKeyDownInCell(e, index, 1)}
                               tabIndex={0}
                               className={clsx(
                                 "w-full bg-transparent pr-10 pl-1 py-2 outline-none break-words whitespace-normal leading-normal select-text cursor-text",
@@ -5113,7 +5570,8 @@ export default function OrcamentoBuilder() {
                         style={{ width: `${colWidths.unidade}px`, minWidth: `${colWidths.unidade}px`, maxWidth: `${colWidths.unidade}px` }}
                         className={clsx(
                           "border border-slate-300 p-0 relative outline-none",
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 2 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 2 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         <input
@@ -5152,11 +5610,12 @@ export default function OrcamentoBuilder() {
                         className={clsx(
                           "border border-slate-300 p-0 relative outline-none",
                           activeCell?.rowIndex === index && activeCell?.colIndex === 3 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
-                          hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 ? "bg-rose-50/60 ring-1 ring-rose-400" : ""
+                          hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 ? "bg-rose-50/60 ring-1 ring-rose-400" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         {/* Balão de alerta flutuante quando a quantidade está vazia/zerada */}
-                        {hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 && (
+                        {hasValues && !isSectionRow && !item.isSummary && item.quantidade === 0 && (selectedRowIndex === index || activeCell?.rowIndex === index) && (
                           <div className="absolute top-full left-1/2 -translate-x-1/2 mt-1.5 bg-rose-600 text-white text-[10px] font-bold px-2.5 py-1 rounded-md shadow-xl flex items-center gap-1.5 z-10 whitespace-nowrap pointer-events-none animate-pulse">
                             <div className="absolute -top-1 left-1/2 -translate-x-1/2 border-4 border-transparent border-b-rose-600 w-0 h-0" />
                             <AlertCircle className="w-3.5 h-3.5 shrink-0" />
@@ -5170,7 +5629,7 @@ export default function OrcamentoBuilder() {
                             ? (item as any).displayQuantidade
                             : (isChildOfComp ? item.baseQuantidade * item.effectiveMultiplier : item.quantidade);
                           if (isSectionRow || item.isSummary) {
-                            return <div onClick={(e) => handleCellClick(index, 3, e)} className={clsx("w-full h-full cursor-not-allowed", isHighlighted ? "bg-amber-100/60" : "bg-slate-50/50")} />;
+                            return <div onClick={(e) => handleCellClick(index, 3, e)} className={clsx("w-full h-full cursor-not-allowed", selectedRowIndices.has(index) ? "!bg-blue-100/40" : (isHighlighted ? "bg-amber-100/60" : "bg-slate-50/50"))} />;
                           }
                           
                           if (activeCell?.rowIndex === index && activeCell?.colIndex === 3 && isEditingCell) {
@@ -5300,7 +5759,8 @@ export default function OrcamentoBuilder() {
                         style={{ width: `${colWidths.matUnit}px`, minWidth: `${colWidths.matUnit}px`, maxWidth: `${colWidths.matUnit}px` }}
                         className={clsx(
                           "border border-slate-300 p-0 relative outline-none",
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 4 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 4 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         <input
@@ -5337,7 +5797,8 @@ export default function OrcamentoBuilder() {
                         style={{ width: `${colWidths.moUnit}px`, minWidth: `${colWidths.moUnit}px`, maxWidth: `${colWidths.moUnit}px` }}
                         className={clsx(
                           "border border-slate-300 p-0 relative outline-none",
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 5 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 5 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         <input
@@ -5373,7 +5834,8 @@ export default function OrcamentoBuilder() {
                         className={clsx(
                           "border border-slate-300 px-3 py-2 text-right tabular-nums relative outline-none",
                           styles.textClass,
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 6 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 6 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         {isSectionRow ? '' : (hasValues && !item.isSummary && valUnit > 0 ? valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : hasValues && item.isSummary ? '' : hasValues ? valUnit.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : '')}
@@ -5397,7 +5859,8 @@ export default function OrcamentoBuilder() {
                           isCompActive ? "font-bold text-slate-800" :
                           item.hasChildren && hasValues ? "font-semibold text-slate-800" :
                           styles.textClass,
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 7 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 7 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         {hasValues ? totMat.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
@@ -5421,7 +5884,8 @@ export default function OrcamentoBuilder() {
                           isCompActive ? "font-bold text-slate-800" :
                           item.hasChildren && hasValues ? "font-semibold text-slate-800" :
                           styles.textClass,
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 8 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 8 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         {hasValues ? totMo.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
@@ -5445,14 +5909,18 @@ export default function OrcamentoBuilder() {
                           isCompActive ? "font-bold text-blue-700" :
                           item.hasChildren && item.codigo && hasValues ? "font-semibold text-blue-600" :
                           styles.textClass,
-                          activeCell?.rowIndex === index && activeCell?.colIndex === 9 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : ""
+                          activeCell?.rowIndex === index && activeCell?.colIndex === 9 ? "ring-2 ring-blue-600 ring-inset bg-blue-50/50 z-20" : "",
+                          selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
                         )}
                       >
                         {hasValues ? totGrand.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : ''}
                       </td>
 
                       {/* Remover Linha */}
-                      <td className="border border-slate-300 px-2 py-2 text-center">
+                      <td className={clsx(
+                        "border border-slate-300 px-2 py-2 text-center",
+                        selectedRowIndices.has(index) ? "!bg-blue-50/70" : ""
+                      )}>
                         <button 
                           onClick={() => handleRemoveRow(index)}
                           className="p-1 hover:bg-red-50 text-slate-400 hover:text-red-500 rounded transition-colors cursor-pointer opacity-0 group-hover:opacity-100"

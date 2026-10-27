@@ -277,7 +277,7 @@ export default function BancoProprioComposicoes() {
               >
                 <option value="Todos" className="text-slate-900 bg-white font-normal">Todas as UFs</option>
                 {estadosDisponiveis.map(uf => (
-                  <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">UF: {uf}</option>
+                  <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">{uf}</option>
                 ))}
               </select>
             </div>

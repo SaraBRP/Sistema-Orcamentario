@@ -9,6 +9,8 @@ type InsumoFormModalProps = {
   isCopyMode?: boolean;
   onSuccess: () => void;
   bancoProprio?: boolean;
+  defaultTipo?: string;
+  defaultTipoUso?: 'direto' | 'indireto' | 'ambos';
 };
 
 const TIPOS_INSUMO = [
@@ -47,7 +49,8 @@ const CurrencyInput = ({ value, onChange, name, className }: any) => {
 
 // Estado inicial limpo do formulário
 const emptyForm = () => ({
-  codigo: '', descricao: '', unidade: 'un', tipo: 'Material', estado: 'SP',
+  codigo: '', descricao: '', unidade: 'un', tipo: 'Material', estado: '',
+  tipo_uso: 'direto',
   valor: 0, fonte_preco: 'Cotação',
   data_base: new Date().toISOString().split('T')[0],
   estado_registro: 'ativo',
@@ -57,7 +60,7 @@ const emptyForm = () => ({
   codigo_pai: null, subitem: null
 });
 
-export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyMode = false, onSuccess, bancoProprio }: InsumoFormModalProps) {
+export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyMode = false, onSuccess, bancoProprio, defaultTipo, defaultTipoUso }: InsumoFormModalProps) {
   const [aba, setAba] = useState<'proprio' | 'sistema'>('proprio');
   const [loading, setLoading] = useState(false);
   const [formData, setFormData] = useState<any>(emptyForm());
@@ -80,21 +83,23 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
   const [existingStatesForInsumo, setExistingStatesForInsumo] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!isOpen || !insumoToEdit) {
+    const targetDesc = formData.descricao || insumoToEdit?.descricao;
+    const targetCodigo = formData.codigo || insumoToEdit?.codigo;
+
+    if (!isOpen || (!insumoToEdit && !isCopyActive && !targetCodigo)) {
       setExistingStatesForInsumo([]);
       return;
     }
 
     const fetchExistingStates = async () => {
       try {
-        let query = supabase.schema('engenharia').from('insumos')
-          .select('estado')
-          .ilike('descricao', insumoToEdit.descricao);
+        let query = supabase.schema('engenharia').from('insumos').select('estado');
 
-        if (['Cotação', 'Histórico'].includes(insumoToEdit.fonte_preco)) {
-          query = query.in('fonte_preco', ['Cotação', 'Histórico']);
-        } else {
-          query = query.eq('fonte_preco', insumoToEdit.fonte_preco);
+        if (targetCodigo) {
+          const baseCode = targetCodigo.includes('.') ? targetCodigo.split('.').slice(0, 2).join('.') : targetCodigo;
+          query = query.or(`codigo.eq.${baseCode},codigo.ilike.${baseCode}.%`);
+        } else if (targetDesc) {
+          query = query.ilike('descricao', targetDesc);
         }
 
         const { data, error } = await query;
@@ -108,7 +113,28 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
     };
 
     fetchExistingStates();
-  }, [isOpen, insumoToEdit, isCopyActive]);
+  }, [isOpen, insumoToEdit, isCopyActive, formData.codigo, formData.descricao]);
+
+  const handleSelectSuggestion = (sug: any) => {
+    setFormData({
+      ...sug,
+      id: undefined,
+      estado: '',
+      tipo_uso: sug.tipo_uso || defaultTipoUso || 'direto'
+    });
+    setIsCopyActive(true);
+    setShowSuggestions(false);
+  };
+
+  const handleCancelCopy = () => {
+    setIsCopyActive(false);
+    const targetTipo = defaultTipo || 'Material';
+    const targetTipoUso = defaultTipoUso || 'direto';
+    const fresh = { ...emptyForm(), tipo: targetTipo, tipo_uso: targetTipoUso };
+    setFormData(fresh);
+    setExistingStatesForInsumo([]);
+    generateAndSetCodigo(targetTipo);
+  };
 
   // Busca fontes de referência do sistema disponíveis
   useEffect(() => {
@@ -145,25 +171,31 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
         setFormData({
           ...insumoToEdit,
           id: undefined,
-          estado: ''
+          estado: '',
+          tipo_uso: insumoToEdit.tipo_uso || defaultTipoUso || 'direto'
         });
       } else {
-        setFormData({ ...insumoToEdit });
+        setFormData({
+          ...insumoToEdit,
+          tipo_uso: insumoToEdit.tipo_uso || defaultTipoUso || 'direto'
+        });
       }
       setAba('proprio');
     } else {
-      const fresh = emptyForm();
+      const targetTipo = defaultTipo || 'Material';
+      const targetTipoUso = defaultTipoUso || 'direto';
+      const fresh = { ...emptyForm(), tipo: targetTipo, tipo_uso: targetTipoUso };
       setFormData(fresh);
       setAba('proprio');
       setInsumoBaseSelecionado(null);
       setBuscaSistema('');
       setResultadosSistema([]);
       setErrorBusca(null);
-      generateAndSetCodigo('Material');
+      generateAndSetCodigo(targetTipo);
     }
     setSuggestions([]);
     setShowSuggestions(false);
-  }, [isOpen, insumoToEdit, isCopyMode]);
+  }, [isOpen, insumoToEdit, isCopyMode, defaultTipo, defaultTipoUso]);
 
   const handleToggleCopy = () => {
     setIsCopyActive(true);
@@ -222,7 +254,7 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
   const fetchSuggestions = async (text: string) => {
     if (text.length < 3) { setSuggestions([]); setShowSuggestions(false); return; }
     const { data } = await supabase.schema('engenharia').from('insumos')
-      .select('id, descricao, codigo, unidade')
+      .select('*')
       .in('fonte_preco', ['Cotação', 'Histórico'])
       .ilike('descricao', `%${text}%`).limit(6);
     if (data) { setSuggestions(data); setShowSuggestions(data.length > 0); }
@@ -333,7 +365,7 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
       ...prev,
       tipo: insumo.tipo || 'Material',
       unidade: UNIDADES.find(u => u.toLowerCase() === (insumo.unidade || '').trim().toLowerCase()) || insumo.unidade || 'un',
-      estado: insumo.estado || 'SP',
+      estado: insumo.estado || '',
       fonte_preco: bancoProprio ? 'Cotação' : (insumo.fonte_preco || 'SINAPI'),
       descricao: '',
       data_base: insumo.data_base || new Date().toISOString().split('T')[0],
@@ -386,6 +418,12 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
       descricao: formData.descricao.trim(),
       unidade: formData.unidade.toLowerCase().trim()
     };
+
+    if (!dataToSave.estado || dataToSave.estado.trim() === '') {
+      alert('Por favor, selecione o Estado (UF) do insumo.');
+      setLoading(false);
+      return;
+    }
 
     // Limpar campos não usados pelo tipo
     if (dataToSave.tipo !== 'Equipamento') {
@@ -600,6 +638,8 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                           isCopyActive={isCopyActive}
                           originalEstado={insumoToEdit?.estado}
                           existingStatesForInsumo={existingStatesForInsumo}
+                          onSelectSuggestion={handleSelectSuggestion}
+                          onCancelCopy={handleCancelCopy}
                         />
                       </div>
                       <div>
@@ -669,6 +709,8 @@ export default function InsumoFormModal({ isOpen, onClose, insumoToEdit, isCopyM
                       isCopyActive={isCopyActive}
                       originalEstado={insumoToEdit?.estado}
                       existingStatesForInsumo={existingStatesForInsumo}
+                      onSelectSuggestion={handleSelectSuggestion}
+                      onCancelCopy={handleCancelCopy}
                     />
                   </div>
 
@@ -786,6 +828,8 @@ type CamposBaseProps = {
   isCopyActive?: boolean;
   originalEstado?: string;
   existingStatesForInsumo?: string[];
+  onSelectSuggestion?: (sug: any) => void;
+  onCancelCopy?: () => void;
 };
 
 const CamposBase = ({
@@ -796,12 +840,34 @@ const CamposBase = ({
   setShowSuggestions,
   setFormData,
   isCopyActive = false,
-  existingStatesForInsumo = []
+  existingStatesForInsumo = [],
+  onSelectSuggestion,
+  onCancelCopy
 }: CamposBaseProps) => {
   const isDuplicado = existingStatesForInsumo.includes(formData.estado);
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+      {isCopyActive && (
+        <div className="col-span-1 md:col-span-4 bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center justify-between text-xs animate-in fade-in duration-150">
+          <div className="flex items-center gap-2">
+            <span className="text-blue-700 font-bold">📋 Cópia de Insumo por Estado:</span>
+            <span className="text-slate-700 font-medium">
+              Criando novo estado para o código <strong className="font-mono text-blue-950 font-bold">{formData.codigo}</strong> ({formData.descricao}).
+            </span>
+          </div>
+          {onCancelCopy && (
+            <button
+              type="button"
+              onClick={onCancelCopy}
+              className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline cursor-pointer bg-white px-2.5 py-1 rounded-md border border-blue-200 shadow-2xs"
+            >
+              Criar Novo do Zero
+            </button>
+          )}
+        </div>
+      )}
+
       <div className="col-span-1 md:col-span-2">
         <label className="block text-sm font-medium text-slate-700 mb-1">Tipo de Insumo *</label>
         <select required name="tipo" value={formData.tipo} onChange={handleChange} disabled={isCopyActive}
@@ -824,7 +890,7 @@ const CamposBase = ({
         </select>
       </div>
 
-      <div className="col-span-1 md:col-span-3 relative">
+      <div className="col-span-1 md:col-span-2 relative">
         <label className="block text-sm font-medium text-slate-700 mb-1">Descrição *</label>
         <input required type="text" name="descricao" value={formData.descricao} onChange={handleChange} disabled={isCopyActive}
           onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
@@ -832,17 +898,28 @@ const CamposBase = ({
           className={`w-full px-3 py-2 border border-slate-300 rounded-lg outline-none text-slate-900 font-normal placeholder:text-slate-400 ${isCopyActive ? 'bg-slate-100 text-slate-700 cursor-not-allowed' : 'bg-white focus:ring-2 focus:ring-blue-500'}`}
           autoComplete="off" placeholder="DESCREVA O INSUMO..." />
         {showSuggestions && (
-          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-xl overflow-hidden">
-            <div className="px-3 py-1.5 bg-slate-50 border-b text-xs font-semibold text-slate-500 uppercase tracking-wider">
-              Insumos Semelhantes Cadastrados
+          <div className="absolute z-10 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden">
+            <div className="px-3 py-1.5 bg-blue-50 border-b border-blue-100 text-xs font-semibold text-blue-800 uppercase tracking-wider flex items-center justify-between">
+              <span>Insumos Semelhantes Cadastrados</span>
+              <span className="text-[10px] text-blue-600 font-normal">Clique para copiar dados e cadastrar para novo estado</span>
             </div>
             <ul className="max-h-48 overflow-y-auto divide-y divide-slate-100">
               {suggestions.map((sug: any) => (
                 <li key={sug.id}
-                  onClick={() => { setFormData((p: any) => ({ ...p, descricao: sug.descricao })); setShowSuggestions(false); }}
-                  className="px-3 py-2 hover:bg-blue-50 cursor-pointer flex justify-between items-center gap-4">
-                  <span className="text-sm font-normal text-slate-900">{sug.descricao}</span>
-                  <span className="text-xs text-slate-500 font-mono whitespace-nowrap">{sug.codigo} · {sug.unidade}</span>
+                  onClick={() => onSelectSuggestion ? onSelectSuggestion(sug) : (setFormData((p: any) => ({ ...p, descricao: sug.descricao })), setShowSuggestions(false))}
+                  className="px-3 py-2.5 hover:bg-blue-50/80 cursor-pointer flex justify-between items-center gap-4 group transition-colors">
+                  <div>
+                    <span className="text-sm font-semibold text-slate-900 block group-hover:text-blue-700">{sug.descricao}</span>
+                    <span className="text-[10.5px] text-slate-500">
+                      {sug.tipo} · {sug.tipo_uso || 'direto'}
+                    </span>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <span className="text-xs font-mono font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded border border-blue-200 block">
+                      {sug.codigo}
+                    </span>
+                    <span className="text-[10px] text-slate-400 font-medium">{sug.unidade}</span>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -850,11 +927,11 @@ const CamposBase = ({
         )}
       </div>
 
-      <div className="col-span-1">
-        <label className="block text-sm font-medium text-slate-700 mb-1">Estado (UF)</label>
-        <select name="estado" value={formData.estado} onChange={handleChange}
-          className={`w-full px-3 py-2 border rounded-lg outline-none bg-white text-slate-900 font-normal ${isCopyActive && (formData.estado === '' || isDuplicado) ? 'border-rose-300 focus:ring-2 focus:ring-rose-500' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'}`}>
-          {isCopyActive && <option value="" className="text-slate-900 bg-white font-normal">Selecione...</option>}
+      <div className="col-span-1 md:col-span-2">
+        <label className="block text-sm font-medium text-slate-700 mb-1">Estado (UF) *</label>
+        <select required name="estado" value={formData.estado || ''} onChange={handleChange}
+          className={`w-full px-3 py-2 border rounded-lg outline-none bg-white text-slate-900 font-normal ${formData.estado === '' || (isCopyActive && isDuplicado) ? 'border-rose-300 focus:ring-2 focus:ring-rose-500' : 'border-slate-300 focus:ring-2 focus:ring-blue-500'}`}>
+          <option value="" className="text-slate-900 bg-white font-normal">Selecione o estado...</option>
           {UFS.map(uf => <option key={uf} value={uf} className="text-slate-900 bg-white font-normal">{uf}</option>)}
         </select>
         {isCopyActive && isDuplicado && (
@@ -863,6 +940,53 @@ const CamposBase = ({
         {isCopyActive && formData.estado === '' && (
           <span className="text-[10px] text-slate-500 font-semibold block mt-1 leading-tight">Estados já cadastrados: <span className="font-bold text-slate-700">{existingStatesForInsumo.join(', ') || 'Nenhum'}</span></span>
         )}
+      </div>
+
+      <div className="col-span-1 md:col-span-4">
+        <label className="block text-sm font-medium text-slate-700 mb-2">Classificação (Uso) *</label>
+        <div className="flex flex-wrap items-center gap-6 p-2 bg-slate-50 border border-slate-200/80 rounded-xl">
+          <label className="flex items-center gap-2 cursor-pointer group select-none">
+            <input
+              type="radio"
+              name="tipo_uso_radio"
+              value="direto"
+              checked={(formData.tipo_uso || 'direto') === 'direto'}
+              onChange={() => setFormData((prev: any) => ({ ...prev, tipo_uso: 'direto' }))}
+              className="w-4 h-4 text-blue-600 border-slate-300 focus:ring-blue-500 cursor-pointer"
+            />
+            <span className="text-sm font-medium text-slate-800 group-hover:text-blue-600 transition-colors">
+              Direto
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer group select-none">
+            <input
+              type="radio"
+              name="tipo_uso_radio"
+              value="indireto"
+              checked={formData.tipo_uso === 'indireto'}
+              onChange={() => setFormData((prev: any) => ({ ...prev, tipo_uso: 'indireto' }))}
+              className="w-4 h-4 text-amber-600 border-slate-300 focus:ring-amber-500 cursor-pointer"
+            />
+            <span className="text-sm font-medium text-slate-800 group-hover:text-amber-600 transition-colors">
+              Indireto
+            </span>
+          </label>
+
+          <label className="flex items-center gap-2 cursor-pointer group select-none">
+            <input
+              type="radio"
+              name="tipo_uso_radio"
+              value="ambos"
+              checked={formData.tipo_uso === 'ambos'}
+              onChange={() => setFormData((prev: any) => ({ ...prev, tipo_uso: 'ambos' }))}
+              className="w-4 h-4 text-emerald-600 border-slate-300 focus:ring-emerald-500 cursor-pointer"
+            />
+            <span className="text-sm font-medium text-slate-800 group-hover:text-emerald-600 transition-colors">
+              Ambos (Direto e Indireto)
+            </span>
+          </label>
+        </div>
       </div>
     </div>
   );

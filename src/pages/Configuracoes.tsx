@@ -32,8 +32,13 @@ import {
   Phone,
   Mail,
   MapPin,
-  Building
+  Building,
+  Ruler,
+  Sparkles,
+  Sliders
 } from 'lucide-react';
+import { GerenciadorFormulas } from '../components/calculos/GerenciadorFormulas';
+import { TabelaParametrosCadastro } from '../components/calculos/TabelaParametrosCadastro';
 import { clsx } from 'clsx';
 import { 
   getClientesCadastrados, 
@@ -53,8 +58,9 @@ import {
   type EmpresaData
 } from '../lib/empresas';
 
-type Tab = 'usuarios' | 'permissoes' | 'empresas' | 'clientes';
+type Tab = 'usuarios' | 'permissoes' | 'empresas' | 'clientes' | 'medidas';
 type SubTabUsuarios = 'lista' | 'pendentes' | 'permissoes';
+type SubTabMedidas = 'formulas' | 'parametros';
 
 interface Profile {
   id: string;
@@ -102,6 +108,9 @@ export default function Configuracoes() {
 
   const initialTab = useMemo<Tab>(() => {
     const tabFromUrl = searchParams.get('tab');
+    if (tabFromUrl === 'medidas') {
+      return 'medidas';
+    }
     if (tabFromUrl === 'clientes') {
       return 'clientes';
     }
@@ -115,10 +124,20 @@ export default function Configuracoes() {
   const [subTabUsuarios, setSubTabUsuarios] = useState<SubTabUsuarios>(() => {
     return searchParams.get('tab') === 'permissoes' ? 'permissoes' : 'lista';
   });
+  const [subTabMedidas, setSubTabMedidas] = useState<SubTabMedidas>(() => {
+    return searchParams.get('sub') === 'parametros' ? 'parametros' : 'formulas';
+  });
 
   useEffect(() => {
     const tabFromUrl = searchParams.get('tab');
-    if (tabFromUrl === 'clientes') {
+    if (tabFromUrl === 'medidas') {
+      setActiveTabState('medidas');
+      if (searchParams.get('sub') === 'parametros') {
+        setSubTabMedidas('parametros');
+      } else if (searchParams.get('sub') === 'formulas') {
+        setSubTabMedidas('formulas');
+      }
+    } else if (tabFromUrl === 'clientes') {
       setActiveTabState('clientes');
     } else if (tabFromUrl === 'empresas' || tabFromUrl === 'minha-empresa') {
       setActiveTabState('empresas');
@@ -882,26 +901,30 @@ export default function Configuracoes() {
             {activeTab === 'usuarios' && 'Gestão de Usuários & Controle de Acessos'}
             {activeTab === 'empresas' && 'Cadastro & Gestão de Minhas Empresas'}
             {activeTab === 'clientes' && 'Cadastro & Gestão de Clientes'}
+            {activeTab === 'medidas' && 'Medidas, Fórmulas & Parâmetros de Cálculo'}
           </h2>
           <p className="text-slate-500 text-xs">
             {activeTab === 'usuarios' && 'Gerencie os colaboradores da BRP Engenharia, permissões aos módulos do sistema e solicitações de acesso'}
             {activeTab === 'empresas' && 'Cadastre as empresas do grupo (BRP Soluções Metálicas, BRP Engenharia, etc.) com logos e dados fiscais para utilização na geração de relatórios e listas de materiais'}
             {activeTab === 'clientes' && 'Cadastre empresas, CNPJs, locais e contatos dos clientes vinculados aos orçamentos'}
+            {activeTab === 'medidas' && 'Gerencie a biblioteca de fórmulas matemáticas, croquis paramétricos e parâmetros técnicos para memórias de cálculo'}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            onClick={() => {
-              if (activeTab === 'clientes') fetchClientesList();
-              else if (activeTab === 'empresas') fetchEmpresasList();
-              else fetchProfiles();
-            }}
-            className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl border border-slate-200 transition-colors cursor-pointer"
-            title="Atualizar lista"
-          >
-            <RefreshCw className={clsx("w-4 h-4", (loading || loadingClientes || loadingEmpresas) && "animate-spin")} />
-          </button>
+          {activeTab !== 'medidas' && (
+            <button
+              onClick={() => {
+                if (activeTab === 'clientes') fetchClientesList();
+                else if (activeTab === 'empresas') fetchEmpresasList();
+                else fetchProfiles();
+              }}
+              className="p-2 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-xl border border-slate-200 transition-colors cursor-pointer"
+              title="Atualizar lista"
+            >
+              <RefreshCw className={clsx("w-4 h-4", (loading || loadingClientes || loadingEmpresas) && "animate-spin")} />
+            </button>
+          )}
 
           {activeTab === 'empresas' ? (
             <button
@@ -919,7 +942,7 @@ export default function Configuracoes() {
               <Plus className="w-4 h-4" />
               <span>+ Novo Cliente</span>
             </button>
-          ) : (
+          ) : activeTab === 'medidas' ? null : (
             <button
               onClick={() => setIsNewUserModalOpen(true)}
               className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl text-xs font-bold flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
@@ -1588,6 +1611,61 @@ export default function Configuracoes() {
               </table>
             </div>
           </div>
+        </div>
+      )}
+
+      {/* ABA 4: MEDIDAS, FÓRMULAS & PARÂMETROS */}
+      {activeTab === 'medidas' && (
+        <div className="space-y-4">
+          {/* Sub-abas de Medidas */}
+          <div className="flex border-b border-slate-200 bg-white rounded-xl p-1.5 border shadow-2xs gap-1">
+            <button
+              type="button"
+              onClick={() => {
+                setSubTabMedidas('formulas');
+                setSearchParams((prev) => {
+                  const p = new URLSearchParams(prev);
+                  p.set('sub', 'formulas');
+                  return p;
+                }, { replace: true });
+              }}
+              className={clsx(
+                'flex-1 py-2.5 px-4 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer',
+                subTabMedidas === 'formulas'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              )}
+            >
+              <Sparkles className="w-4 h-4 text-blue-200" />
+              <span>Central & Cadastro de Fórmulas</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setSubTabMedidas('parametros');
+                setSearchParams((prev) => {
+                  const p = new URLSearchParams(prev);
+                  p.set('sub', 'parametros');
+                  return p;
+                }, { replace: true });
+              }}
+              className={clsx(
+                'flex-1 py-2.5 px-4 font-bold text-xs rounded-lg transition-all flex items-center justify-center gap-2 cursor-pointer',
+                subTabMedidas === 'parametros'
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:bg-slate-100'
+              )}
+            >
+              <Sliders className="w-4 h-4 text-blue-200" />
+              <span>Tabela & Cadastro de Parâmetros</span>
+            </button>
+          </div>
+
+          {subTabMedidas === 'formulas' ? (
+            <GerenciadorFormulas />
+          ) : (
+            <TabelaParametrosCadastro />
+          )}
         </div>
       )}
 

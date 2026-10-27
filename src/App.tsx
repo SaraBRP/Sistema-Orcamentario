@@ -18,10 +18,13 @@ import AprendizadoPage from './pages/AprendizadoPage';
 import BancoProprioInsumos from './pages/banco-proprio/Insumos';
 import BancoProprioComposicoes from './pages/banco-proprio/Composicoes';
 import ComposicaoBuilder from './pages/banco-proprio/ComposicaoBuilder';
+import BancoProprioCatalogoIndiretos from './pages/banco-proprio/CatalogoIndiretos';
 
 // Banco do Sistema
 import BancoSistemaInsumos from './pages/banco-sistema/Insumos';
 import BancoSistemaComposicoes from './pages/banco-sistema/Composicoes';
+
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth();
@@ -50,9 +53,11 @@ export default function App() {
           <Route
             path="/"
             element={
-              <ProtectedRoute>
-                <Layout />
-              </ProtectedRoute>
+              <ErrorBoundary>
+                <ProtectedRoute>
+                  <Layout />
+                </ProtectedRoute>
+              </ErrorBoundary>
             }
           >
             <Route index element={<Dashboard />} />
@@ -67,6 +72,7 @@ export default function App() {
             <Route path="banco-proprio/insumos" element={<BancoProprioInsumos />} />
             <Route path="banco-proprio/composicoes" element={<BancoProprioComposicoes />} />
             <Route path="banco-proprio/composicoes/:id" element={<ComposicaoBuilder />} />
+            <Route path="banco-proprio/indiretos" element={<BancoProprioCatalogoIndiretos />} />
 
             {/* Banco do Sistema */}
             <Route path="banco-sistema/insumos" element={<BancoSistemaInsumos />} />

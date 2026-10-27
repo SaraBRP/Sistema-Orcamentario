@@ -27,7 +27,8 @@ import {
   User,
   ShieldCheck,
   Users,
-  Briefcase
+  Briefcase,
+  Ruler
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -75,6 +76,7 @@ const navSections: NavSection[] = [
     children: [
       { name: 'Composições', path: '/banco-proprio/composicoes', icon: Layers },
       { name: 'Insumos', path: '/banco-proprio/insumos', icon: Package },
+      { name: 'Catálogo de Indiretos', path: '/banco-proprio/indiretos', icon: Building2 },
     ],
   },
   {
@@ -101,6 +103,7 @@ const navSections: NavSection[] = [
       { name: 'Usuários & Acessos', path: '/configuracoes?tab=usuarios', icon: Users },
       { name: 'Minha Empresa', path: '/configuracoes?tab=empresas', icon: Building2 },
       { name: 'Clientes', path: '/configuracoes?tab=clientes', icon: Briefcase },
+      { name: 'Medidas', path: '/configuracoes?tab=medidas', icon: Ruler },
     ]
   },
 ];
@@ -431,7 +434,14 @@ export default function Layout() {
     if (pathname.includes('/padroes-tecnicos')) return 'Padrões Técnicos & Especificações';
     if (pathname.includes('/relatorios')) return 'Emissão de Relatórios & Exportação XLSX/PDF';
     if (pathname.includes('/aprendizado')) return 'Central de Aprendizado & Guias Práticos';
-    if (pathname.includes('/configuracoes')) return 'Configurações do Sistema';
+    if (pathname.includes('/configuracoes')) {
+      const tab = new URLSearchParams(location.search).get('tab');
+      if (tab === 'medidas') return 'Configurações - Medidas & Fórmulas';
+      if (tab === 'empresas') return 'Configurações - Minha Empresa';
+      if (tab === 'clientes') return 'Configurações - Gestão de Clientes';
+      if (tab === 'usuarios') return 'Configurações - Usuários & Acessos';
+      return 'Configurações do Sistema';
+    }
     return 'OrçaBRP Engenharia';
   };
 
@@ -524,12 +534,48 @@ export default function Layout() {
           )}
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {visibleNavSections.map((section: NavSection) => {
+            const Icon = section.icon;
+            const active = section.children ? isSectionActive(section) : (section.path ? isPathActive(section.path) : false);
+
+            // ── Modo COLAPSADO (Apenas Ícones Perfeitamente Alinhados e Centralizados) ──
+            if (sidebarCollapsed) {
+              if (section.path) {
+                return (
+                  <Link
+                    key={section.name}
+                    to={section.path}
+                    title={section.name}
+                    className={cn(
+                      'w-full flex items-center justify-center py-2.5 rounded-lg text-sm font-medium transition-all group cursor-pointer',
+                      active ? 'bg-blue-600/90 text-white shadow-sm shadow-blue-900/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                    )}
+                  >
+                    <Icon className="w-5 h-5 shrink-0" />
+                  </Link>
+                );
+              }
+
+              return (
+                <button
+                  key={section.name}
+                  type="button"
+                  onClick={() => setSidebarCollapsed(false)}
+                  title={section.name}
+                  className={cn(
+                    'w-full flex items-center justify-center py-2.5 rounded-lg text-sm font-medium transition-all group cursor-pointer',
+                    active ? 'bg-blue-600/90 text-white shadow-sm shadow-blue-900/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
+                  )}
+                >
+                  <Icon className="w-5 h-5 shrink-0" />
+                </button>
+              );
+            }
+
+            // ── Modo EXPANDIDO (Com Nomes, Submenus e Setas) ──
             if (section.children) {
-              const expanded = !sidebarCollapsed && expandedSections.includes(section.name);
-              const active = isSectionActive(section);
-              const Icon = section.icon;
+              const expanded = expandedSections.includes(section.name);
 
               return (
                 <div key={section.name}>
@@ -537,8 +583,7 @@ export default function Layout() {
                     <div
                       className={cn(
                         'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all group',
-                        active ? 'text-white bg-slate-700/60' : 'text-slate-400 hover:text-white hover:bg-slate-800/60',
-                        sidebarCollapsed && 'justify-center'
+                        active ? 'text-white bg-slate-700/60' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                       )}
                     >
                       <Link
@@ -546,61 +591,50 @@ export default function Layout() {
                         className="flex items-center gap-3 flex-1 overflow-hidden"
                       >
                         <Icon className="w-5 h-5 shrink-0" />
-                        {!sidebarCollapsed && <span>{section.name}</span>}
+                        <span>{section.name}</span>
                       </Link>
 
-                      {!sidebarCollapsed && (
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.preventDefault();
-                            e.stopPropagation();
-                            toggleSection(section.name);
-                          }}
-                          className="p-1 hover:bg-slate-600/50 rounded transition-colors text-slate-400 hover:text-white shrink-0 ml-1 cursor-pointer"
-                        >
-                          {expanded ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </button>
-                      )}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          toggleSection(section.name);
+                        }}
+                        className="p-1 hover:bg-slate-600/50 rounded transition-colors text-slate-400 hover:text-white shrink-0 ml-1 cursor-pointer"
+                      >
+                        {expanded ? (
+                          <ChevronDown className="w-4 h-4" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4" />
+                        )}
+                      </button>
                     </div>
                   ) : (
                     <button
                       type="button"
-                      onClick={() => {
-                        if (sidebarCollapsed) {
-                          setSidebarCollapsed(false);
-                        } else {
-                          toggleSection(section.name);
-                        }
-                      }}
+                      onClick={() => toggleSection(section.name)}
                       className={cn(
                         'w-full flex items-center justify-between px-3 py-2.5 rounded-lg text-sm font-medium transition-all group cursor-pointer',
-                        active ? 'text-white bg-slate-700/60' : 'text-slate-400 hover:text-white hover:bg-slate-800/60',
-                        sidebarCollapsed && 'justify-center'
+                        active ? 'text-white bg-slate-700/60' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                       )}
                     >
                       <div className="flex items-center gap-3 overflow-hidden">
                         <Icon className="w-5 h-5 shrink-0" />
-                        {!sidebarCollapsed && <span>{section.name}</span>}
+                        <span>{section.name}</span>
                       </div>
 
-                      {!sidebarCollapsed && (
-                        <span className="text-slate-400 group-hover:text-white transition-colors">
-                          {expanded ? (
-                            <ChevronDown className="w-4 h-4" />
-                          ) : (
-                            <ChevronRight className="w-4 h-4" />
-                          )}
-                        </span>
-                      )}
+                      <span className="text-slate-400 group-hover:text-white transition-colors">
+                        {expanded ? (
+                          <ChevronDown className="w-4 h-4" />
+                        ) : (
+                          <ChevronRight className="w-4 h-4" />
+                        )}
+                      </span>
                     </button>
                   )}
 
-                  {expanded && !sidebarCollapsed && (
+                  {expanded && (
                     <div className="mt-1 ml-4 pl-3 border-l border-slate-700/60 space-y-1">
                       {section.children.map((child: { name: string; path: string; icon: React.ElementType }) => {
                         const childActive = isPathActive(child.path);
@@ -627,20 +661,17 @@ export default function Layout() {
               );
             }
 
-            const Icon = section.icon;
-            const active = section.path ? isPathActive(section.path) : false;
             return (
               <Link
                 key={section.name}
                 to={section.path!}
                 className={cn(
                   'flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all',
-                  active ? 'bg-blue-600/90 text-white shadow-sm shadow-blue-900/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/60',
-                  sidebarCollapsed && 'justify-center'
+                  active ? 'bg-blue-600/90 text-white shadow-sm shadow-blue-900/40' : 'text-slate-400 hover:text-white hover:bg-slate-800/60'
                 )}
               >
                 <Icon className="w-5 h-5 shrink-0" />
-                {!sidebarCollapsed && <span>{section.name}</span>}
+                <span>{section.name}</span>
               </Link>
             );
           })}
@@ -649,9 +680,10 @@ export default function Layout() {
         <div className="p-3 border-t border-slate-800/80">
           <button
             onClick={handleLogout}
+            title={sidebarCollapsed ? "Sair" : undefined}
             className={cn(
-              "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full group cursor-pointer",
-              sidebarCollapsed && "justify-center"
+              "flex items-center rounded-lg text-sm font-medium text-slate-400 hover:text-red-400 hover:bg-red-900/20 transition-all w-full group cursor-pointer",
+              sidebarCollapsed ? "justify-center py-2.5" : "gap-3 px-3 py-2.5"
             )}
           >
             <LogOut className="w-5 h-5 shrink-0" />
@@ -661,7 +693,7 @@ export default function Layout() {
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 print:bg-white print:h-auto print:overflow-visible">
-        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex items-center justify-between shadow-2xs z-[100] shrink-0 print:hidden">
+        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex items-center justify-between shadow-2xs z-10 shrink-0 print:hidden">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
               <span>{obterTituloPagina(location.pathname)}</span>

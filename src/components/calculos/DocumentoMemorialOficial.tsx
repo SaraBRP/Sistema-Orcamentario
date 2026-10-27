@@ -663,6 +663,7 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
   const [memorialDetalhadoIndex, setMemorialDetalhadoIndex] = useState<number | null>(null);
   const [mostrarMemorialGlobal, setMostrarMemorialGlobal] = useState(false);
   const [showVincularPanel, setShowVincularPanel] = useState<boolean>(true);
+  const [showParametrosGlobais, setShowParametrosGlobais] = useState<boolean>(true);
 
   // Insumos filhos da composição atual sendo editada no modal
   const childItemsOfComposition = React.useMemo(() => {
@@ -3480,10 +3481,33 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                 <Globe className="w-4 h-4 text-blue-600" />
                 Parâmetros Globais da Obra
               </span>
-              <span className="text-[11px] font-medium text-slate-500">
-                ({(header.dadosComplementares || []).length} cadastrados no orçamento)
-              </span>
+              <div className="flex items-center gap-3">
+                <span className="text-[11px] font-medium text-slate-500">
+                  ({(header.dadosComplementares || []).length} cadastrados no orçamento)
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setShowParametrosGlobais(prev => !prev)}
+                  className="px-2.5 py-1 bg-white hover:bg-slate-100 text-slate-700 border border-slate-300/80 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs shrink-0"
+                  title={showParametrosGlobais ? "Minimizar Parâmetros Globais da Obra" : "Exibir Parâmetros Globais da Obra"}
+                >
+                  {showParametrosGlobais ? (
+                    <>
+                      <EyeOff className="w-3.5 h-3.5 text-blue-600" />
+                      <span className="text-[11px]">Minimizar</span>
+                    </>
+                  ) : (
+                    <>
+                      <Eye className="w-3.5 h-3.5 text-blue-600" />
+                      <span className="text-[11px]">Exibir</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
+
+            {showParametrosGlobais && (
+              <>
 
             {!readonly && (
               <div className="bg-white p-3 rounded-xl border border-slate-200 shadow-2xs">
@@ -3839,6 +3863,8 @@ export const DocumentoMemorialOficial: React.FC<DocumentoMemorialOficialProps> =
                   </tbody>
                 </table>
               </div>
+            )}
+              </>
             )}
           </div>
         </div>
