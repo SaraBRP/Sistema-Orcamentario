@@ -914,4 +914,206 @@ export function syncEapChangeToIndiretoConfig(
   return null;
 }
 
+export interface IndiretosInEapInfo {
+  hasIndiretosInEap: boolean;
+  insertedGruposCount: number;
+  insertedGruposNames: string[];
+  insertedItemCount: number;
+}
+
+/**
+ * Identifica se e quais custos indiretos já constam inseridos na Planilha Orçamentária (EAP)
+ */
+export function getIndiretosInEapInfo(
+  currentItens: any[],
+  config: IndiretoOrcamentoConfig
+): IndiretosInEapInfo {
+  if (!currentItens || currentItens.length === 0 || !config || !config.grupos) {
+    return {
+      hasIndiretosInEap: false,
+      insertedGruposCount: 0,
+      insertedGruposNames: [],
+      insertedItemCount: 0
+    };
+  }
+
+  const groupByName = new Map<string, IndiretoGrupo>();
+  const groupById = new Map<string, IndiretoGrupo>();
+  for (const g of config.grupos) {
+    groupByName.set(g.nome.trim().toLowerCase(), g);
+    groupById.set(g.id, g);
+  }
+
+  // 1. Identifica capítulo geral se existir
+  let capEap = '';
+  for (const row of currentItens) {
+    if (!row) continue;
+    const rowId = String(row.id || '');
+    const rowDesc = String(row.descricao || '').trim().toLowerCase();
+    if (
+      rowId.startsWith('indireto-cap-') ||
+      rowDesc === 'administração local e canteiro de obras' ||
+      rowDesc.includes('administração local')
+    ) {
+      capEap = (row.item_eap || '').trim();
+      break;
+    }
+  }
+
+  const insertedGroupNames = new Set<string>();
+  let countItems = 0;
+
+  for (let i = 0; i < currentItens.length; i++) {
+    const row = currentItens[i];
+    if (!row) continue;
+    const rowId = String(row.id || '');
+    const rowDesc = String(row.descricao || '').trim().toLowerCase();
+    const rowCod = String(row.codigo || '').trim().toLowerCase();
+    const rawGrupoId = String((row as any).indireto_grupo_id || '');
+    const rawItemId = String((row as any).indireto_item_id || '');
+    const rowEap = (row.item_eap || '').trim();
+
+    let isIndireto = false;
+    let matchedGrupo: IndiretoGrupo | undefined;
+
+    if (rowId.startsWith('indireto-cap-') || (capEap !== '' && (rowEap === capEap || rowEap.startsWith(capEap + '.')))) {
+      isIndireto = true;
+    } else if (
+      rowId.startsWith('indireto-') || 
+      rawGrupoId || 
+      rawItemId || 
+      rowCod.startsWith('ind-grp-') || 
+      rowCod.startsWith('ind-itm-')
+    ) {
+      isIndireto = true;
+    } else if (groupByName.has(rowDesc)) {
+      isIndireto = true;
+    }
+
+    if (isIndireto) {
+      countItems++;
+      if (rawGrupoId && groupById.has(rawGrupoId)) {
+        matchedGrupo = groupById.get(rawGrupoId);
+      } else if (groupByName.has(rowDesc)) {
+        matchedGrupo = groupByName.get(rowDesc);
+      } else {
+        for (const g of config.grupos) {
+          if (rowId.includes(`__${g.id}__`) || rowId.includes(`-${g.id}-`) || rowId.includes(g.id)) {
+            matchedGrupo = g;
+            break;
+          }
+        }
+      }
+
+      if (matchedGrupo) {
+        insertedGroupNames.add(matchedGrupo.nome);
+      }
+    }
+  }
+
+  return {
+    hasIndiretosInEap: countItems > 0,
+    insertedGruposCount: insertedGroupNames.size,
+    insertedGruposNames: Array.from(insertedGroupNames),
+    insertedItemCount: countItems
+  };
+}
+
+/**
+ * Remove todos os itens, grupos e capítulos de custos indiretos da Planilha Orçamentária
+ */
+export function removeIndiretosFromEap(
+  currentItens: any[],
+  config: IndiretoOrcamentoConfig
+): { cleanedItens: any[]; removedIds: string[] } {
+  if (!currentItens || currentItens.length === 0) {
+    return { cleanedItens: [], removedIds: [] };
+  }
+
+  const allGroupNames = new Set((config?.grupos || []).map(g => g.nome.trim().toLowerCase()));
+  const indicesToRemove = new Set<number>();
+
+  // 1. Identifica e remove capítulo de indiretos e seus filhos
+  let capEap = '';
+  for (let i = 0; i < currentItens.length; i++) {
+    const row = currentItens[i];
+    if (!row) continue;
+    const rowId = String(row.id || '');
+    const rowDesc = String(row.descricao || '').trim().toLowerCase();
+    if (
+      rowId.startsWith('indireto-cap-') ||
+      rowDesc === 'administração local e canteiro de obras' ||
+      rowDesc.includes('administração local')
+    ) {
+      capEap = (row.item_eap || '').trim();
+      indicesToRemove.add(i);
+      break;
+    }
+  }
+
+  if (capEap) {
+    for (let i = 0; i < currentItens.length; i++) {
+      const row = currentItens[i];
+      if (!row) continue;
+      const rowEap = (row.item_eap || '').trim();
+      if (rowEap.startsWith(capEap + '.')) {
+        indicesToRemove.add(i);
+      }
+    }
+  }
+
+  // 2. Remove tabelas e itens de indiretos independentes
+  for (let i = 0; i < currentItens.length; i++) {
+    if (indicesToRemove.has(i)) continue;
+    const row = currentItens[i];
+    if (!row) continue;
+    const rowId = String(row.id || '');
+    const rowDesc = String(row.descricao || '').trim().toLowerCase();
+    const rowCod = String(row.codigo || '').trim().toLowerCase();
+    const rawGrupoId = String((row as any).indireto_grupo_id || '');
+    const isSec = Boolean(row.isSecao || (row as any).is_secao || (!row.codigo && (!row.quantidade || row.quantidade === 0)));
+
+    if (
+      rowId.startsWith('indireto-') ||
+      rawGrupoId ||
+      rowCod.startsWith('ind-grp-') ||
+      rowCod.startsWith('ind-itm-')
+    ) {
+      indicesToRemove.add(i);
+      continue;
+    }
+
+    if (allGroupNames.has(rowDesc)) {
+      indicesToRemove.add(i);
+      if (isSec) {
+        const secEap = (row.item_eap || '').trim();
+        for (let j = i + 1; j < currentItens.length; j++) {
+          const c = currentItens[j];
+          if (!c) continue;
+          const cSec = Boolean(c.isSecao || (c as any).is_secao);
+          const cEap = (c.item_eap || '').trim();
+          if (cSec && (!secEap || !cEap.startsWith(secEap + '.'))) break;
+          if (secEap && !cEap.startsWith(secEap + '.')) break;
+          indicesToRemove.add(j);
+        }
+      }
+    }
+  }
+
+  const removedIds: string[] = [];
+  const cleanedItens: any[] = [];
+
+  for (let i = 0; i < currentItens.length; i++) {
+    if (indicesToRemove.has(i)) {
+      if (currentItens[i]?.id) {
+        removedIds.push(currentItens[i].id);
+      }
+    } else {
+      cleanedItens.push(currentItens[i]);
+    }
+  }
+
+  return { cleanedItens, removedIds };
+}
+
 

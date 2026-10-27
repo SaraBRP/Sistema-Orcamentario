@@ -19,7 +19,13 @@ import type { CalculoItem } from '../types/calculos';
 import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
 import { resolveCidadeEstadoFromCliente } from '../lib/clientes';
 import { downloadMsProjectXML } from '../lib/msprojectExport';
-import { updateSyncedEapItemsWithNewConfig, syncEapChangeToIndiretoConfig, loadIndiretoConfig } from '../lib/indiretoStorage';
+import { 
+  updateSyncedEapItemsWithNewConfig, 
+  syncEapChangeToIndiretoConfig, 
+  loadIndiretoConfig,
+  getIndiretosInEapInfo,
+  removeIndiretosFromEap
+} from '../lib/indiretoStorage';
 import { calculateCronogramaTotalDuration } from '../lib/cronogramaUtils';
 
 type OrcamentoItem = {
@@ -3841,6 +3847,30 @@ export default function OrcamentoBuilder() {
     }, 0);
   }, [computedItens]);
 
+  // Informações sobre custos indiretos presentes na EAP (para trava de segurança Caminho 1)
+  const indiretosEapInfo = useMemo(() => {
+    const cfg = loadIndiretoConfig(id || 'temp');
+    return getIndiretosInEapInfo(itens, cfg);
+  }, [itens, id]);
+
+  // Handler para remover todos os indiretos da EAP caso o usuário decida orçar pelo BDI (Caminho 1)
+  const handleRemoveAllIndiretosFromEap = useCallback(() => {
+    pushUndoSnapshot();
+    setItens(prev => {
+      const cfg = loadIndiretoConfig(id || 'temp');
+      const { cleanedItens, removedIds } = removeIndiretosFromEap(prev, cfg);
+
+      const uuidRemovals = removedIds.filter(isUUID);
+      if (uuidRemovals.length > 0) {
+        setRemovedItemIds(old => [...old, ...uuidRemovals]);
+      }
+
+      const rebuilt = rebuildEapCodes(cleanedItens);
+      return ensureSingleTrailingBlankRow(rebuilt, id || 'temp');
+    });
+    setHasUnsavedChanges(true);
+  }, [id, pushUndoSnapshot]);
+
   if (loading) {
     return (
       <div className="min-h-[60vh] flex flex-col items-center justify-center text-slate-500">
@@ -4674,7 +4704,14 @@ export default function OrcamentoBuilder() {
             <h4 className="font-bold text-slate-900 text-xs uppercase tracking-wider mb-3">Taxas de Composição (%)</h4>
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-4">
               <div>
-                <label className="block text-[11px] font-bold text-slate-800 mb-1">Adm. Central (AC)</label>
+                <label className="block text-[11px] font-bold text-slate-800 mb-1">
+                  Adm. Central (AC)
+                  {indiretosEapInfo.hasIndiretosInEap && (
+                    <span className="text-[9.5px] font-semibold text-amber-700 ml-1 block sm:inline" title="Custos indiretos já constam como itens na planilha orçamentária">
+                      (Na Planilha)
+                    </span>
+                  )}
+                </label>
                 <input type="number" step="0.01" 
                   value={configData.bdi_ac === 0 ? '' : (Math.round(Number(configData.bdi_ac || 0) * 100) / 100)} 
                   placeholder="0"
@@ -5096,6 +5133,9 @@ export default function OrcamentoBuilder() {
             duracaoCronogramaDias={cronogramaDuracaoInfo.totalDays}
             totalCustoDireto={custoDiretoPlanilha}
             currentBdiAc={configData.bdi_ac}
+            hasIndiretosInEap={indiretosEapInfo.hasIndiretosInEap}
+            insertedGruposNames={indiretosEapInfo.insertedGruposNames}
+            onRemoveIndiretosFromEap={handleRemoveAllIndiretosFromEap}
             onApplyBdi={(taxaPercent, modo) => {
               pushUndoSnapshot();
               setConfigData(prev => {

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { 
   Building2, Calendar, DollarSign, Plus, Trash2, Edit3, CheckSquare, Square, 
   RotateCcw, Search, ShieldCheck, FileSpreadsheet,
-  ChevronUp, ChevronDown, Sliders, Percent, Info, Calculator
+  ChevronUp, ChevronDown, Sliders, Percent, Info, Calculator, ShieldAlert, AlertTriangle
 } from 'lucide-react';
 import { clsx } from 'clsx';
 import type { IndiretoOrcamentoConfig, IndiretoGrupo, IndiretoItem, DestinoIndireto, UnidadeIndireto } from '../../types/indireto';
@@ -15,6 +15,9 @@ interface CustosIndiretosTabProps {
   duracaoCronogramaDias?: number;
   totalCustoDireto?: number;
   currentBdiAc?: number;
+  hasIndiretosInEap?: boolean;
+  insertedGruposNames?: string[];
+  onRemoveIndiretosFromEap?: () => void;
   onSyncEap?: (itensEap: any[], options?: { syncMode: IndiretoSyncMode; specificGrupoId?: string | null }) => void;
   onApplyBdi?: (taxaAcPercent: number, modo: 'substituir' | 'somar') => void;
   onChangeConfig?: (config: IndiretoOrcamentoConfig) => void;
@@ -26,6 +29,9 @@ export default function CustosIndiretosTab({
   duracaoCronogramaDias,
   totalCustoDireto = 0,
   currentBdiAc = 0,
+  hasIndiretosInEap = false,
+  insertedGruposNames = [],
+  onRemoveIndiretosFromEap,
   onSyncEap,
   onApplyBdi,
   onChangeConfig
@@ -36,6 +42,9 @@ export default function CustosIndiretosTab({
 
   const [searchTerm, setSearchTerm] = useState('');
   const [syncFeedback, setSyncFeedback] = useState<string | null>(null);
+
+  // Modal de bloqueio de BDI quando já existem indiretos na EAP (Caminho 1)
+  const [isBdiBlockedModalOpen, setIsBdiBlockedModalOpen] = useState(false);
 
   // Estado de grupos colapsados
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
@@ -558,6 +567,11 @@ export default function CustosIndiretosTab({
 
   // Abrir modal de aplicação da taxa no BDI
   const handleAbrirModalApplyBdi = () => {
+    if (hasIndiretosInEap) {
+      setIsBdiBlockedModalOpen(true);
+      return;
+    }
+
     const directBase = totalCustoDireto && totalCustoDireto > 0 ? totalCustoDireto : 0;
     setBdiDirectBaseInput(directBase > 0 ? directBase : '');
     
@@ -640,11 +654,29 @@ export default function CustosIndiretosTab({
             {onApplyBdi && (
               <button
                 onClick={handleAbrirModalApplyBdi}
-                className="px-4 py-1.5 text-xs font-bold text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300 rounded-lg shadow-2xs transition flex items-center gap-1.5 cursor-pointer"
-                title="Aplicar a taxa percentual calculada de custos indiretos no BDI (Administração Central) da obra"
+                className={clsx(
+                  "px-4 py-1.5 text-xs font-bold rounded-lg shadow-2xs transition flex items-center gap-1.5 cursor-pointer",
+                  hasIndiretosInEap
+                    ? "text-amber-900 bg-amber-100/90 hover:bg-amber-200 border border-amber-300"
+                    : "text-emerald-800 bg-emerald-100 hover:bg-emerald-200 border border-emerald-300"
+                )}
+                title={
+                  hasIndiretosInEap
+                    ? "Bloqueado: Custos Indiretos já constam na Planilha Orçamentária. Clique para ver opções."
+                    : "Aplicar a taxa percentual calculada de custos indiretos no BDI (Administração Central) da obra"
+                }
               >
-                <Percent className="w-4 h-4 text-emerald-700" />
-                Aplicar Taxa no BDI
+                {hasIndiretosInEap ? (
+                  <>
+                    <ShieldAlert className="w-4 h-4 text-amber-700" />
+                    <span>BDI Bloqueado (na EAP)</span>
+                  </>
+                ) : (
+                  <>
+                    <Percent className="w-4 h-4 text-emerald-700" />
+                    <span>Aplicar Taxa no BDI</span>
+                  </>
+                )}
               </button>
             )}
 
@@ -707,26 +739,45 @@ export default function CustosIndiretosTab({
             onClick={onApplyBdi ? handleAbrirModalApplyBdi : undefined}
             className={clsx(
               "p-3 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between transition-all select-none",
-              onApplyBdi && "cursor-pointer hover:border-emerald-300 hover:bg-emerald-50/40 group"
+              onApplyBdi && (hasIndiretosInEap
+                ? "cursor-pointer hover:border-amber-300 hover:bg-amber-50/50 group"
+                : "cursor-pointer hover:border-emerald-300 hover:bg-emerald-50/40 group"
+              )
             )}
-            title={onApplyBdi ? "Clique para abrir o painel e aplicar no BDI" : undefined}
+            title={
+              hasIndiretosInEap
+                ? "Custos Indiretos já constam na Planilha Orçamentária. Clique para ver opções."
+                : onApplyBdi 
+                  ? "Clique para abrir o painel e aplicar no BDI" 
+                  : undefined
+            }
           >
             <div>
               <div className="flex items-center gap-1.5">
                 <span className="text-[10.5px] font-bold text-slate-500 uppercase tracking-wider block">Indireto / Direto</span>
-                {onApplyBdi && (
+                {hasIndiretosInEap ? (
+                  <span className="text-[9px] font-bold text-amber-800 bg-amber-100 border border-amber-300/80 px-1 py-0.2 rounded flex items-center gap-0.5">
+                    <ShieldAlert className="w-2.5 h-2.5 text-amber-700" /> Na Planilha
+                  </span>
+                ) : onApplyBdi ? (
                   <span className="text-[9px] font-bold text-emerald-700 bg-emerald-100/70 border border-emerald-300/60 px-1 py-0.2 rounded group-hover:bg-emerald-200">
                     BDI
                   </span>
-                )}
+                ) : null}
               </div>
-              <span className="text-base font-bold text-slate-800 mt-0.5 block tabular-nums group-hover:text-emerald-800">
+              <span className={clsx(
+                "text-base font-bold mt-0.5 block tabular-nums",
+                hasIndiretosInEap ? "text-slate-800 group-hover:text-amber-800" : "text-slate-800 group-hover:text-emerald-800"
+              )}>
                 {totalCustoDireto > 0 && totais.totalGeral > 0
                   ? `${((totais.totalGeral / totalCustoDireto) * 100).toFixed(2)}%`
                   : 'N/D'}
               </span>
             </div>
-            <Percent className="w-5 h-5 text-slate-400 group-hover:text-emerald-600 transition-colors" />
+            <Percent className={clsx(
+              "w-5 h-5 transition-colors",
+              hasIndiretosInEap ? "text-amber-500/70 group-hover:text-amber-600" : "text-slate-400 group-hover:text-emerald-600"
+            )} />
           </div>
 
           {/* Itens Ativos */}
@@ -1417,10 +1468,18 @@ export default function CustosIndiretosTab({
             </div>
 
             {/* Aviso de Substituição Inteligente */}
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-start gap-2.5 mb-5">
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-start gap-2.5 mb-2.5">
               <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <span>
                 <strong>Substituição Inteligente:</strong> Se esta tabela já tiver sido inserida na planilha (seja em modo sintético ou detalhado), a estrutura anterior será <strong>substituída pelo novo formato</strong> escolhido no mesmo local, eliminando duplicidades de valores.
+              </span>
+            </div>
+
+            {/* Aviso de Exclusão Mútua com BDI (Caminho 1) */}
+            <div className="p-3 bg-amber-50/90 border border-amber-200 rounded-xl text-[11px] text-amber-950 flex items-start gap-2.5 mb-5">
+              <ShieldAlert className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
+              <span>
+                <strong>Segurança Orçamentária:</strong> Ao inserir custos indiretos na planilha, a aplicação da taxa no BDI ficará <strong>bloqueada</strong> para evitar cobrança em duplicidade e efeito cascata.
               </span>
             </div>
 
@@ -1735,6 +1794,85 @@ export default function CustosIndiretosTab({
               </button>
             </div>
 
+          </div>
+        </div>
+      )}
+
+      {/* ── MODAL DE BLOQUEIO DE BDI (CAMINHO 1 - EXCLUSÃO MÚTUA) ──────────────────── */}
+      {isBdiBlockedModalOpen && (
+        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-2xl max-w-lg w-full p-6 shadow-xl border border-slate-200 animate-fadeIn">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2.5 bg-amber-50 text-amber-600 rounded-xl border border-amber-200">
+                <ShieldAlert className="w-5 h-5 text-amber-600" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-slate-900">
+                  Aplicação no BDI Bloqueada
+                </h3>
+                <p className="text-xs text-slate-500">
+                  Trava de segurança orçamentária contra duplicidade de custos.
+                </p>
+              </div>
+            </div>
+
+            <div className="space-y-3 my-4">
+              <div className="p-3.5 bg-amber-50/90 border border-amber-200 rounded-xl text-xs text-amber-950 space-y-2">
+                <p className="leading-relaxed">
+                  Identificamos que já existem itens de <strong>Custos Indiretos inseridos na Planilha Orçamentária (EAP)</strong>
+                  {insertedGruposNames && insertedGruposNames.length > 0 && (
+                    <> (ex: <strong>{insertedGruposNames.slice(0, 3).join(', ')}{insertedGruposNames.length > 3 ? '...' : ''}</strong>)</>
+                  )}.
+                </p>
+                <p className="leading-relaxed text-amber-900">
+                  Para evitar a <strong>duplicidade de valores</strong> e o <strong>efeito cascata</strong>, o sistema adota o critério de exclusão mútua:
+                </p>
+                <ul className="list-disc pl-4 space-y-1 text-amber-900">
+                  <li>Se aplicássemos a taxa de indiretos no BDI agora, os custos indiretos seriam cobrados duas vezes.</li>
+                  <li>Além disso, o BDI geral incidiria sobre as próprias tabelas de indiretos que já estão na planilha.</li>
+                </ul>
+              </div>
+
+              <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl text-xs text-slate-700">
+                <span className="font-bold text-slate-900 block mb-1">Como você deseja orçar os indiretos?</span>
+                <p className="text-[11.5px] text-slate-600 leading-relaxed">
+                  • <strong>Opção 1 (Na Planilha):</strong> Mantenha os indiretos organizados em tabelas diretamente na EAP da planilha orçamentária.<br />
+                  • <strong>Opção 2 (No BDI):</strong> Remova as tabelas da planilha para aplicar o percentual diretamente na taxa de Administração Central do BDI.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-3 border-t border-slate-100">
+              <button
+                onClick={() => setIsBdiBlockedModalOpen(false)}
+                className="px-4 py-2 text-xs font-semibold text-slate-600 bg-slate-100 hover:bg-slate-200 rounded-lg transition cursor-pointer"
+              >
+                Manter na Planilha
+              </button>
+              {onRemoveIndiretosFromEap && (
+                <button
+                  onClick={() => {
+                    if (window.confirm('Deseja remover todas as tabelas de custos indiretos da Planilha Orçamentária para orçá-los via BDI?')) {
+                      onRemoveIndiretosFromEap();
+                      setIsBdiBlockedModalOpen(false);
+                      setTimeout(() => {
+                        const directBase = totalCustoDireto && totalCustoDireto > 0 ? totalCustoDireto : 0;
+                        setBdiDirectBaseInput(directBase > 0 ? directBase : '');
+                        const calculatedRate = directBase > 0 ? (totais.totalGeral / directBase) * 100 : 0;
+                        setBdiRateInput(calculatedRate > 0 ? Math.round(calculatedRate * 100) / 100 : '');
+                        setBdiApplyMode('substituir');
+                        setIsManualRateOverride(false);
+                        setIsApplyBdiModalOpen(true);
+                      }, 200);
+                    }
+                  }}
+                  className="px-4 py-2 text-xs font-bold text-white bg-amber-600 hover:bg-amber-700 rounded-lg transition shadow-2xs flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  Remover da Planilha e Usar no BDI
+                </button>
+              )}
+            </div>
           </div>
         </div>
       )}
