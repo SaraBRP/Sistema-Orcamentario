@@ -49,6 +49,8 @@ type OrcamentoItem = {
   hasChildren?: boolean;
 };
 
+const isUUID = (str: string) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(str || '');
+
 const STATUS_ENVIO_OPTIONS = ['Ag. Retorno', 'Cancelado', 'Encerrado', 'Consolidado'];
 
 // Função para remover linhas duplicadas (geradas por inserções múltiplas)
@@ -5114,124 +5116,175 @@ export default function OrcamentoBuilder() {
               });
               setHasUnsavedChanges(true);
             }}
-            onSyncEap={(novosItensEap) => {
+            onSyncEap={(novosItensEap, syncOptions) => {
               setItens(prev => {
                 const blankRows = prev.filter(i => (!i.item_eap || i.item_eap.trim() === '') && (!i.descricao || i.descricao.trim() === ''));
                 const nonBlankRows = prev.filter(i => (i.item_eap && i.item_eap.trim() !== '') || (i.descricao && i.descricao.trim() !== ''));
-                const finalNonBlank = [...nonBlankRows];
+                let finalNonBlank = [...nonBlankRows];
 
-                let currentParentSectionIdx = -1;
+                const currentConfig = loadIndiretoConfig(id || 'temp');
+                const grupos = currentConfig?.grupos || [];
+                
+                // Determina se estamos sincronizando um grupo específico ou todos os grupos
+                const groupIdsInNew = Array.from(new Set(novosItensEap.map(i => (i as any).indireto_grupo_id).filter(Boolean)));
+                const specificGrupoId = syncOptions?.specificGrupoId || (groupIdsInNew.length === 1 ? groupIdsInNew[0] : null);
 
-                novosItensEap.forEach(novoItem => {
-                  const isNovoSecao = Boolean(novoItem.isSecao || (novoItem as any).is_secao || (!novoItem.codigo && (!novoItem.quantidade || novoItem.quantidade === 0)));
-                  const novoDesc = String(novoItem.descricao || '').trim().toLowerCase();
-                  const novoCod = String(novoItem.codigo || '').trim().toLowerCase();
-                  const novoItemId = String(novoItem.id || '');
-                  const rawItemId = (novoItem as any).indireto_item_id || '';
-                  const rawGrupoId = (novoItem as any).indireto_grupo_id || '';
+                const itemsToRemove: OrcamentoItem[] = [];
+                let insertPosition = -1;
 
-                  let matchedIdx = -1;
+                if (specificGrupoId) {
+                  // Sincronizando um grupo específico (ex: g2 - TOPOGRAFIA)
+                  const targetGrupo = grupos.find(g => g.id === specificGrupoId);
+                  const targetNome = targetGrupo ? targetGrupo.nome.trim().toLowerCase() : '';
+                  const targetNumero = targetGrupo ? targetGrupo.numero : -1;
+                  const targetItemIds = new Set((targetGrupo?.itens || []).map(i => i.id));
 
-                  if (isNovoSecao) {
-                    // Match de seção no orçamento
-                    matchedIdx = finalNonBlank.findIndex(i => {
-                      const isSec = Boolean(i.isSecao || (i as any).is_secao || (!i.codigo && (!i.quantidade || i.quantidade === 0)));
-                      if (!isSec) return false;
-                      const iDesc = String(i.descricao || '').trim().toLowerCase();
-                      const iId = String(i.id || '');
-                      return iId === novoItemId ||
-                        (rawGrupoId && iId.includes(rawGrupoId)) ||
-                        iDesc === novoDesc;
-                    });
+                  const indicesToRemove = new Set<number>();
 
-                    if (matchedIdx >= 0) {
-                      currentParentSectionIdx = matchedIdx;
-                      finalNonBlank[matchedIdx] = {
-                        ...finalNonBlank[matchedIdx],
-                        ...novoItem,
-                        id: finalNonBlank[matchedIdx].id,
-                        item_eap: finalNonBlank[matchedIdx].item_eap
-                      };
-                    } else {
-                      finalNonBlank.push(novoItem);
-                      currentParentSectionIdx = finalNonBlank.length - 1;
+                  for (let i = 0; i < finalNonBlank.length; i++) {
+                    const row = finalNonBlank[i];
+                    if (!row) continue;
+                    const rowId = String(row.id || '');
+                    const rowDesc = String(row.descricao || '').trim().toLowerCase();
+                    const rowCod = String(row.codigo || '').trim().toLowerCase();
+                    const rawGrupoId = String((row as any).indireto_grupo_id || '');
+                    const rawItemId = String((row as any).indireto_item_id || '');
+                    const isSec = Boolean(row.isSecao || (row as any).is_secao || (!row.codigo && (!row.quantidade || row.quantidade === 0)));
+
+                    // Match direto por grupoId no ID ou propriedade
+                    const matchesGrupoId = rowId.includes(`__${specificGrupoId}__`) || 
+                      rowId.includes(`-${specificGrupoId}-`) || 
+                      rawGrupoId === specificGrupoId;
+
+                    // Match por item do grupo
+                    const matchesItemId = Array.from(targetItemIds).some(itId => rowId.includes(itId) || rawItemId === itId);
+
+                    // Linha sintética do grupo (não é seção, descrição = nome do grupo ou código = IND-GRP-x)
+                    const isSyntheticGroupRow = !isSec && (
+                      (targetNome && rowDesc === targetNome) ||
+                      (targetNumero > 0 && rowCod === `ind-grp-${targetNumero}`) ||
+                      matchesGrupoId
+                    );
+
+                    if (isSyntheticGroupRow) {
+                      indicesToRemove.add(i);
+                      continue;
                     }
-                  } else {
-                    // Item filho / folha
-                    // 1. Procura primeiro dentro dos filhos da seção pai identificada
-                    if (currentParentSectionIdx >= 0) {
-                      for (let k = currentParentSectionIdx + 1; k < finalNonBlank.length; k++) {
-                        const candidate = finalNonBlank[k];
-                        const candSec = Boolean(candidate.isSecao || (candidate as any).is_secao || (!candidate.codigo && (!candidate.quantidade || candidate.quantidade === 0)));
-                        if (candSec) {
-                          // Encontrou a próxima seção
+
+                    // Seção do grupo (modo detalhado)
+                    const isDetailedSectionRow = isSec && (
+                      (targetNome && rowDesc === targetNome) ||
+                      matchesGrupoId
+                    );
+
+                    if (isDetailedSectionRow) {
+                      indicesToRemove.add(i);
+                      const secEap = (row.item_eap || '').trim();
+                      // Inclui todos os filhos desta seção até a próxima seção
+                      for (let j = i + 1; j < finalNonBlank.length; j++) {
+                        const child = finalNonBlank[j];
+                        const childSec = Boolean(child.isSecao || (child as any).is_secao || (!child.codigo && (!child.quantidade || child.quantidade === 0)));
+                        const childEap = (child.item_eap || '').trim();
+                        if (childSec) {
+                          if (!secEap || !childEap.startsWith(secEap + '.')) {
+                            break;
+                          }
+                        } else if (secEap && !childEap.startsWith(secEap + '.')) {
                           break;
                         }
-                        const candDesc = String(candidate.descricao || '').trim().toLowerCase();
-                        const candCod = String(candidate.codigo || '').trim().toLowerCase();
-                        const candId = String(candidate.id || '');
-
-                        const idMatch = candId === novoItemId || (rawItemId && candId.includes(rawItemId));
-                        const codMatch = Boolean(novoCod && candCod && novoCod === candCod);
-                        const descMatch = Boolean(novoDesc && candDesc && novoDesc === candDesc);
-
-                        if (idMatch || codMatch || descMatch) {
-                          matchedIdx = k;
-                          break;
-                        }
+                        indicesToRemove.add(j);
                       }
+                      continue;
                     }
 
-                    // 2. Se não encontrou sob a seção atual, busca globalmente
-                    if (matchedIdx === -1) {
-                      matchedIdx = finalNonBlank.findIndex(i => {
-                        const iDesc = String(i.descricao || '').trim().toLowerCase();
-                        const iCod = String(i.codigo || '').trim().toLowerCase();
-                        const iId = String(i.id || '');
-                        const isSec = Boolean(i.isSecao || (i as any).is_secao);
-                        if (isSec) return false;
-                        return iId === novoItemId ||
-                          (rawItemId && iId.includes(rawItemId)) ||
-                          (novoCod && iCod && novoCod === iCod) ||
-                          (novoDesc && iDesc && novoDesc === iDesc);
-                      });
-                    }
-
-                    if (matchedIdx >= 0) {
-                      finalNonBlank[matchedIdx] = {
-                        ...finalNonBlank[matchedIdx],
-                        ...novoItem,
-                        id: finalNonBlank[matchedIdx].id,
-                        item_eap: finalNonBlank[matchedIdx].item_eap,
-                        quantidade: novoItem.quantidade,
-                        valor_unitario_mat: novoItem.valor_unitario_mat,
-                        valor_unitario_mo: novoItem.valor_unitario_mo,
-                        valor_unitario: novoItem.valor_unitario,
-                        valor_unitario_com_bdi: novoItem.valor_unitario_com_bdi,
-                        total_mat: novoItem.total_mat,
-                        total_mo: novoItem.total_mo,
-                        total: novoItem.total,
-                        unidade: novoItem.unidade,
-                        isSecao: false,
-                        is_secao: false
-                      };
-                    } else {
-                      // Se não existe, insere logo após o último filho da seção pai ou no final
-                      if (currentParentSectionIdx >= 0) {
-                        let insertPos = currentParentSectionIdx + 1;
-                        while (insertPos < finalNonBlank.length) {
-                          const cand = finalNonBlank[insertPos];
-                          const isCandSec = Boolean(cand.isSecao || (cand as any).is_secao || (!cand.codigo && (!cand.quantidade || cand.quantidade === 0)));
-                          if (isCandSec) break;
-                          insertPos++;
-                        }
-                        finalNonBlank.splice(insertPos, 0, novoItem);
-                      } else {
-                        finalNonBlank.push(novoItem);
-                      }
+                    if (matchesItemId) {
+                      indicesToRemove.add(i);
                     }
                   }
-                });
+
+                  if (indicesToRemove.size > 0) {
+                    insertPosition = Math.min(...Array.from(indicesToRemove));
+                    itemsToRemove.push(...finalNonBlank.filter((_, idx) => indicesToRemove.has(idx)));
+                    finalNonBlank = finalNonBlank.filter((_, idx) => !indicesToRemove.has(idx));
+                  }
+                } else {
+                  // Sincronizando todos os grupos (Global Sync)
+                  const allGroupNames = new Set(grupos.map(g => g.nome.trim().toLowerCase()));
+                  const indicesToRemove = new Set<number>();
+
+                  for (let i = 0; i < finalNonBlank.length; i++) {
+                    const row = finalNonBlank[i];
+                    if (!row) continue;
+                    const rowId = String(row.id || '');
+                    const rowDesc = String(row.descricao || '').trim().toLowerCase();
+                    const rawGrupoId = String((row as any).indireto_grupo_id || '');
+                    const isSec = Boolean(row.isSecao || (row as any).is_secao || (!row.codigo && (!row.quantidade || row.quantidade === 0)));
+
+                    const isCap = rowId.startsWith('indireto-cap-') ||
+                      rowDesc === 'administração local e canteiro de obras' ||
+                      rowDesc.includes('administração local');
+
+                    if (isCap) {
+                      indicesToRemove.add(i);
+                      const capEap = (row.item_eap || '').trim();
+                      for (let j = i + 1; j < finalNonBlank.length; j++) {
+                        const c = finalNonBlank[j];
+                        const cEap = (c.item_eap || '').trim();
+                        if (capEap && cEap.startsWith(capEap + '.')) {
+                          indicesToRemove.add(j);
+                        } else if (!capEap) {
+                          const cSec = Boolean(c.isSecao || (c as any).is_secao);
+                          const cId = String(c.id || '');
+                          if (cSec && !cId.startsWith('indireto-') && !allGroupNames.has(String(c.descricao || '').trim().toLowerCase())) {
+                            break;
+                          }
+                          indicesToRemove.add(j);
+                        }
+                      }
+                      continue;
+                    }
+
+                    if (rowId.startsWith('indireto-') || rawGrupoId) {
+                      indicesToRemove.add(i);
+                      continue;
+                    }
+
+                    if (allGroupNames.has(rowDesc)) {
+                      indicesToRemove.add(i);
+                      if (isSec) {
+                        const secEap = (row.item_eap || '').trim();
+                        for (let j = i + 1; j < finalNonBlank.length; j++) {
+                          const c = finalNonBlank[j];
+                          const cSec = Boolean(c.isSecao || (c as any).is_secao);
+                          const cEap = (c.item_eap || '').trim();
+                          if (cSec && (!secEap || !cEap.startsWith(secEap + '.'))) break;
+                          if (secEap && !cEap.startsWith(secEap + '.')) break;
+                          indicesToRemove.add(j);
+                        }
+                      }
+                      continue;
+                    }
+                  }
+
+                  if (indicesToRemove.size > 0) {
+                    insertPosition = Math.min(...Array.from(indicesToRemove));
+                    itemsToRemove.push(...finalNonBlank.filter((_, idx) => indicesToRemove.has(idx)));
+                    finalNonBlank = finalNonBlank.filter((_, idx) => !indicesToRemove.has(idx));
+                  }
+                }
+
+                // Notifica DB sobre os IDs reais que foram removidos para exclusão no Supabase
+                const uuidRemovals = itemsToRemove.map(it => it.id).filter(isUUID);
+                if (uuidRemovals.length > 0) {
+                  setRemovedItemIds(old => [...old, ...uuidRemovals]);
+                }
+
+                // Insere os novos itens na posição onde os anteriores estavam, ou no final
+                if (insertPosition >= 0 && insertPosition <= finalNonBlank.length) {
+                  finalNonBlank.splice(insertPosition, 0, ...novosItensEap);
+                } else {
+                  finalNonBlank.push(...novosItensEap);
+                }
 
                 const rebuilt = rebuildEapCodes(finalNonBlank);
                 return ensureSingleTrailingBlankRow(rebuilt, id || 'temp');

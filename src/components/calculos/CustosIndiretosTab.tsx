@@ -15,7 +15,7 @@ interface CustosIndiretosTabProps {
   duracaoCronogramaDias?: number;
   totalCustoDireto?: number;
   currentBdiAc?: number;
-  onSyncEap?: (itensEap: any[]) => void;
+  onSyncEap?: (itensEap: any[], options?: { syncMode: IndiretoSyncMode; specificGrupoId?: string | null }) => void;
   onApplyBdi?: (taxaAcPercent: number, modo: 'substituir' | 'somar') => void;
   onChangeConfig?: (config: IndiretoOrcamentoConfig) => void;
 }
@@ -545,7 +545,7 @@ export default function CustosIndiretosTab({
   const handleConfirmarSyncEap = () => {
     if (onSyncEap) {
       const itensEap = generateEapItemsFromIndiretos(config, orcamentoId, syncMode, syncModalGrupoId || undefined);
-      onSyncEap(itensEap);
+      onSyncEap(itensEap, { syncMode, specificGrupoId: syncModalGrupoId });
       const grupoNome = syncModalGrupoId ? config.grupos.find(g => g.id === syncModalGrupoId)?.nome : null;
       const msg = grupoNome 
         ? `Grupo "${grupoNome}" inserido com sucesso na Planilha Orçamentária (${syncMode === 'sintetico' ? 'Modo Sintético' : 'Modo Detalhado'})!`
@@ -1416,11 +1416,11 @@ export default function CustosIndiretosTab({
               </label>
             </div>
 
-            {/* Aviso de Inserção Preservativa */}
-            <div className="p-3 bg-amber-50 border border-amber-200 rounded-xl text-[11px] text-amber-900 flex items-start gap-2.5 mb-5">
-              <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            {/* Aviso de Substituição Inteligente */}
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-[11px] text-blue-900 flex items-start gap-2.5 mb-5">
+              <ShieldCheck className="w-4 h-4 text-blue-600 shrink-0 mt-0.5" />
               <span>
-                <strong>Garantia de Preservação:</strong> Os itens selecionados serão <strong>inseridos</strong> na sua planilha orçamentária sem apagar ou substituir qualquer item que já exista nela.
+                <strong>Substituição Inteligente:</strong> Se esta tabela já tiver sido inserida na planilha (seja em modo sintético ou detalhado), a estrutura anterior será <strong>substituída pelo novo formato</strong> escolhido no mesmo local, eliminando duplicidades de valores.
               </span>
             </div>
 
