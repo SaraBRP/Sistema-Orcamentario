@@ -2373,13 +2373,13 @@ export default function OrcamentoBuilder() {
         projeto: orcData.projeto || '',
         gestor_cliente: orcData.gestor_cliente || '',
         status: orcData.status || '',
-        bdi_ac: parseFloat(orcData.bdi_ac || 0) * 100,
-        bdi_s: parseFloat(orcData.bdi_s || 0) * 100,
-        bdi_g: parseFloat(orcData.bdi_g || 0) * 100,
-        bdi_r: parseFloat(orcData.bdi_r || 0) * 100,
-        bdi_df: parseFloat(orcData.bdi_df || 0) * 100,
-        bdi_l: parseFloat(orcData.bdi_l || 0) * 100,
-        bdi_i: parseFloat(orcData.bdi_i || 0) * 100
+        bdi_ac: Math.round(parseFloat(orcData.bdi_ac || 0) * 10000) / 100,
+        bdi_s: Math.round(parseFloat(orcData.bdi_s || 0) * 10000) / 100,
+        bdi_g: Math.round(parseFloat(orcData.bdi_g || 0) * 10000) / 100,
+        bdi_r: Math.round(parseFloat(orcData.bdi_r || 0) * 10000) / 100,
+        bdi_df: Math.round(parseFloat(orcData.bdi_df || 0) * 10000) / 100,
+        bdi_l: Math.round(parseFloat(orcData.bdi_l || 0) * 10000) / 100,
+        bdi_i: Math.round(parseFloat(orcData.bdi_i || 0) * 10000) / 100
       });
 
       // 1.5. Verificar se existe alguma revisão posterior
@@ -3170,13 +3170,13 @@ export default function OrcamentoBuilder() {
               gestor_cliente: configData.gestor_cliente,
               status: configData.status,
               dados_complementares: updatedDCPayload,
-              bdi_ac: configData.bdi_ac / 100,
-              bdi_s: configData.bdi_s / 100,
-              bdi_g: configData.bdi_g / 100,
-              bdi_r: configData.bdi_r / 100,
-              bdi_df: configData.bdi_df / 100,
-              bdi_l: configData.bdi_l / 100,
-              bdi_i: configData.bdi_i / 100
+              bdi_ac: Math.round(((configData.bdi_ac || 0) / 100) * 10000) / 10000,
+              bdi_s: Math.round(((configData.bdi_s || 0) / 100) * 10000) / 10000,
+              bdi_g: Math.round(((configData.bdi_g || 0) / 100) * 10000) / 10000,
+              bdi_r: Math.round(((configData.bdi_r || 0) / 100) * 10000) / 10000,
+              bdi_df: Math.round(((configData.bdi_df || 0) / 100) * 10000) / 10000,
+              bdi_l: Math.round(((configData.bdi_l || 0) / 100) * 10000) / 10000,
+              bdi_i: Math.round(((configData.bdi_i || 0) / 100) * 10000) / 10000
             })
             .eq('id', id);
 
@@ -3192,13 +3192,13 @@ export default function OrcamentoBuilder() {
                 gestor_cliente: configData.gestor_cliente,
                 status: configData.status,
                 dados_complementares: updatedDCPayload,
-                bdi_ac: configData.bdi_ac / 100,
-                bdi_s: configData.bdi_s / 100,
-                bdi_g: configData.bdi_g / 100,
-                bdi_r: configData.bdi_r / 100,
-                bdi_df: configData.bdi_df / 100,
-                bdi_l: configData.bdi_l / 100,
-                bdi_i: configData.bdi_i / 100
+                bdi_ac: Math.round(((configData.bdi_ac || 0) / 100) * 10000) / 10000,
+                bdi_s: Math.round(((configData.bdi_s || 0) / 100) * 10000) / 10000,
+                bdi_g: Math.round(((configData.bdi_g || 0) / 100) * 10000) / 10000,
+                bdi_r: Math.round(((configData.bdi_r || 0) / 100) * 10000) / 10000,
+                bdi_df: Math.round(((configData.bdi_df || 0) / 100) * 10000) / 10000,
+                bdi_l: Math.round(((configData.bdi_l || 0) / 100) * 10000) / 10000,
+                bdi_i: Math.round(((configData.bdi_i || 0) / 100) * 10000) / 10000
               })
               .eq('id', id);
           }
@@ -4673,64 +4673,71 @@ export default function OrcamentoBuilder() {
             <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-7 gap-4">
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Adm. Central (AC)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_ac === 0 ? '' : configData.bdi_ac} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_ac === 0 ? '' : (Math.round(Number(configData.bdi_ac || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_ac: Math.round((Number(p.bdi_ac) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_ac: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Seguro (S)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_s === 0 ? '' : configData.bdi_s} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_s === 0 ? '' : (Math.round(Number(configData.bdi_s || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_s: Math.round((Number(p.bdi_s) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_s: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Garantia (G)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_g === 0 ? '' : configData.bdi_g} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_g === 0 ? '' : (Math.round(Number(configData.bdi_g || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_g: Math.round((Number(p.bdi_g) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_g: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Risco (R)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_r === 0 ? '' : configData.bdi_r} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_r === 0 ? '' : (Math.round(Number(configData.bdi_r || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_r: Math.round((Number(p.bdi_r) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_r: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Desp. Finan. (DF)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_df === 0 ? '' : configData.bdi_df} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_df === 0 ? '' : (Math.round(Number(configData.bdi_df || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_df: Math.round((Number(p.bdi_df) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_df: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Lucro (L)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_l === 0 ? '' : configData.bdi_l} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_l === 0 ? '' : (Math.round(Number(configData.bdi_l || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_l: Math.round((Number(p.bdi_l) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_l: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
               <div>
                 <label className="block text-[11px] font-bold text-slate-800 mb-1">Impostos (I)</label>
-                <input type="number" step="0.0001" 
-                  value={configData.bdi_i === 0 ? '' : configData.bdi_i} 
+                <input type="number" step="0.01" 
+                  value={configData.bdi_i === 0 ? '' : (Math.round(Number(configData.bdi_i || 0) * 100) / 100)} 
                   placeholder="0"
                   onFocus={e => e.target.select()}
+                  onBlur={() => setConfigData(p => ({ ...p, bdi_i: Math.round((Number(p.bdi_i) || 0) * 100) / 100 }))}
                   onChange={e => { const val = e.target.value; setConfigData(p => ({ ...p, bdi_i: val === '' ? 0 : parseFloat(val) })); setHasUnsavedChanges(true); }}
                   className="w-full px-2.5 py-1.5 border border-slate-300 bg-white rounded-lg text-xs font-bold text-slate-950 outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs placeholder:text-slate-400" />
               </div>
@@ -5093,7 +5100,7 @@ export default function OrcamentoBuilder() {
                 const novaAc = modo === 'somar' ? (prev.bdi_ac + taxaPercent) : taxaPercent;
                 return {
                   ...prev,
-                  bdi_ac: Math.round(novaAc * 10000) / 10000
+                  bdi_ac: Math.round(novaAc * 100) / 100
                 };
               });
               setHasUnsavedChanges(true);

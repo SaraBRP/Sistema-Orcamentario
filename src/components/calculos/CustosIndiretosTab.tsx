@@ -573,7 +573,7 @@ export default function CustosIndiretosTab({
 
   // Confirmar aplicação de taxa no BDI
   const handleConfirmarApplyBdi = () => {
-    const rateToApply = Number(bdiRateInput) || 0;
+    const rateToApply = Math.round((Number(bdiRateInput) || 0) * 100) / 100;
     if (rateToApply <= 0) {
       alert('Informe uma taxa percentual válida maior que zero para aplicar no BDI.');
       return;
