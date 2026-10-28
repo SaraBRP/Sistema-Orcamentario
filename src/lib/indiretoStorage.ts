@@ -60,13 +60,29 @@ export function getDefaultIndiretoConfig(orcamentoId: string, prazoMeses: number
     ...g,
     numero: idx + 1,
     itens: (g.itens || []).map(item => {
-      const aloc = item.alocacaoMensal !== undefined ? Number(item.alocacaoMensal) : 1;
       const isFixo = Boolean(item.isCustoFixo);
+      const aloc = isFixo ? 1 : (item.alocacaoMensal !== undefined ? Number(item.alocacaoMensal) : 1);
       const effectivePrazo = isFixo ? 1 : aloc;
       const totalQtd = item.quantidadeTotal !== undefined ? Number(item.quantidadeTotal) : 1;
-      const unitU = Math.max(0, Number(item.valorUnitario) || 0);
-      const unitEncargos = Math.max(0, Number(item.valorFixoEncargos) || 0);
-      const valorTotal = (effectivePrazo * totalQtd * unitU) + unitEncargos;
+      let unitU = Math.max(0, Number(item.valorUnitario) || 0);
+      let unitEncargos = Math.max(0, Number(item.valorFixoEncargos) || 0);
+      let valorTotal: number;
+
+      if (isFixo) {
+        if (unitEncargos > 0) {
+          valorTotal = unitEncargos;
+          unitU = totalQtd > 0 ? unitEncargos / totalQtd : unitEncargos;
+        } else if (item.valorTotal && Number(item.valorTotal) > 0) {
+          valorTotal = Number(item.valorTotal);
+          unitEncargos = valorTotal;
+          unitU = totalQtd > 0 ? valorTotal / totalQtd : valorTotal;
+        } else {
+          valorTotal = totalQtd * unitU;
+          unitEncargos = valorTotal;
+        }
+      } else {
+        valorTotal = (effectivePrazo * totalQtd * unitU) + unitEncargos;
+      }
 
       return {
         ...item,
@@ -135,13 +151,29 @@ export function recalculateIndiretoConfig(config: IndiretoOrcamentoConfig, novoP
 
   const gruposAtualizados = grupos.map((grupo, idx) => {
     const itensAtualizados = (grupo.itens || []).map(item => {
-      const aloc = item.alocacaoMensal !== undefined ? Number(item.alocacaoMensal) : 1;
       const isFixo = Boolean(item.isCustoFixo);
+      const aloc = isFixo ? 1 : (item.alocacaoMensal !== undefined ? Number(item.alocacaoMensal) : 1);
       const effectivePrazo = isFixo ? 1 : aloc;
       const totalQtd = item.quantidadeTotal !== undefined ? Number(item.quantidadeTotal) : 1;
-      const unitU = Math.max(0, Number(item.valorUnitario) || 0);
-      const unitEncargos = Math.max(0, Number(item.valorFixoEncargos) || 0);
-      const valorTotal = (effectivePrazo * totalQtd * unitU) + unitEncargos;
+      let unitU = Math.max(0, Number(item.valorUnitario) || 0);
+      let unitEncargos = Math.max(0, Number(item.valorFixoEncargos) || 0);
+      let valorTotal: number;
+
+      if (isFixo) {
+        if (unitEncargos > 0) {
+          valorTotal = unitEncargos;
+          unitU = totalQtd > 0 ? unitEncargos / totalQtd : unitEncargos;
+        } else if (item.valorTotal && Number(item.valorTotal) > 0) {
+          valorTotal = Number(item.valorTotal);
+          unitEncargos = valorTotal;
+          unitU = totalQtd > 0 ? valorTotal / totalQtd : valorTotal;
+        } else {
+          valorTotal = totalQtd * unitU;
+          unitEncargos = valorTotal;
+        }
+      } else {
+        valorTotal = (effectivePrazo * totalQtd * unitU) + unitEncargos;
+      }
 
       return {
         ...item,
@@ -866,20 +898,36 @@ export function syncEapChangeToIndiretoConfig(
   if (field === 'quantidade') {
     const newQty = Math.max(0, parseFloat(value) || 0);
     matchedItem.quantidadeTotal = newQty;
-    const effectivePrazo = matchedItem.isCustoFixo ? 1 : (matchedItem.alocacaoMensal || 1);
-    matchedItem.valorTotal = (effectivePrazo * matchedItem.quantidadeTotal * (matchedItem.valorUnitario || 0)) + (matchedItem.valorFixoEncargos || 0);
+    if (matchedItem.isCustoFixo) {
+      // Para item de custo fixo, o total permanece inalterado! O valor unitário se ajusta.
+      const currentTotal = (matchedItem.valorFixoEncargos && matchedItem.valorFixoEncargos > 0)
+        ? matchedItem.valorFixoEncargos
+        : (matchedItem.valorTotal || 0);
+      matchedItem.valorTotal = currentTotal;
+      matchedItem.valorFixoEncargos = currentTotal;
+      matchedItem.valorUnitario = newQty > 0 ? currentTotal / newQty : currentTotal;
+    } else {
+      const effectivePrazo = matchedItem.alocacaoMensal || 1;
+      matchedItem.valorTotal = (effectivePrazo * matchedItem.quantidadeTotal * (matchedItem.valorUnitario || 0)) + (matchedItem.valorFixoEncargos || 0);
+    }
     modified = true;
   } else if (field === 'valor_unitario_mo' || field === 'valor_unitario_mat' || field === 'valor_unitario') {
     const newUnit = Math.max(0, parseFloat(value) || 0);
-    const effectivePrazo = matchedItem.isCustoFixo ? 1 : (matchedItem.alocacaoMensal || 1);
     const qty = (matchedItem.quantidadeTotal && matchedItem.quantidadeTotal > 0) ? matchedItem.quantidadeTotal : 1;
 
-    if (matchedItem.valorFixoEncargos && matchedItem.valorFixoEncargos > 0) {
+    if (matchedItem.isCustoFixo) {
+      const newTotal = newUnit * qty;
+      matchedItem.valorUnitario = newUnit;
+      matchedItem.valorFixoEncargos = newTotal;
+      matchedItem.valorTotal = newTotal;
+    } else if (matchedItem.valorFixoEncargos && matchedItem.valorFixoEncargos > 0) {
+      const effectivePrazo = matchedItem.alocacaoMensal || 1;
       const newTotal = newUnit * qty;
       const variablePart = effectivePrazo * qty * (matchedItem.valorUnitario || 0);
       matchedItem.valorFixoEncargos = Math.max(0, newTotal - variablePart);
       matchedItem.valorTotal = newTotal;
     } else {
+      const effectivePrazo = matchedItem.alocacaoMensal || 1;
       matchedItem.valorUnitario = effectivePrazo > 0 ? (newUnit / effectivePrazo) : newUnit;
       matchedItem.valorTotal = effectivePrazo * qty * matchedItem.valorUnitario;
     }

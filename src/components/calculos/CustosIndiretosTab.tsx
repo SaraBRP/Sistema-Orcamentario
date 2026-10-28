@@ -194,7 +194,11 @@ export default function CustosIndiretosTab({
     const gruposAtualizados = config.grupos.map(g => ({
       ...g,
       itens: g.itens.map(i => {
-        const effectivePrazo = i.isCustoFixo ? 1 : (i.alocacaoMensal || 1);
+        if (i.isCustoFixo) {
+          // Custo fixo não depende e não varia com o prazo da obra
+          return i;
+        }
+        const effectivePrazo = i.alocacaoMensal || 1;
         const unitU = i.valorUnitario || 0;
         const unitEncargos = i.valorFixoEncargos || 0;
         const totalQtd = i.quantidadeTotal || 0;
@@ -257,37 +261,84 @@ export default function CustosIndiretosTab({
         itens: g.itens.map(i => {
           if (i.id !== itemId) return i;
           let aloc = i.alocacaoMensal;
-          let isFixo = i.isCustoFixo;
+          let isFixo = Boolean(i.isCustoFixo);
           let unitU = i.valorUnitario || 0;
           let unitEncargos = i.valorFixoEncargos || 0;
-          let totalQtd = i.quantidadeTotal;
+          let totalQtd = i.quantidadeTotal !== undefined ? i.quantidadeTotal : 1;
+          let valorTotal = i.valorTotal || 0;
 
-          if (field === 'alocacaoMensal') {
-            aloc = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
-          } else if (field === 'quantidadeTotal') {
-            totalQtd = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
-          } else if (field === 'isCustoFixo') {
+          if (field === 'isCustoFixo') {
             isFixo = Boolean(val);
-          } else if (field === 'valorUnitario') {
-            unitU = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
-          } else if (field === 'valorFixoEncargos') {
-            unitEncargos = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+            if (isFixo) {
+              aloc = 1;
+              // Se marcar como fixo, o total passa a ser estritamente fixo
+              if (unitEncargos > 0) {
+                valorTotal = unitEncargos;
+                unitU = totalQtd > 0 ? (unitEncargos / totalQtd) : unitEncargos;
+              } else if (valorTotal > 0) {
+                unitEncargos = valorTotal;
+                unitU = totalQtd > 0 ? (valorTotal / totalQtd) : valorTotal;
+              } else {
+                valorTotal = totalQtd * unitU;
+                unitEncargos = valorTotal;
+              }
+            } else {
+              // Ao desmarcar fixo, volta a calcular proporcional ao prazo
+              valorTotal = (aloc * totalQtd * unitU) + unitEncargos;
+            }
+          } else if (isFixo) {
+            // QUANDO O ITEM É CUSTO FIXO:
+            aloc = 1; // Prazo não se aplica / é sempre 1
+            if (field === 'valorFixoEncargos') {
+              unitEncargos = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+              valorTotal = unitEncargos;
+              unitU = totalQtd > 0 ? (unitEncargos / totalQtd) : unitEncargos;
+            } else if (field === 'quantidadeTotal') {
+              totalQtd = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+              // O valor total do item permanece FIXO; recalcula o valor unitário proporcional
+              if (unitEncargos > 0) {
+                valorTotal = unitEncargos;
+                unitU = totalQtd > 0 ? (unitEncargos / totalQtd) : unitEncargos;
+              } else if (valorTotal > 0) {
+                unitEncargos = valorTotal;
+                unitU = totalQtd > 0 ? (valorTotal / totalQtd) : valorTotal;
+              } else {
+                valorTotal = totalQtd * unitU;
+                unitEncargos = valorTotal;
+              }
+            } else if (field === 'valorUnitario') {
+              unitU = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+              valorTotal = totalQtd * unitU;
+              unitEncargos = valorTotal;
+            } else if (field === 'alocacaoMensal') {
+              // Custo fixo não varia por prazo
+              aloc = 1;
+            }
+          } else {
+            // QUANDO O ITEM É CUSTO VARIÁVEL:
+            if (field === 'alocacaoMensal') {
+              aloc = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+            } else if (field === 'quantidadeTotal') {
+              totalQtd = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+            } else if (field === 'valorUnitario') {
+              unitU = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+            } else if (field === 'valorFixoEncargos') {
+              unitEncargos = val === '' ? 0 : Math.max(0, parseFloat(val) || 0);
+            }
+            const effectivePrazo = aloc;
+            valorTotal = (effectivePrazo === 0)
+              ? unitEncargos
+              : (effectivePrazo * totalQtd * unitU) + unitEncargos;
           }
-
-          const effectivePrazo = isFixo ? 1 : aloc;
-          // Se o prazo for 0 e não for fixo, zera a parte proporcional ao prazo mas preserva encargos/valores fixos
-          const valorTotal = (!isFixo && effectivePrazo === 0)
-            ? unitEncargos
-            : (effectivePrazo * totalQtd * unitU) + unitEncargos;
 
           return {
             ...i,
             alocacaoMensal: aloc,
             isCustoFixo: isFixo,
-            valorUnitario: unitU,
-            valorFixoEncargos: unitEncargos,
+            valorUnitario: Math.round(unitU * 100) / 100,
+            valorFixoEncargos: Math.round(unitEncargos * 100) / 100,
             quantidadeTotal: totalQtd,
-            valorTotal: valorTotal
+            valorTotal: Math.round(valorTotal * 100) / 100
           };
         })
       };
@@ -383,12 +434,29 @@ export default function CustosIndiretosTab({
       return;
     }
 
-    const aloc = Math.max(0, itemFormData.alocacaoMensal || 0);
+    const isFixo = Boolean(itemFormData.isCustoFixo);
+    const aloc = isFixo ? 1 : Math.max(0, itemFormData.alocacaoMensal || 0);
     const totalQtd = Math.max(0, itemFormData.quantidadeTotal || 0);
-    const unitU = Math.max(0, itemFormData.valorUnitario || 0);
-    const unitEncargos = Math.max(0, itemFormData.valorFixoEncargos || 0);
-    const effectivePrazo = itemFormData.isCustoFixo ? 1 : aloc;
-    const valorTotal = (effectivePrazo * totalQtd * unitU) + unitEncargos;
+    let unitU = Math.max(0, itemFormData.valorUnitario || 0);
+    let unitEncargos = Math.max(0, itemFormData.valorFixoEncargos || 0);
+
+    let valorTotal = 0;
+    if (isFixo) {
+      if (unitEncargos > 0) {
+        valorTotal = unitEncargos;
+        unitU = totalQtd > 0 ? (unitEncargos / totalQtd) : unitEncargos;
+      } else if (unitU > 0) {
+        valorTotal = totalQtd * unitU;
+        unitEncargos = valorTotal;
+      } else {
+        valorTotal = 0;
+      }
+    } else {
+      const effectivePrazo = aloc;
+      valorTotal = (effectivePrazo === 0)
+        ? unitEncargos
+        : (effectivePrazo * totalQtd * unitU) + unitEncargos;
+    }
 
     if (editingItem) {
       // Edição
@@ -402,11 +470,11 @@ export default function CustosIndiretosTab({
             codigo: itemFormData.codigo.trim(),
             unidade: itemFormData.unidade,
             alocacaoMensal: aloc,
-            isCustoFixo: itemFormData.isCustoFixo,
+            isCustoFixo: isFixo,
             quantidadeTotal: totalQtd,
-            valorUnitario: unitU,
-            valorFixoEncargos: unitEncargos,
-            valorTotal: valorTotal,
+            valorUnitario: Math.round(unitU * 100) / 100,
+            valorFixoEncargos: Math.round(unitEncargos * 100) / 100,
+            valorTotal: Math.round(valorTotal * 100) / 100,
             destino: 'eap',
             observacao: itemFormData.observacao.trim()
           } : i)
@@ -492,7 +560,7 @@ export default function CustosIndiretosTab({
     const valUnit = parseFloat(insumo.valor || insumo.valor_nao_desonerado || 0);
     const isFixo = insumo.unidade !== 'mês' && insumo.unidade !== 'equipe/mês';
     const effectivePrazo = isFixo ? 1 : 1;
-    const valorTotal = (effectivePrazo * 1 * valUnit) + 0;
+    const valorTotal = isFixo ? valUnit : (effectivePrazo * 1 * valUnit);
 
     const novoItem: IndiretoItem = {
       id: `i_banco_${insumo.id}_${Date.now()}`,
@@ -504,7 +572,7 @@ export default function CustosIndiretosTab({
       quantidadeTotal: 1,
       isCustoFixo: isFixo,
       valorUnitario: valUnit,
-      valorFixoEncargos: 0,
+      valorFixoEncargos: isFixo ? valUnit : 0,
       valorTotal: valorTotal,
       destino: 'eap',
       ativo: true,
@@ -989,16 +1057,25 @@ export default function CustosIndiretosTab({
 
                             {/* Prazo */}
                             <td className="py-2 px-3 text-center">
-                              <input
-                                type="number"
-                                step="0.01"
-                                min="0"
-                                value={item.alocacaoMensal === 0 ? '' : (item.alocacaoMensal ?? '')}
-                                placeholder="0"
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => updateItemField(grupo.id, item.id, 'alocacaoMensal', e.target.value)}
-                                className="w-20 text-center font-semibold bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none shadow-2xs"
-                              />
+                              {item.isCustoFixo ? (
+                                <span 
+                                  className="inline-block w-20 text-center py-0.5 px-1.5 text-xs text-slate-400 bg-slate-100 border border-slate-200 rounded font-medium cursor-not-allowed select-none"
+                                  title="Custo fixo único (não varia com o prazo da obra)"
+                                >
+                                  —
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  step="0.01"
+                                  min="0"
+                                  value={item.alocacaoMensal === 0 ? '' : (item.alocacaoMensal ?? '')}
+                                  placeholder="0"
+                                  onFocus={(e) => e.target.select()}
+                                  onChange={(e) => updateItemField(grupo.id, item.id, 'alocacaoMensal', e.target.value)}
+                                  className="w-20 text-center font-semibold bg-white border border-slate-300 rounded px-1.5 py-0.5 text-xs focus:ring-1 focus:ring-blue-500 outline-none shadow-2xs"
+                                />
+                              )}
                             </td>
 
                             {/* Custo Fixo? */}
@@ -1227,14 +1304,20 @@ export default function CustosIndiretosTab({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Prazo</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                    Prazo {itemFormData.isCustoFixo && <span className="text-slate-400 font-normal">(Fixo: —)</span>}
+                  </label>
                   <input
                     type="number"
                     step="0.01"
                     min="0"
-                    value={itemFormData.alocacaoMensal}
+                    disabled={itemFormData.isCustoFixo}
+                    value={itemFormData.isCustoFixo ? 1 : itemFormData.alocacaoMensal}
                     onChange={(e) => setItemFormData({ ...itemFormData, alocacaoMensal: parseFloat(e.target.value) || 0 })}
-                    className="w-full px-3 py-2 border border-slate-300 rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500"
+                    className={clsx(
+                      "w-full px-3 py-2 border rounded-lg text-xs outline-none focus:ring-2 focus:ring-blue-500",
+                      itemFormData.isCustoFixo ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed" : "border-slate-300"
+                    )}
                   />
                 </div>
 
@@ -1282,7 +1365,14 @@ export default function CustosIndiretosTab({
                   type="checkbox"
                   id="chkFixo"
                   checked={itemFormData.isCustoFixo}
-                  onChange={(e) => setItemFormData({ ...itemFormData, isCustoFixo: e.target.checked })}
+                  onChange={(e) => {
+                    const checked = e.target.checked;
+                    setItemFormData(prev => ({
+                      ...prev,
+                      isCustoFixo: checked,
+                      alocacaoMensal: checked ? 1 : prev.alocacaoMensal
+                    }));
+                  }}
                   className="w-4 h-4 text-blue-600 rounded border-slate-300 focus:ring-blue-500 cursor-pointer"
                 />
                 <label htmlFor="chkFixo" className="text-xs font-medium text-slate-700 cursor-pointer">
