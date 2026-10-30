@@ -447,6 +447,44 @@ export default function CronogramaTab({
     handlePredecessorasChange(itemId, itemEap, sanitized);
   };
 
+  const handlePredecessorKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    itemId: string,
+    itemEap: string
+  ) => {
+    if (e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const target = e.currentTarget;
+      const value = target.value;
+
+      handleValidateAndCommitPredecessor(itemId, itemEap, value);
+
+      const allInputs = Array.from(
+        document.querySelectorAll<HTMLInputElement>('input[data-cronograma-predecessor="true"]')
+      );
+
+      const currentIndex = allInputs.indexOf(target);
+      if (currentIndex !== -1) {
+        if (e.key === 'Enter' || e.key === 'ArrowDown') {
+          e.preventDefault();
+          const nextInput = allInputs[currentIndex + 1];
+          if (nextInput) {
+            nextInput.focus();
+            nextInput.select();
+            nextInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        } else if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          const prevInput = allInputs[currentIndex - 1];
+          if (prevInput) {
+            prevInput.focus();
+            prevInput.select();
+            prevInput.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+          }
+        }
+      }
+    }
+  };
+
   const handleDataInicioChange = (val: string) => {
     const safeVal = val || new Date().toISOString().split('T')[0];
     setDataInicioObra(safeVal);
@@ -2011,17 +2049,13 @@ export default function CronogramaTab({
                           ) : (
                             <input 
                               type="text"
+                              data-cronograma-predecessor="true"
                               value={predecessorasMap[t.item.id] || predecessorasMap[eap] || ''}
                               placeholder="ex: 1.2.5 ou 1.1TI+2"
                               onChange={(e) => handlePredecessorasChange(t.item.id, eap, e.target.value)}
                               onBlur={(e) => handleValidateAndCommitPredecessor(t.item.id, eap, e.target.value)}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter') {
-                                  handleValidateAndCommitPredecessor(t.item.id, eap, (e.target as HTMLInputElement).value);
-                                  (e.target as HTMLInputElement).blur();
-                                }
-                              }}
-                              className="w-full text-center bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 rounded py-0.5 px-1 text-xs font-semibold"
+                              onKeyDown={(e) => handlePredecessorKeyDown(e, t.item.id, eap)}
+                              className="w-full text-center bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 rounded py-0.5 px-1 text-xs font-semibold focus:ring-1 focus:ring-blue-500 outline-none"
                               title="Digitando apenas o número (ex: 1.2.5), assume automaticamente Término-Início (TI). Também suporta TI, II, TT, IT com folgas (ex: 1.2.5+2 ou 1.1II-1)"
                             />
                           )}
