@@ -2013,7 +2013,7 @@ export default function CronogramaTab({
             </div>
 
             {/* LINHAS DAS TAREFAS (SEÇÕES, COMPOSIÇÕES E SUBCOMPOSIÇÕES) */}
-            <div className="divide-y divide-slate-200 bg-white relative">
+            <div className="bg-white relative">
               {/* OVERLAY SVG DE DEPENDÊNCIAS / PREDECESSORAS (SETAS FINAS MS PROJECT) */}
               {dependencyLinks.length > 0 && (
                 <svg 
@@ -2061,17 +2061,17 @@ export default function CronogramaTab({
                   <div 
                     key={t.item.id || eap}
                     className={`flex items-center h-10 hover:bg-slate-50/90 transition-colors text-xs ${
-                      isSec ? 'bg-slate-100/70 font-bold' : isInherited ? 'bg-indigo-50/40' : ''
+                      isSec ? 'bg-slate-100/70 font-bold' : isInherited ? 'bg-indigo-50/40' : 'bg-white'
                     }`}
                   >
                     {/* Tabela Esquerda (Inputs & Informações) */}
                     <div 
                       style={{ width: `${tablePanelWidth}px`, minWidth: `${tablePanelWidth}px`, maxWidth: `${tablePanelWidth}px` }}
-                      className="shrink-0 relative z-10 border-r border-slate-300 overflow-hidden"
+                      className="shrink-0 relative z-10 border-r border-slate-300 border-b border-slate-200 overflow-hidden h-full flex items-center"
                     >
                       <div 
-                        style={{ width: `${descricaoWidth + 470}px` }}
-                        className={`flex items-center h-10 px-1 text-xs ${isSec ? 'bg-slate-100/70 font-bold' : isInherited ? 'bg-indigo-50/40' : 'bg-white'}`}
+                        style={{ minWidth: `${descricaoWidth + 470}px` }}
+                        className="flex items-center h-full w-full px-1 text-xs"
                       >
                         {/* Código EAP - Centralizado ao Meio */}
                         <div className="w-[60px] shrink-0 flex items-center justify-center gap-1 font-semibold text-slate-800 text-center truncate">
@@ -2174,7 +2174,7 @@ export default function CronogramaTab({
                     </div>
 
                     {/* Gráfico da Linha de Balanço / Gantt (Direita com fundo 100% opaco e z-10) */}
-                    <div className={`flex-1 relative h-10 flex items-center px-1 overflow-hidden z-10 border-l border-slate-300 ${isSec ? 'bg-slate-100/80' : isInherited ? 'bg-indigo-50/30' : 'bg-white'}`}>
+                    <div className={`flex-1 relative h-10 flex items-center px-1 overflow-hidden z-10 border-l border-slate-300 border-b border-slate-200 ${isSec ? 'bg-slate-100/80' : isInherited ? 'bg-indigo-50/30' : 'bg-white'}`}>
                       {/* Grid de fundo para os meses/semanas */}
                       <div className="absolute inset-0 flex pointer-events-none">
                         {timelineInfo.columns.map((_, idx) => (
