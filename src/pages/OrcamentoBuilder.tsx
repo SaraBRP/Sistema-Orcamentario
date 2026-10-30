@@ -1726,61 +1726,153 @@ export default function OrcamentoBuilder() {
     }
 
     const position = dropTarget?.position || 'above';
+    const sourceIndex = draggedRowIndex;
     setDropTarget(null);
+    setDraggedRowIndex(null);
 
     setItens(prev => {
       pushUndoSnapshot(prev);
       const copy = [...prev];
-      const draggedItem = copy[draggedRowIndex];
+      const draggedItem = copy[sourceIndex];
       if (!draggedItem) return prev;
 
-      // Insumo interno de composição (movimentação apenas entre irmãos de sua mãe)
-      const isChild = (draggedItem as any).isChildInsumoOfComposition || (draggedItem as any).is_child_insumo;
+      // Bloco da linha arrastada: se for composição/seção com filhas, move o bloco; se for insumo/linha folha, move apenas ele mesmo (blockLength = 1)
+      const blockLength = getBlockLength(sourceIndex, copy);
 
-      if (isChild) {
-        const compRange = getParentCompositionRange(draggedRowIndex, copy);
-        if (compRange && compRange.siblingIndices.length > 0) {
-          const { siblingIndices } = compRange;
-          const minAllowedIndex = siblingIndices[0];
-          const maxAllowedIndex = siblingIndices[siblingIndices.length - 1];
-
-          let targetPos = position === 'above' ? targetIndex : targetIndex + 1;
-          let adjustedDest = Math.max(minAllowedIndex, Math.min(maxAllowedIndex, targetPos));
-          const [movedInsumo] = copy.splice(draggedRowIndex, 1);
-          if (draggedRowIndex < adjustedDest) adjustedDest--;
-          copy.splice(adjustedDest, 0, movedInsumo);
-
-          const rebuilt = rebuildEapCodes(copy);
-          return ensureSingleTrailingBlankRow(rebuilt, id!);
+      // Determina a posição de inserção pretendida
+      let targetPos = targetIndex;
+      if (position === 'below') {
+        if (blockLength === 1) {
+          // Quando arrasta um insumo individual e solta 'below' (por exemplo, abaixo do cabeçalho da composição ou de outro insumo),
+          // ele deve entrar imediatamente na linha seguinte (tornando-se o primeiro subitem da composição ou o próximo irmão),
+          // e NÃO pular todos os filhos existentes da composição
+          targetPos = targetIndex + 1;
+        } else {
+          // Se for um bloco completo (ex: composição inteira com seus insumos), posiciona após o bloco alvo
+          const targetBlockLen = getBlockLength(targetIndex, copy);
+          targetPos = targetIndex + targetBlockLen;
         }
       }
 
-      // Bloco de composição/seção completa (move a mãe JUNTO com todos os seus insumos e filhas)
-      const blockLength = getBlockLength(draggedRowIndex, copy);
+      if (sourceIndex === targetPos) return prev;
 
-      let targetPos = targetIndex;
-      if (position === 'below') {
-        const targetBlockLen = getBlockLength(targetIndex, copy);
-        targetPos = targetIndex + targetBlockLen;
-      }
-
-      if (draggedRowIndex === targetPos) return prev;
-
-      const block = copy.splice(draggedRowIndex, blockLength);
+      const block = copy.splice(sourceIndex, blockLength);
 
       let insertIndex = targetPos;
-      if (draggedRowIndex < targetPos) {
+      if (sourceIndex < targetPos) {
         insertIndex = targetPos - blockLength;
       }
       insertIndex = Math.max(0, Math.min(copy.length, insertIndex));
 
+      // Adaptação de Nível Hierárquico e Vínculo ao Novo Contexto
+      const prevItem = insertIndex > 0 ? copy[insertIndex - 1] : null;
+
+      if (blockLength === 1) {
+        // Linha individual (insumo / folha)
+        const movedItem = block[0];
+        if (!prevItem) {
+          // Inserido no topo da planilha
+          (movedItem as any).level = 0;
+          (movedItem as any).isChildInsumoOfComposition = false;
+          (movedItem as any).parentCompositionId = null;
+        } else if (canItemBeParent(prevItem)) {
+          const isPrevSecao = Boolean(!prevItem.codigo || (prevItem as any).isSecao || (prevItem as any).is_secao || (prevItem as any).isTextLine);
+          const prevLevel = (prevItem as any).level !== undefined 
+            ? (prevItem as any).level 
+            : (isPrevSecao ? 0 : getEapLevel(prevItem.item_eap));
+
+          if (isPrevSecao) {
+            // Filho direto de uma seção (Nível 1)
+            (movedItem as any).level = 1;
+            (movedItem as any).isChildInsumoOfComposition = false;
+            (movedItem as any).parentCompositionId = null;
+          } else {
+            // Filho direto de uma Composição / Subcomposição (Nível da composição + 1)
+            (movedItem as any).level = prevLevel + 1;
+            (movedItem as any).isChildInsumoOfComposition = true;
+            (movedItem as any).parentCompositionId = prevItem.id;
+          }
+        } else {
+          // Inserido após outro insumo/irmão
+          const prevLevel = (prevItem as any).level !== undefined 
+            ? (prevItem as any).level 
+            : getEapLevel(prevItem.item_eap);
+          (movedItem as any).level = prevLevel;
+          (movedItem as any).isChildInsumoOfComposition = Boolean((prevItem as any).isChildInsumoOfComposition);
+          (movedItem as any).parentCompositionId = (prevItem as any).parentCompositionId || null;
+        }
+      } else {
+        // Bloco de composição/seção com filhos: calcula novo nível raiz e propaga o delta
+        const rootItem = block[0];
+        const isRootSecao = Boolean(!rootItem.codigo || (rootItem as any).isSecao || (rootItem as any).is_secao || (rootItem as any).isTextLine);
+        const oldRootLevel = (rootItem as any).level !== undefined 
+          ? (rootItem as any).level 
+          : (isRootSecao ? 0 : getEapLevel(rootItem.item_eap));
+
+        let newRootLevel = oldRootLevel;
+        if (!prevItem) {
+          newRootLevel = 0;
+        } else {
+          const isPrevSecao = Boolean(!prevItem.codigo || (prevItem as any).isSecao || (prevItem as any).is_secao || (prevItem as any).isTextLine);
+          const prevLevel = (prevItem as any).level !== undefined 
+            ? (prevItem as any).level 
+            : (isPrevSecao ? 0 : getEapLevel(prevItem.item_eap));
+          const maxLevel = canItemBeParent(prevItem) ? prevLevel + 1 : prevLevel;
+          if (newRootLevel > maxLevel) {
+            newRootLevel = maxLevel;
+          }
+        }
+        const delta = newRootLevel - oldRootLevel;
+        (rootItem as any).level = newRootLevel;
+        if (delta !== 0) {
+          for (let b = 1; b < block.length; b++) {
+            const child = block[b];
+            const curL = (child as any).level !== undefined ? (child as any).level : getEapLevel(child.item_eap);
+            (child as any).level = Math.max(0, curL + delta);
+          }
+        }
+      }
+
       copy.splice(insertIndex, 0, ...block);
 
       const rebuilt = rebuildEapCodes(copy);
+
+      // Garante que se o item foi movido para dentro de uma composição/seção colapsada,
+      // essa composição/seção seja automaticamente expandida para que a linha do insumo NUNCA fique oculta
+      setCollapsedEaps(prevCollapsed => {
+        const nextCollapsed = new Set(prevCollapsed);
+        if (prevItem?.item_eap) {
+          const pClean = prevItem.item_eap.replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+          nextCollapsed.delete(pClean);
+          nextCollapsed.delete(`${pClean}.0`);
+        }
+        const insertedEap = rebuilt[insertIndex]?.item_eap;
+        if (insertedEap) {
+          const clean = insertedEap.replace(/\.+/g, '.').replace(/^\.|\.$/g, '').trim();
+          const parts = clean.split('.').filter(Boolean);
+          for (let p = 1; p < parts.length; p++) {
+            const ancestor = parts.slice(0, p).join('.');
+            nextCollapsed.delete(ancestor);
+            nextCollapsed.delete(`${ancestor}.0`);
+          }
+        }
+        if (id) {
+          try {
+            localStorage.setItem(`orcamento_collapsed_${id}`, JSON.stringify(Array.from(nextCollapsed)));
+          } catch (e) {
+            console.error(e);
+          }
+        }
+        return nextCollapsed;
+      });
+
+      // Seleciona a linha recém-inserida para feedback visual imediato
+      setSelectedRowIndex(insertIndex);
+      setSelectedRowIndices(new Set([insertIndex]));
+
       return ensureSingleTrailingBlankRow(rebuilt, id!);
     });
 
-    setDraggedRowIndex(null);
     setHasUnsavedChanges(true);
   };
 
@@ -1898,7 +1990,15 @@ export default function OrcamentoBuilder() {
       return true;
     }
     // 2. Composição / Subcomposição → Pode ser mãe se tiver composicao_id/sub_composicao_id ou for composição
-    if (item.hasChildren || item.composicao_id || (item as any).sub_composicao_id || (item as any).is_composicao) {
+    if (
+      item.hasChildren ||
+      item.composicao_id ||
+      (item as any).sub_composicao_id ||
+      (item as any).is_composicao ||
+      (item as any).isComposicao ||
+      (item as any).tipo_vinculo === 'composicao' ||
+      String((item as any).tipo || '').toLowerCase().includes('composi')
+    ) {
       return true;
     }
     // 3. Caso contrário, é um insumo simples (folha) → NÃO PODE SER MÃE
