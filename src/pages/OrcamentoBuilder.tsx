@@ -1599,6 +1599,30 @@ export default function OrcamentoBuilder() {
 
 
 
+  const isItemComposition = (item: OrcamentoItem | null | undefined): boolean => {
+    if (!item) return false;
+    return Boolean(
+      item.hasChildren ||
+      item.composicao_id ||
+      (item as any).sub_composicao_id ||
+      (item as any).is_composicao ||
+      (item as any).isComposicao ||
+      (item as any).tipo_vinculo === 'composicao' ||
+      String((item as any).tipo || '').toLowerCase().includes('composi')
+    );
+  };
+
+  const isItemSection = (item: OrcamentoItem | null | undefined): boolean => {
+    if (!item) return false;
+    return Boolean(
+      (item as any).isSecao ||
+      (item as any).is_secao ||
+      (item as any).isTextLine ||
+      (item as any).tipo_vinculo === 'secao' ||
+      (!item.codigo && (!item.quantidade || item.quantidade === 0))
+    );
+  };
+
   // Manipuladores de Drag and Drop (Reordenação de Linhas com Suporte a Blocos de Composições/Seções e Indicador de Posição Estilo MS Project)
   const getBlockLength = (index: number, list: OrcamentoItem[]): number => {
     const item = list[index];
@@ -1670,6 +1694,22 @@ export default function OrcamentoBuilder() {
       return;
     }
 
+    const targetItem = itens[index];
+    const draggedItem = itens[draggedRowIndex];
+    const isDraggedInsumo = blockLen === 1 && !isItemComposition(draggedItem) && !isItemSection(draggedItem);
+    const isTargetComp = isItemComposition(targetItem);
+
+    // Se um insumo estiver sendo arrastado sobre uma composição,
+    // o indicador visual deve sempre ficar 'below' (abaixo do cabeçalho da composição),
+    // garantindo visualmente que ele entrará DENTRO da composição e nunca sobrepondo seu cabeçalho
+    if (isDraggedInsumo && isTargetComp) {
+      setDropTarget(prev => {
+        if (prev && prev.index === index && prev.position === 'below') return prev;
+        return { index, position: 'below' };
+      });
+      return;
+    }
+
     const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
     const midY = rect.top + rect.height / 2;
     const position: 'above' | 'below' = e.clientY < midY ? 'above' : 'below';
@@ -1738,10 +1778,18 @@ export default function OrcamentoBuilder() {
 
       // Bloco da linha arrastada: se for composição/seção com filhas, move o bloco; se for insumo/linha folha, move apenas ele mesmo (blockLength = 1)
       const blockLength = getBlockLength(sourceIndex, copy);
+      const targetItem = copy[targetIndex];
+      const isDraggedInsumo = blockLength === 1 && !isItemComposition(draggedItem) && !isItemSection(draggedItem);
+      const isTargetComp = isItemComposition(targetItem);
 
       // Determina a posição de inserção pretendida
       let targetPos = targetIndex;
-      if (position === 'below') {
+
+      if (isDraggedInsumo && isTargetComp) {
+        // Regra de Ouro: Um insumo solto sobre uma Composição NUNCA sobrepõe nem fica antes do cabeçalho da mãe.
+        // Ele sempre entra imediatamente após o cabeçalho da composição (tornando-se o primeiro subitem da composição)
+        targetPos = targetIndex + 1;
+      } else if (position === 'below') {
         if (blockLength === 1) {
           // Quando arrasta um insumo individual e solta 'below' (por exemplo, abaixo do cabeçalho da composição ou de outro insumo),
           // ele deve entrar imediatamente na linha seguinte (tornando-se o primeiro subitem da composição ou o próximo irmão),
@@ -1775,23 +1823,19 @@ export default function OrcamentoBuilder() {
           (movedItem as any).level = 0;
           (movedItem as any).isChildInsumoOfComposition = false;
           (movedItem as any).parentCompositionId = null;
-        } else if (canItemBeParent(prevItem)) {
-          const isPrevSecao = Boolean(!prevItem.codigo || (prevItem as any).isSecao || (prevItem as any).is_secao || (prevItem as any).isTextLine);
+        } else if (isItemComposition(prevItem)) {
+          // Filho direto de uma Composição / Subcomposição (Nível da composição + 1)
           const prevLevel = (prevItem as any).level !== undefined 
             ? (prevItem as any).level 
-            : (isPrevSecao ? 0 : getEapLevel(prevItem.item_eap));
-
-          if (isPrevSecao) {
-            // Filho direto de uma seção (Nível 1)
-            (movedItem as any).level = 1;
-            (movedItem as any).isChildInsumoOfComposition = false;
-            (movedItem as any).parentCompositionId = null;
-          } else {
-            // Filho direto de uma Composição / Subcomposição (Nível da composição + 1)
-            (movedItem as any).level = prevLevel + 1;
-            (movedItem as any).isChildInsumoOfComposition = true;
-            (movedItem as any).parentCompositionId = prevItem.id;
-          }
+            : getEapLevel(prevItem.item_eap);
+          (movedItem as any).level = prevLevel + 1;
+          (movedItem as any).isChildInsumoOfComposition = true;
+          (movedItem as any).parentCompositionId = prevItem.id;
+        } else if (isItemSection(prevItem)) {
+          // Filho direto de uma seção (Nível 1)
+          (movedItem as any).level = 1;
+          (movedItem as any).isChildInsumoOfComposition = false;
+          (movedItem as any).parentCompositionId = null;
         } else {
           // Inserido após outro insumo/irmão
           const prevLevel = (prevItem as any).level !== undefined 
