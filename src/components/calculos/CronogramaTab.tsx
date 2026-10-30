@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 'react';
 import { 
   Calendar, Clock, Layers, ArrowRight, RefreshCw, ChevronDown, ChevronRight, 
   BarChart3, TrendingUp, Package, HardHat, FileSpreadsheet, ZoomIn, ZoomOut, Filter,
@@ -158,8 +158,8 @@ export function validateAndSanitizePredecessors(
   const validTokens: string[] = [];
 
   tokens.forEach(token => {
-    // Regex de sintaxe: EAP (ex: 1.2.5 ou 1.1), Tipo de relação (TI, FS, II, SS, TT, FF, IT, SF), Folga (+2, -1, +30dias)
-    const match = token.match(/^\s*([0-9\.]+)\s*(TI|FS|II|SS|TT|FF|IT|SF)?\s*([\+\-]\s*\d+(?:\s*dias?)?)?\s*/i);
+    // Regex de sintaxe: EAP (ex: 1.2.5 ou 1.1), Tipo de relação (TI, FS, II, SS, TT, FF, IT, SF), Folga (+2, -1, +30d, +30dias)
+    const match = token.match(/^\s*([0-9\.]+)\s*(TI|FS|II|SS|TT|FF|IT|SF)?\s*([\+\-]\s*\d+(?:\s*d(?:ias?)?)?)?\s*/i);
     if (!match) return; // Sintaxe totalmente inválida
 
     const targetEap = match[1].trim();
@@ -207,6 +207,95 @@ export function validateAndSanitizePredecessors(
 
 export function cleanPredecessorsString(predStr: string, nonActMap: Record<string, boolean>): string {
   return validateAndSanitizePredecessors(predStr, undefined, undefined, undefined, nonActMap);
+}
+
+interface PredecessorInputCellProps {
+  taskId: string;
+  eap: string;
+  value: string;
+  onChange: (val: string) => void;
+  onCommit: (val: string) => void;
+  onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>, taskId: string, eap: string) => void;
+}
+
+function PredecessorInputCell({
+  taskId,
+  eap,
+  value,
+  onChange,
+  onCommit,
+  onKeyDown
+}: PredecessorInputCellProps) {
+  const [isFocused, setIsFocused] = useState(false);
+  const measurerRef = useRef<HTMLSpanElement>(null);
+  const [textWidth, setTextWidth] = useState(0);
+
+  // Calcula a sugestão fantasma (ghost text) "dias"
+  const ghostSuggestion = useMemo(() => {
+    if (!value) return '';
+    // Detecta se terminou de digitar um + ou - seguido de dígitos e opcionalmente início de 'dias'
+    const match = value.match(/[\+\-]\s*(\d+)\s*([a-zA-Z]*)$/);
+    if (!match) return '';
+
+    const typedLetters = (match[2] || '').toLowerCase();
+    const fullWord = 'dias';
+
+    if (typedLetters === '') {
+      return 'dias';
+    } else if (fullWord.startsWith(typedLetters) && typedLetters !== fullWord) {
+      return fullWord.slice(typedLetters.length);
+    }
+    return '';
+  }, [value]);
+
+  // Mede a largura exata em pixels do texto digitado
+  useLayoutEffect(() => {
+    if (measurerRef.current) {
+      setTextWidth(measurerRef.current.offsetWidth);
+    }
+  }, [value]);
+
+  return (
+    <div className="relative w-full flex items-center justify-center overflow-hidden">
+      {/* Elemento oculto que replica a tipografia para medir a largura com precisão milimétrica */}
+      <span
+        ref={measurerRef}
+        aria-hidden="true"
+        className="invisible absolute top-0 left-0 pointer-events-none text-xs font-semibold whitespace-pre select-none"
+      >
+        {value || ''}
+      </span>
+
+      {/* Input de texto real */}
+      <input
+        type="text"
+        data-cronograma-predecessor="true"
+        value={value}
+        placeholder="ex: 1.2.5 ou 1.1TI+2"
+        onFocus={() => setIsFocused(true)}
+        onChange={(e) => onChange(e.target.value)}
+        onBlur={(e) => {
+          setIsFocused(false);
+          onCommit(e.target.value);
+        }}
+        onKeyDown={(e) => onKeyDown(e, taskId, eap)}
+        className="w-full text-center bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 rounded py-0.5 px-1 text-xs font-semibold focus:ring-1 focus:ring-blue-500 outline-none"
+        title="Digitando apenas o número (ex: 1.2.5), assume automaticamente Término-Início (TI). Também suporta TI, II, TT, IT com folgas (ex: 1.2.5+2 ou 1.1II-1)"
+      />
+
+      {/* Sugestão inline transparente (Ghost Text) com visualização 'dias' */}
+      {ghostSuggestion && isFocused && (
+        <span
+          style={{
+            left: `calc(50% + ${Math.round(textWidth / 2)}px)`
+          }}
+          className="absolute top-1/2 -translate-y-1/2 pointer-events-none text-slate-400/60 font-semibold text-xs whitespace-nowrap select-none italic"
+        >
+          {ghostSuggestion}
+        </span>
+      )}
+    </div>
+  );
 }
 
 export default function CronogramaTab({
@@ -2047,16 +2136,13 @@ export default function CronogramaTab({
                           {isSec || isInherited ? (
                             <span className="text-slate-400 text-[10px]" title={isInherited ? "Predecessora desativada para tarefas herdadas da mãe" : ""}>-</span>
                           ) : (
-                            <input 
-                              type="text"
-                              data-cronograma-predecessor="true"
+                            <PredecessorInputCell
+                              taskId={t.item.id}
+                              eap={eap}
                               value={predecessorasMap[t.item.id] || predecessorasMap[eap] || ''}
-                              placeholder="ex: 1.2.5 ou 1.1TI+2"
-                              onChange={(e) => handlePredecessorasChange(t.item.id, eap, e.target.value)}
-                              onBlur={(e) => handleValidateAndCommitPredecessor(t.item.id, eap, e.target.value)}
-                              onKeyDown={(e) => handlePredecessorKeyDown(e, t.item.id, eap)}
-                              className="w-full text-center bg-slate-50 border border-slate-200 focus:border-blue-500 text-slate-800 rounded py-0.5 px-1 text-xs font-semibold focus:ring-1 focus:ring-blue-500 outline-none"
-                              title="Digitando apenas o número (ex: 1.2.5), assume automaticamente Término-Início (TI). Também suporta TI, II, TT, IT com folgas (ex: 1.2.5+2 ou 1.1II-1)"
+                              onChange={(val) => handlePredecessorasChange(t.item.id, eap, val)}
+                              onCommit={(val) => handleValidateAndCommitPredecessor(t.item.id, eap, val)}
+                              onKeyDown={handlePredecessorKeyDown}
                             />
                           )}
                         </div>
