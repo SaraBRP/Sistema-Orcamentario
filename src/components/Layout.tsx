@@ -369,6 +369,20 @@ export default function Layout() {
     };
   }, []);
 
+  // Fechar dropdowns de perfil e notificacoes ao clicar fora
+  useEffect(() => {
+    if (!perfilOpen && !notificacoesOpen) return;
+    const handleClickOutside = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      if (!target.closest('[data-dropdown-container="true"]')) {
+        setPerfilOpen(false);
+        setNotificacoesOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, [perfilOpen, notificacoesOpen]);
+
   const handleOpenKanban = () => {
     setKanbanModalOpen(true);
     setKanbanUnreadCount(0);
@@ -693,7 +707,7 @@ export default function Layout() {
       </aside>
 
       <main className="flex-1 flex flex-col h-screen overflow-hidden bg-slate-100 print:bg-white print:h-auto print:overflow-visible">
-        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex items-center justify-between shadow-2xs z-10 shrink-0 print:hidden">
+        <header className="bg-white border-b border-slate-200 px-4 md:px-6 py-2.5 flex items-center justify-between shadow-2xs relative z-50 shrink-0 print:hidden">
           <div className="flex items-center gap-3">
             <h1 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
               <span>{obterTituloPagina(location.pathname)}</span>
@@ -718,7 +732,7 @@ export default function Layout() {
             </button>
 
             {/* Botão 2: Notificações com Badge */}
-            <div className="relative">
+            <div className="relative z-50" data-dropdown-container="true">
               <button
                 type="button"
                 onClick={() => {
@@ -816,7 +830,7 @@ export default function Layout() {
             </div>
 
             {/* Avatar do Orçamentista (Bolinha no Canto Superior Direito - Clique abre Edição de Perfil!) */}
-            <div className="relative">
+            <div className="relative z-50" data-dropdown-container="true">
               <button
                 type="button"
                 onClick={() => setPerfilOpen(!perfilOpen)}
