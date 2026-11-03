@@ -271,7 +271,6 @@ function PredecessorInputCell({
         type="text"
         data-cronograma-predecessor="true"
         value={value}
-        placeholder="ex: 1.2.5 ou 1.1TI+2"
         onFocus={() => setIsFocused(true)}
         onChange={(e) => onChange(e.target.value)}
         onBlur={(e) => {
