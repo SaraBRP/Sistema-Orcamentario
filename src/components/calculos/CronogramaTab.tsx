@@ -8,6 +8,7 @@ import {
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, 
   CartesianGrid, AreaChart, Area, LineChart, Line 
 } from 'recharts';
+import { reconcileRowValues } from '../../lib/cronogramaExcelExporter';
 
 export type OrcamentoItem = {
   id: string;
@@ -1153,18 +1154,19 @@ export default function CronogramaTab({
     const columns: Array<{ label: string; sublabel?: string; startDay: number; daySpan: number }> = [];
 
     if (viewMode === 'meses') {
-      const curr = new Date(minStart);
-      curr.setDate(1);
-      while (curr <= maxEnd) {
-        const monthLabel = curr.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }).toUpperCase();
-        const startDay = Math.max(0, Math.round((curr.getTime() - minStart.getTime()) / (1000 * 60 * 60 * 24)));
-
-        const nextMonth = new Date(curr);
-        nextMonth.setMonth(nextMonth.getMonth() + 1);
-        const daySpan = Math.round((nextMonth.getTime() - curr.getTime()) / (1000 * 60 * 60 * 24));
+      let monthCursor = new Date(minStart);
+      while (monthCursor <= maxEnd) {
+        const monthLabel = monthCursor.toLocaleDateString('pt-BR', { month: 'short', year: '2-digit' }).toUpperCase();
+        
+        // Início do próximo mês civil (dia 1 às 00:00:00)
+        const nextMonthFirst = new Date(monthCursor.getFullYear(), monthCursor.getMonth() + 1, 1);
+        
+        const startDay = Math.max(0, Math.round((monthCursor.getTime() - minStart.getTime()) / (1000 * 60 * 60 * 24)));
+        const endDay = Math.max(startDay, Math.round((nextMonthFirst.getTime() - minStart.getTime()) / (1000 * 60 * 60 * 24)));
+        const daySpan = endDay - startDay;
 
         columns.push({ label: monthLabel, startDay, daySpan });
-        curr.setMonth(curr.getMonth() + 1);
+        monthCursor = nextMonthFirst;
       }
     } else if (viewMode === 'semanas') {
       const curr = new Date(minStart);
@@ -1642,7 +1644,7 @@ export default function CronogramaTab({
         }
       });
 
-      const periodValues = timelineInfo.columns.map(col => {
+      const rawPeriodValues = timelineInfo.columns.map(col => {
         const startIdx = Math.max(0, col.startDay);
         const endIdx = Math.min(totalDays, col.startDay + col.daySpan);
 
@@ -1656,9 +1658,15 @@ export default function CronogramaTab({
           }
         }
 
-        const pQtd = sumValorTotal > 0 ? (pVal / sumValorTotal) * sumQtdTotal : 0;
-        return { qtd: pQtd, val: pVal, colaboradores: peakWorkersInPeriod };
+        return { val: pVal, colaboradores: peakWorkersInPeriod };
       });
+
+      const recVals = reconcileRowValues(rawPeriodValues.map(p => p.val), sumValorTotal, 2);
+      const periodValues = rawPeriodValues.map((p, idx) => ({
+        val: recVals[idx],
+        qtd: sumValorTotal > 0 ? (recVals[idx] / sumValorTotal) * sumQtdTotal : 0,
+        colaboradores: p.colaboradores
+      }));
 
       const eapList = Array.from(eapsSet);
       const formattedEap = eapList.length > 3 
@@ -1722,9 +1730,17 @@ export default function CronogramaTab({
             : eapList.length > 0 
             ? eapList.join(', ') 
             : '-';
+          
+          const recVals = reconcileRowValues(item.periodValues.map(p => p.val), item.valorTotal, 2);
+          const reconciledPeriods = item.periodValues.map((p, idx) => ({
+            val: recVals[idx],
+            qtd: item.valorTotal > 0 ? (recVals[idx] / item.valorTotal) * item.qtdTotal : 0
+          }));
+
           return {
             ...item,
-            eap: formattedEap
+            eap: formattedEap,
+            periodValues: reconciledPeriods
           };
         })
         .sort((a, b) => b.valorTotal - a.valorTotal);

@@ -59,6 +59,36 @@ export interface CronogramaExportOptions {
   }>;
 }
 
+export function reconcileRowValues(rawValues: number[], targetTotal: number, decimals: number = 2): number[] {
+  if (targetTotal <= 0) return rawValues.map(() => 0);
+  const sumRaw = rawValues.reduce((a, b) => a + b, 0);
+  if (sumRaw <= 0) return rawValues.map(() => 0);
+
+  const multiplier = Math.pow(10, decimals);
+  const targetUnits = Math.round(targetTotal * multiplier);
+
+  const factor = targetTotal / sumRaw;
+  const unitsArray = rawValues.map(v => Math.round(v * factor * multiplier));
+  const currentUnitsSum = unitsArray.reduce((a, b) => a + b, 0);
+  const diffUnits = targetUnits - currentUnitsSum;
+
+  if (diffUnits !== 0) {
+    let bestIdx = -1;
+    let maxVal = -1;
+    for (let i = 0; i < unitsArray.length; i++) {
+      if (unitsArray[i] > maxVal) {
+        maxVal = unitsArray[i];
+        bestIdx = i;
+      }
+    }
+    if (bestIdx >= 0) {
+      unitsArray[bestIdx] += diffUnits;
+    }
+  }
+
+  return unitsArray.map(u => u / multiplier);
+}
+
 function getColLetter(colIdx: number): string {
   let temp = colIdx;
   let letter = '';
@@ -195,8 +225,16 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
   // Linhas de Dados MO (Linhas 8+)
   let curRowMO = 8;
   const moRows = detailedResourceData.moRows || [];
+  const reconciledMoRows = moRows.map(row => {
+    const rawVals = columns.map((_c, pIdx) => row.periodValues[pIdx]?.val || 0);
+    const reconciledVals = reconcileRowValues(rawVals, Number(row.valorTotal || 0), 2);
+    return {
+      ...row,
+      reconciledVals
+    };
+  });
 
-  moRows.forEach(row => {
+  reconciledMoRows.forEach(row => {
     const r = wsMO.getRow(curRowMO);
     r.height = 20;
 
@@ -232,7 +270,7 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     columns.forEach((_col, pIdx) => {
       const colIdx = 7 + pIdx;
       const cell = r.getCell(colIdx);
-      const pVal = row.periodValues[pIdx]?.val || 0;
+      const pVal = row.reconciledVals[pIdx] || 0;
 
       cell.border = {
         top: { style: 'hair', color: { argb: 'FFCBD5E1' } },
@@ -266,8 +304,8 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
   totalRowMO.getCell(2).value = '';
   totalRowMO.getCell(3).value = 'TOTAL GERAL DA EQUIPE NO PERÍODO:';
   totalRowMO.getCell(4).value = '';
-  totalRowMO.getCell(5).value = moRows.length > 0 ? { formula: `SUM(E8:E${lastDataRowMO})`, result: moRows.reduce((a, b) => a + b.qtdTotal, 0) } : 0;
-  totalRowMO.getCell(6).value = moRows.length > 0 ? { formula: `SUM(F8:F${lastDataRowMO})`, result: moRows.reduce((a, b) => a + b.valorTotal, 0) } : 0;
+  totalRowMO.getCell(5).value = reconciledMoRows.length > 0 ? { formula: `SUM(E8:E${lastDataRowMO})`, result: reconciledMoRows.reduce((a, b) => a + b.qtdTotal, 0) } : 0;
+  totalRowMO.getCell(6).value = reconciledMoRows.length > 0 ? { formula: `SUM(F8:F${lastDataRowMO})`, result: reconciledMoRows.reduce((a, b) => a + b.valorTotal, 0) } : 0;
 
   for (let c = 2; c <= 6; c++) {
     const cell = totalRowMO.getCell(c);
@@ -293,9 +331,9 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     const colIdx = 7 + pIdx;
     const colLetter = getColLetter(colIdx);
     const cell = totalRowMO.getCell(colIdx);
-    const colSum = moRows.reduce((acc, r) => acc + (r.periodValues[pIdx]?.val || 0), 0);
+    const colSum = reconciledMoRows.reduce((acc, r) => acc + (r.reconciledVals[pIdx] || 0), 0);
 
-    cell.value = moRows.length > 0 ? { formula: `SUM(${colLetter}8:${colLetter}${lastDataRowMO})`, result: colSum } : colSum;
+    cell.value = reconciledMoRows.length > 0 ? { formula: `SUM(${colLetter}8:${colLetter}${lastDataRowMO})`, result: colSum } : colSum;
     cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF0F172A' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
     cell.border = {
@@ -419,8 +457,16 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
   // Linhas de Dados Mat (Linhas 8+)
   let curRowMat = 8;
   const matRows = detailedResourceData.materiaisRows || [];
+  const reconciledMatRows = matRows.map(row => {
+    const rawVals = columns.map((_c, pIdx) => row.periodValues[pIdx]?.val || 0);
+    const reconciledVals = reconcileRowValues(rawVals, Number(row.valorTotal || 0), 2);
+    return {
+      ...row,
+      reconciledVals
+    };
+  });
 
-  matRows.forEach(row => {
+  reconciledMatRows.forEach(row => {
     const r = wsMat.getRow(curRowMat);
     r.height = 20;
 
@@ -456,7 +502,7 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     columns.forEach((_col, pIdx) => {
       const colIdx = 7 + pIdx;
       const cell = r.getCell(colIdx);
-      const pVal = row.periodValues[pIdx]?.val || 0;
+      const pVal = row.reconciledVals[pIdx] || 0;
 
       cell.border = {
         top: { style: 'hair', color: { argb: 'FFCBD5E1' } },
@@ -490,8 +536,8 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
   totalRowMat.getCell(2).value = '';
   totalRowMat.getCell(3).value = 'TOTAL GERAL DE SUPRIMENTOS NO PERÍODO:';
   totalRowMat.getCell(4).value = '';
-  totalRowMat.getCell(5).value = matRows.length > 0 ? { formula: `SUM(E8:E${lastDataRowMat})`, result: matRows.reduce((a, b) => a + b.qtdTotal, 0) } : 0;
-  totalRowMat.getCell(6).value = matRows.length > 0 ? { formula: `SUM(F8:F${lastDataRowMat})`, result: matRows.reduce((a, b) => a + b.valorTotal, 0) } : 0;
+  totalRowMat.getCell(5).value = reconciledMatRows.length > 0 ? { formula: `SUM(E8:E${lastDataRowMat})`, result: reconciledMatRows.reduce((a, b) => a + b.qtdTotal, 0) } : 0;
+  totalRowMat.getCell(6).value = reconciledMatRows.length > 0 ? { formula: `SUM(F8:F${lastDataRowMat})`, result: reconciledMatRows.reduce((a, b) => a + b.valorTotal, 0) } : 0;
 
   for (let c = 2; c <= 6; c++) {
     const cell = totalRowMat.getCell(c);
@@ -517,9 +563,9 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     const colIdx = 7 + pIdx;
     const colLetter = getColLetter(colIdx);
     const cell = totalRowMat.getCell(colIdx);
-    const colSum = matRows.reduce((acc, r) => acc + (r.periodValues[pIdx]?.val || 0), 0);
+    const colSum = reconciledMatRows.reduce((acc, r) => acc + (r.reconciledVals[pIdx] || 0), 0);
 
-    cell.value = matRows.length > 0 ? { formula: `SUM(${colLetter}8:${colLetter}${lastDataRowMat})`, result: colSum } : colSum;
+    cell.value = reconciledMatRows.length > 0 ? { formula: `SUM(${colLetter}8:${colLetter}${lastDataRowMat})`, result: colSum } : colSum;
     cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF0F172A' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
     cell.border = {
@@ -647,7 +693,33 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
   const validTasks = calculatedTasks || [];
   const grandTotalPrevisto = validTasks.filter(t => !t.isSection).reduce((acc, t) => acc + (t.totalGeral || 0), 0);
 
-  validTasks.forEach(task => {
+  const reconciledTasks = validTasks.map(task => {
+    const isSection = Boolean(task.isSection);
+    const durDias = Math.max(1, task.duracaoDias || 1);
+    const totalVal = Number(task.totalGeral || 0);
+    const taskStartOffset = task.startOffsetDays || 0;
+    const taskEndOffset = task.endOffsetDays || (taskStartOffset + durDias);
+
+    let reconciledVals: number[] = new Array(columns.length).fill(0);
+
+    if (!isSection && totalVal > 0) {
+      const rawMonthWeights = columns.map(col => {
+        const colStart = col.startDay;
+        const colEnd = col.startDay + col.daySpan;
+        const overlapStart = Math.max(taskStartOffset, colStart);
+        const overlapEnd = Math.min(taskEndOffset, colEnd);
+        return Math.max(0, overlapEnd - overlapStart);
+      });
+      reconciledVals = reconcileRowValues(rawMonthWeights, totalVal, 2);
+    }
+
+    return {
+      ...task,
+      reconciledVals
+    };
+  });
+
+  reconciledTasks.forEach(task => {
     const r = wsCurvaS.getRow(curRowS);
     r.height = 20;
 
@@ -696,18 +768,10 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     }
 
     // Colunas de Período para a Atividade (Distribuição Mensal + Barra Gantt)
-    const taskStartOffset = task.startOffsetDays || 0;
-    const taskEndOffset = task.endOffsetDays || (taskStartOffset + durDias);
-
-    columns.forEach((col, pIdx) => {
+    columns.forEach((_col, pIdx) => {
       const colIdx = 9 + pIdx;
       const cell = r.getCell(colIdx);
-      const colStart = col.startDay;
-      const colEnd = col.startDay + col.daySpan;
-
-      const overlapStart = Math.max(taskStartOffset, colStart);
-      const overlapEnd = Math.min(taskEndOffset, colEnd);
-      const overlapDays = Math.max(0, overlapEnd - overlapStart);
+      const monthVal = task.reconciledVals[pIdx] || 0;
 
       cell.border = {
         top: { style: 'hair', color: { argb: 'FFCBD5E1' } },
@@ -716,10 +780,7 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
         right: { style: colIdx === lastColSIdx ? 'thin' : 'hair', color: { argb: 'FFCBD5E1' } }
       };
 
-      if (!isSection && overlapDays > 0 && totalVal > 0) {
-        const fraction = overlapDays / durDias;
-        const monthVal = fraction * totalVal;
-
+      if (!isSection && monthVal > 0) {
         cell.value = monthVal;
         cell.font = { name: 'Calibri', bold: true, size: 9.5, color: { argb: 'FF065F46' } };
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFD1FAE5' } }; // Soft emerald Gantt bar
@@ -747,6 +808,7 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
 
   // Linha 1: DESEMBOLSO MENSAL (R$)
   const rowDesembolso = wsCurvaS.getRow(curRowS);
+  const desembolsoRowIdx = curRowS;
   rowDesembolso.height = 24;
   rowDesembolso.getCell(2).value = '';
   rowDesembolso.getCell(3).value = 'DESEMBOLSO NO PERÍODO (R$):';
@@ -776,11 +838,13 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
 
   columns.forEach((_col, pIdx) => {
     const colIdx = 9 + pIdx;
+    const colLetter = getColLetter(colIdx);
     const cell = rowDesembolso.getCell(colIdx);
-    const pData = histogramData[pIdx];
-    const monthVal = pData ? pData.totalPeriodo : 0;
+    const colSum = reconciledTasks.filter(t => !t.isSection).reduce((acc, t) => acc + (t.reconciledVals[pIdx] || 0), 0);
 
-    cell.value = monthVal;
+    cell.value = reconciledTasks.length > 0 
+      ? { formula: `SUM(${colLetter}8:${colLetter}${lastTaskRowS})`, result: colSum } 
+      : colSum;
     cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF0F172A' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
     cell.border = {
@@ -816,12 +880,14 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
 
   columns.forEach((_col, pIdx) => {
     const colIdx = 9 + pIdx;
+    const colLetter = getColLetter(colIdx);
     const cell = rowAvancoMes.getCell(colIdx);
-    const pData = histogramData[pIdx];
-    const monthVal = pData ? pData.totalPeriodo : 0;
-    const pct = grandTotalPrevisto > 0 ? (monthVal / grandTotalPrevisto) : 0;
+    const colSum = reconciledTasks.filter(t => !t.isSection).reduce((acc, t) => acc + (t.reconciledVals[pIdx] || 0), 0);
+    const pct = grandTotalPrevisto > 0 ? (colSum / grandTotalPrevisto) : 0;
 
-    cell.value = pct;
+    cell.value = grandTotalPrevisto > 0 
+      ? { formula: `${colLetter}${desembolsoRowIdx}/$G$${desembolsoRowIdx}`, result: pct } 
+      : pct;
     cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF2563EB' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF8FAFC' } };
     cell.border = {
@@ -838,6 +904,7 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
 
   // Linha 3: DESEMBOLSO ACUMULADO (R$)
   const rowAcumR$ = wsCurvaS.getRow(curRowS);
+  const acumRowIdx = curRowS;
   rowAcumR$.height = 22;
   rowAcumR$.getCell(2).value = '';
   rowAcumR$.getCell(3).value = 'DESEMBOLSO ACUMULADO (R$):';
@@ -855,13 +922,20 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     if (c === 3) cell.alignment = { horizontal: 'right', vertical: 'middle' };
   }
 
+  let runningAcumR$ = 0;
   columns.forEach((_col, pIdx) => {
     const colIdx = 9 + pIdx;
+    const colLetter = getColLetter(colIdx);
     const cell = rowAcumR$.getCell(colIdx);
-    const pData = histogramData[pIdx];
-    const acumVal = pData ? pData.acumuladoR$ : 0;
+    const colSum = reconciledTasks.filter(t => !t.isSection).reduce((acc, t) => acc + (t.reconciledVals[pIdx] || 0), 0);
+    runningAcumR$ += colSum;
 
-    cell.value = acumVal;
+    if (pIdx === 0) {
+      cell.value = { formula: `${colLetter}${desembolsoRowIdx}`, result: runningAcumR$ };
+    } else {
+      const prevColLetter = getColLetter(colIdx - 1);
+      cell.value = { formula: `${prevColLetter}${acumRowIdx}+${colLetter}${desembolsoRowIdx}`, result: runningAcumR$ };
+    }
     cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF3730A3' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
     cell.border = {
@@ -895,13 +969,18 @@ export async function exportarCronogramaExcel(options: CronogramaExportOptions):
     if (c === 3) cell.alignment = { horizontal: 'right', vertical: 'middle' };
   }
 
+  let runningCurvaS = 0;
   columns.forEach((_col, pIdx) => {
     const colIdx = 9 + pIdx;
+    const colLetter = getColLetter(colIdx);
     const cell = rowCurvaS.getCell(colIdx);
-    const pData = histogramData[pIdx];
-    const pctAcum = pData ? pData.percentAcumulado : 0;
+    const colSum = reconciledTasks.filter(t => !t.isSection).reduce((acc, t) => acc + (t.reconciledVals[pIdx] || 0), 0);
+    runningCurvaS += colSum;
+    const pctAcum = grandTotalPrevisto > 0 ? (runningCurvaS / grandTotalPrevisto) : 0;
 
-    cell.value = pctAcum / 100;
+    cell.value = grandTotalPrevisto > 0
+      ? { formula: `${colLetter}${acumRowIdx}/$G$${desembolsoRowIdx}`, result: pctAcum }
+      : pctAcum;
     cell.font = { name: 'Calibri', bold: true, size: 11, color: { argb: 'FFB45309' } };
     cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFEF3C7' } };
     cell.border = {
