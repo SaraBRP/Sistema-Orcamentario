@@ -19,6 +19,7 @@ import type { CalculoItem } from '../types/calculos';
 import { exportarOrcamentoExcelPadrao } from '../lib/excelExporter';
 import { resolveCidadeEstadoFromCliente } from '../lib/clientes';
 import { downloadMsProjectXML } from '../lib/msprojectExport';
+import { exportarCronogramaExcel } from '../lib/cronogramaExcelExporter';
 import { 
   updateSyncedEapItemsWithNewConfig, 
   syncEapChangeToIndiretoConfig, 
@@ -997,9 +998,50 @@ export default function OrcamentoBuilder() {
   const [showExportModal, setShowExportModal] = useState<boolean>(false);
   const [exportScope, setExportScope] = useState<'full' | 'active'>('full');
   const [exportFormat, setExportFormat] = useState<'xlsx' | 'pdf'>('xlsx');
+  const [cronogramaExportFormat, setCronogramaExportFormat] = useState<'xlsx' | 'xml'>('xlsx');
+  const [cronogramaExportData, setCronogramaExportData] = useState<any>(null);
 
   const handleConfirmExport = () => {
     setShowExportModal(false);
+
+    // Se estiver na aba Cronograma
+    if (activeSubTab === 'cronograma') {
+      if (cronogramaExportFormat === 'xml') {
+        downloadMsProjectXML({
+          orcamentoInfo: orcamento,
+          itens: computedItens,
+          duracoesMap: equipeDuracoesMap,
+          jornadasMap: equipeJornadasMap
+        });
+        return;
+      }
+
+      // Exportação em Excel da Planilha do Cronograma Físico-Financeiro (3 abas)
+      const currentEmpresa = configData.empresa || (orcamento as any)?.empresa || (id ? localStorage.getItem(`orcamento_empresa_${id}`) : null) || 'BRP Soluções Metálicas';
+      const currentResponsavel = configData.responsavel || (orcamento as any)?.responsavel || (id ? localStorage.getItem(`orcamento_responsavel_${id}`) : null) || '';
+
+      if (!cronogramaExportData) {
+        alert('Os dados do cronograma estão sendo processados. Por favor, aguarde alguns instantes e tente novamente.');
+        return;
+      }
+
+      exportarCronogramaExcel({
+        empresa: currentEmpresa,
+        codigo: orcamento?.codigo || (configData as any)?.codigo || 'BRP',
+        revisao: orcamento?.revisao || (configData as any)?.revisao || '00',
+        cliente: orcamento?.cliente || (configData as any)?.cliente || '',
+        projeto: orcamento?.projeto || orcamento?.nome || (configData as any)?.nome || '',
+        gestor: orcamento?.gestor_cliente || (configData as any)?.gestor_cliente || '',
+        responsavel: currentResponsavel,
+        timelineInfo: cronogramaExportData.timelineInfo,
+        detailedResourceData: cronogramaExportData.detailedResourceData,
+        calculatedTasks: cronogramaExportData.calculatedTasks,
+        histogramData: cronogramaExportData.histogramData
+      }).catch(err => {
+        alert('Erro ao exportar planilha do cronograma: ' + err.message);
+      });
+      return;
+    }
 
     if (exportFormat === 'pdf') {
       if (exportScope === 'full') {
@@ -4273,34 +4315,15 @@ export default function OrcamentoBuilder() {
               </>
             )}
 
-            {['planilha', 'memoria_calculo', 'distribuicao_equipe'].includes(activeSubTab) && (
+            {['planilha', 'memoria_calculo', 'distribuicao_equipe', 'custos_indiretos', 'cronograma'].includes(activeSubTab) && (
               <button 
                 type="button"
                 onClick={() => setShowExportModal(true)}
                 className="bg-emerald-50 hover:bg-emerald-100 border border-emerald-300 text-emerald-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                title="Exportar Orçamento Completo ou por Aba (Excel .xlsx / PDF)"
+                title="Exportar"
               >
                 <Download className="w-3.5 h-3.5 text-emerald-700" />
                 <span>Exportar</span>
-              </button>
-            )}
-
-            {activeSubTab === 'cronograma' && (
-              <button 
-                type="button"
-                onClick={() => {
-                  downloadMsProjectXML({
-                    orcamentoInfo: orcamento,
-                    itens: computedItens,
-                    duracoesMap: equipeDuracoesMap,
-                    jornadasMap: equipeJornadasMap
-                  });
-                }}
-                className="bg-indigo-50 hover:bg-indigo-100 border border-indigo-300 text-indigo-800 px-2.5 py-1.5 rounded-lg text-[11px] font-bold flex items-center gap-1.5 transition-colors cursor-pointer shadow-2xs"
-                title="Exportar Cronograma para o MS Project (.xml / .mpp)"
-              >
-                <Calendar className="w-3.5 h-3.5 text-indigo-700" />
-                <span>Exportar Cronograma</span>
               </button>
             )}
 
@@ -5286,6 +5309,7 @@ export default function OrcamentoBuilder() {
               setCronogramaDataInicio(inicio);
               setHasUnsavedChanges(true);
             }}
+            onExportDataChange={setCronogramaExportData}
           />
         </div>
       ) : activeSubTab === 'custos_indiretos' ? (
@@ -6700,8 +6724,14 @@ export default function OrcamentoBuilder() {
                   <Download className="w-5 h-5 text-blue-400" />
                 </div>
                 <div>
-                  <h3 className="font-bold text-sm text-white">Exportar Orçamento</h3>
-                  <p className="text-[11px] text-slate-400">Escolha o escopo e o formato para download</p>
+                  <h3 className="font-bold text-sm text-white">
+                    {activeSubTab === 'cronograma' ? 'Exportar Cronograma' : 'Exportar Orçamento'}
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    {activeSubTab === 'cronograma'
+                      ? 'Escolha se deseja exportar a planilha ou o arquivo de cronograma'
+                      : 'Escolha o escopo e o formato para download'}
+                  </p>
                 </div>
               </div>
               <button
@@ -6715,99 +6745,150 @@ export default function OrcamentoBuilder() {
 
             {/* Body Modal */}
             <div className="p-5 space-y-5">
-              {/* 1. Escolha do Escopo */}
-              <div>
-                <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2">
-                  1. Escopo da Exportação:
-                </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setExportScope('full')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                      exportScope === 'full' 
-                        ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 text-blue-950 font-bold' 
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <span className="text-xs font-extrabold">Orçamento Completo</span>
-                      <span className="text-blue-600 font-bold">{exportScope === 'full' && '✓'}</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 font-normal">
-                      Inclui Planilha, Memória de Cálculo, Distribuição de Equipe e Custos Indiretos.
-                    </p>
-                  </button>
+              {activeSubTab === 'cronograma' ? (
+                <div>
+                  <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2.5">
+                    1. Escolha o que deseja exportar:
+                  </label>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setCronogramaExportFormat('xlsx')}
+                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                        cronogramaExportFormat === 'xlsx' 
+                          ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-500/20 text-emerald-950 font-bold' 
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                      }`}
+                    >
+                      <div className="p-2.5 bg-emerald-100 text-emerald-700 rounded-lg shrink-0">
+                        <FileSpreadsheet className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-extrabold block">Planilha (.xlsx)</span>
+                        <span className="text-[10px] text-slate-500 font-normal leading-tight block mt-0.5">
+                          Cronograma Físico-Financeiro (Mão de Obra, Suprimentos e Curva S)
+                        </span>
+                      </div>
+                    </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setExportScope('active')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
-                      exportScope === 'active' 
-                        ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 text-blue-950 font-bold' 
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between w-full mb-1">
-                      <span className="text-xs font-extrabold">Apenas Aba Atual</span>
-                      <span className="text-blue-600 font-bold">{exportScope === 'active' && '✓'}</span>
-                    </div>
-                    <p className="text-[10px] text-slate-500 font-normal">
-                      Exporta somente ({
-                        activeSubTab === 'memoria_calculo' ? 'Memória de Cálculo' :
-                        activeSubTab === 'distribuicao_equipe' ? 'Distribuição de Equipe' :
-                        activeSubTab === 'lista_materiais' ? 'Lista de Materiais' :
-                        activeSubTab === 'custos_indiretos' ? 'Custos Indiretos' :
-                        activeSubTab === 'cronograma' ? 'Cronograma' : 'Planilha Orçamentária'
-                      }).
-                    </p>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => setCronogramaExportFormat('xml')}
+                      className={`p-3.5 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                        cronogramaExportFormat === 'xml' 
+                          ? 'border-indigo-600 bg-indigo-50/50 ring-2 ring-indigo-500/20 text-indigo-950 font-bold' 
+                          : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                      }`}
+                    >
+                      <div className="p-2.5 bg-indigo-100 text-indigo-700 rounded-lg shrink-0">
+                        <Calendar className="w-5 h-5" />
+                      </div>
+                      <div>
+                        <span className="text-xs font-extrabold block">Cronograma (.xml)</span>
+                        <span className="text-[10px] text-slate-500 font-normal leading-tight block mt-0.5">
+                          Arquivo compatível com o Microsoft Project (.xml / .mpp)
+                        </span>
+                      </div>
+                    </button>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <>
+                  {/* 1. Escolha do Escopo */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2">
+                      1. Escopo da Exportação:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setExportScope('full')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          exportScope === 'full' 
+                            ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 text-blue-950 font-bold' 
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full mb-1">
+                          <span className="text-xs font-extrabold">Orçamento Completo</span>
+                          <span className="text-blue-600 font-bold">{exportScope === 'full' && '✓'}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-normal">
+                          Inclui Planilha, Memória de Cálculo, Distribuição de Equipe e Custos Indiretos.
+                        </p>
+                      </button>
 
-              {/* 2. Escolha do Formato */}
-              <div>
-                <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2">
-                  2. Formato do Arquivo:
-                </label>
-                <div className="grid grid-cols-2 gap-2.5">
-                  <button
-                    type="button"
-                    onClick={() => setExportFormat('xlsx')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
-                      exportFormat === 'xlsx' 
-                        ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-500/20 text-emerald-950 font-bold' 
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
-                    }`}
-                  >
-                    <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
-                      <FileSpreadsheet className="w-5 h-5" />
+                      <button
+                        type="button"
+                        onClick={() => setExportScope('active')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex flex-col justify-between ${
+                          exportScope === 'active' 
+                            ? 'border-blue-600 bg-blue-50/50 ring-2 ring-blue-500/20 text-blue-950 font-bold' 
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between w-full mb-1">
+                          <span className="text-xs font-extrabold">Apenas Aba Atual</span>
+                          <span className="text-blue-600 font-bold">{exportScope === 'active' && '✓'}</span>
+                        </div>
+                        <p className="text-[10px] text-slate-500 font-normal">
+                          Exporta somente ({
+                            activeSubTab === 'memoria_calculo' ? 'Memória de Cálculo' :
+                            activeSubTab === 'distribuicao_equipe' ? 'Distribuição de Equipe' :
+                            activeSubTab === 'lista_materiais' ? 'Lista de Materiais' :
+                            activeSubTab === 'custos_indiretos' ? 'Custos Indiretos' :
+                            activeSubTab === 'cronograma' ? 'Cronograma' : 'Planilha Orçamentária'
+                          }).
+                        </p>
+                      </button>
                     </div>
-                    <div>
-                      <span className="text-xs font-extrabold block">Excel (.xlsx)</span>
-                      <span className="text-[10px] text-slate-500 font-normal">Planilha editável</span>
-                    </div>
-                  </button>
+                  </div>
 
-                  <button
-                    type="button"
-                    onClick={() => setExportFormat('pdf')}
-                    className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
-                      exportFormat === 'pdf' 
-                        ? 'border-rose-600 bg-rose-50/50 ring-2 ring-rose-500/20 text-rose-950 font-bold' 
-                        : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
-                    }`}
-                  >
-                    <div className="p-2 bg-rose-100 text-rose-700 rounded-lg">
-                      <FileText className="w-5 h-5" />
+                  {/* 2. Escolha do Formato */}
+                  <div>
+                    <label className="text-xs font-bold text-slate-800 uppercase tracking-wide block mb-2">
+                      2. Formato do Arquivo:
+                    </label>
+                    <div className="grid grid-cols-2 gap-2.5">
+                      <button
+                        type="button"
+                        onClick={() => setExportFormat('xlsx')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                          exportFormat === 'xlsx' 
+                            ? 'border-emerald-600 bg-emerald-50/50 ring-2 ring-emerald-500/20 text-emerald-950 font-bold' 
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                        }`}
+                      >
+                        <div className="p-2 bg-emerald-100 text-emerald-700 rounded-lg">
+                          <FileSpreadsheet className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold block">Excel (.xlsx)</span>
+                          <span className="text-[10px] text-slate-500 font-normal">Planilha editável</span>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setExportFormat('pdf')}
+                        className={`p-3 rounded-xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                          exportFormat === 'pdf' 
+                            ? 'border-rose-600 bg-rose-50/50 ring-2 ring-rose-500/20 text-rose-950 font-bold' 
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-700 font-medium'
+                        }`}
+                      >
+                        <div className="p-2 bg-rose-100 text-rose-700 rounded-lg">
+                          <FileText className="w-5 h-5" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-extrabold block">PDF / Imprimir</span>
+                          <span className="text-[10px] text-slate-500 font-normal">Relatório oficial</span>
+                        </div>
+                      </button>
                     </div>
-                    <div>
-                      <span className="text-xs font-extrabold block">PDF / Imprimir</span>
-                      <span className="text-[10px] text-slate-500 font-normal">Relatório oficial</span>
-                    </div>
-                  </button>
-                </div>
-              </div>
+                  </div>
+                </>
+              )}
             </div>
 
             {/* Footer Modal */}

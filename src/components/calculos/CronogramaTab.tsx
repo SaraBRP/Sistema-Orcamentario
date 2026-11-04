@@ -40,6 +40,12 @@ interface CronogramaTabProps {
     predecessoras: Record<string, string>, 
     dataInicio: string
   ) => void;
+  onExportDataChange?: (data: {
+    timelineInfo: any;
+    detailedResourceData: any;
+    calculatedTasks: any;
+    histogramData: any;
+  }) => void;
 }
 
 export type DistributionProfile = 'uniforme' | 'concentrado_inicio' | 'concentrado_fim' | 'pontual';
@@ -303,7 +309,8 @@ export default function CronogramaTab({
   duracoesMap: externalDuracoes,
   predecessorasMap: externalPredecessoras,
   dataInicioObra: externalDataInicio,
-  onChangeCronogramaConfig
+  onChangeCronogramaConfig,
+  onExportDataChange
 }: CronogramaTabProps) {
   // Estado local para durações (sincronizado com equipe e com composições sem M.O.)
   const [duracoesMap, setDuracoesMap] = useState<Record<string, string>>(() => {
@@ -1727,6 +1734,18 @@ export default function CronogramaTab({
 
     return { materiaisRows: consolidatedMateriais, moRows };
   }, [calculatedTasks, timelineInfo, customProfilesMap, jornadasMap]);
+
+  // Sincroniza dados calculados completos com o orquestrador para exportação em Excel
+  useEffect(() => {
+    if (onExportDataChange && timelineInfo && detailedResourceData && calculatedTasks) {
+      onExportDataChange({
+        timelineInfo,
+        detailedResourceData,
+        calculatedTasks,
+        histogramData
+      });
+    }
+  }, [timelineInfo, detailedResourceData, calculatedTasks, histogramData, onExportDataChange]);
 
   // Itens visíveis (respeitando seções recolhidas)
   const visibleTasks = useMemo(() => {
