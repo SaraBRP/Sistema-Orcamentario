@@ -1,5 +1,6 @@
 import ExcelJS from 'exceljs';
 import { LOGO_SOLUCOES_B64, LOGO_ENGENHARIA_B64 } from './logos';
+import type { IndiretoOrcamentoConfig } from '../types/indireto';
 
 export interface ExportOrcamentoOptions {
   empresa?: string;
@@ -16,6 +17,9 @@ export interface ExportOrcamentoOptions {
   distribuicaoEquipe?: any[];
   duracoesMap?: Record<string, string>;
   jornadasMap?: Record<string, string>;
+  exportScope?: 'full' | 'active';
+  activeTab?: string;
+  custosIndiretosConfig?: IndiretoOrcamentoConfig;
 }
 
 export function toTitleCase(str: string): string {
@@ -217,12 +221,23 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
   const revisao = options.revisao || '00';
   const itens = options.itens && options.itens.length > 0 ? options.itens : [];
 
+  const isFullExport = !options.exportScope || options.exportScope === 'full';
+  let shouldExportPlanilha = isFullExport || options.activeTab === 'planilha';
+  let shouldExportMemoria = isFullExport || options.activeTab === 'memoria_calculo';
+  let shouldExportEquipe = isFullExport || options.activeTab === 'distribuicao_equipe';
+  let shouldExportIndiretos = isFullExport || options.activeTab === 'custos_indiretos' || options.activeTab === 'indiretos';
+
+  if (!shouldExportPlanilha && !shouldExportMemoria && !shouldExportEquipe && !shouldExportIndiretos) {
+    shouldExportPlanilha = true;
+  }
+
   // ==========================================
   // ABA 1: PLANILHA ORÇAMENTÁRIA
   // ==========================================
-  const wsOrcamento = workbook.addWorksheet('Planilha Orçamentária', {
-    views: [{ showGridLines: false }]
-  });
+  if (shouldExportPlanilha) {
+    const wsOrcamento = workbook.addWorksheet('Planilha Orçamentária', {
+      views: [{ showGridLines: false }]
+    });
 
   wsOrcamento.properties.outlineProperties = {
     summaryBelow: false,
@@ -556,13 +571,15 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
       right: { style: 'thin', color: { argb: 'FF94A3B8' } }
     };
   });
+  }
 
   // ==========================================
   // ABA 2: MEMÓRIA DE CÁLCULO
   // ==========================================
-  const wsMemoria = workbook.addWorksheet('Memória de Cálculo', {
-    views: [{ showGridLines: false }]
-  });
+  if (shouldExportMemoria) {
+    const wsMemoria = workbook.addWorksheet('Memória de Cálculo', {
+      views: [{ showGridLines: false }]
+    });
 
   wsMemoria.properties.outlineProperties = {
     summaryBelow: false,
@@ -728,13 +745,15 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
       if (col === 6) cell.numFmt = '#,##0.00';
     }
   });
+  }
 
   // ==========================================
   // ABA 3: DISTRIBUIÇÃO DE EQUIPE
   // ==========================================
-  const wsEquipe = workbook.addWorksheet('Distribuição de Equipe', {
-    views: [{ showGridLines: false }]
-  });
+  if (shouldExportEquipe) {
+    const wsEquipe = workbook.addWorksheet('Distribuição de Equipe', {
+      views: [{ showGridLines: false }]
+    });
 
   wsEquipe.properties.outlineProperties = {
     summaryBelow: false,
@@ -889,6 +908,269 @@ export async function exportarOrcamentoExcelPadrao(options: ExportOrcamentoOptio
       }
     }
   });
+  }
+
+  // ==========================================
+  // ABA 4: CUSTOS INDIRETOS E CANTEIRO
+  // ==========================================
+  if (shouldExportIndiretos) {
+    const wsIndiretos = workbook.addWorksheet('Custos Indiretos', {
+      views: [{ showGridLines: false }]
+    });
+
+    wsIndiretos.properties.outlineProperties = {
+      summaryBelow: false,
+      summaryRight: true
+    };
+
+    // Configuração de Larguras das Colunas (Iniciando na Coluna B)
+    wsIndiretos.getColumn(1).width = 4;   // A
+    wsIndiretos.getColumn(2).width = 12;  // B - Item EAP
+    wsIndiretos.getColumn(3).width = 55;  // C - Estrutura / Seção / Atividade / Mão de Obra
+    wsIndiretos.getColumn(4).width = 10;  // D - UNIDADE
+    wsIndiretos.getColumn(5).width = 10;  // E - PRAZO
+    wsIndiretos.getColumn(6).width = 10;  // F - FIXO?
+    wsIndiretos.getColumn(7).width = 18;  // G - QUANTIDADE
+    wsIndiretos.getColumn(8).width = 14;  // H - VALOR UNIT. (R$)
+    wsIndiretos.getColumn(9).width = 16;  // I - VALOR FIXO/ ENCARGOS (R$)
+    wsIndiretos.getColumn(10).width = 22; // J - TOTAL (R$)
+
+    // Configuração dos Metadados (Linhas 2 a 5)
+    wsIndiretos.getCell('B2').value = 'CLIENTE:';
+    wsIndiretos.getCell('B2').font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF1E293B' } };
+    wsIndiretos.getCell('B2').alignment = { vertical: 'middle' };
+    wsIndiretos.getCell('C2').value = cliente;
+    wsIndiretos.getCell('C2').font = { name: 'Calibri', bold: true, size: 11, color: { argb: 'FF0F172A' } };
+    wsIndiretos.getCell('C2').alignment = { vertical: 'middle' };
+
+    wsIndiretos.getCell('B3').value = 'PROJETO:';
+    wsIndiretos.getCell('B3').font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF1E293B' } };
+    wsIndiretos.getCell('B3').alignment = { vertical: 'middle' };
+    wsIndiretos.getCell('C3').value = projeto;
+    wsIndiretos.getCell('C3').font = { name: 'Calibri', size: 10, color: { argb: 'FF334155' } };
+    wsIndiretos.getCell('C3').alignment = { vertical: 'middle' };
+
+    wsIndiretos.getCell('B4').value = 'GESTOR:';
+    wsIndiretos.getCell('B4').font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF1E293B' } };
+    wsIndiretos.getCell('B4').alignment = { vertical: 'middle' };
+    wsIndiretos.getCell('C4').value = gestor;
+    wsIndiretos.getCell('C4').font = { name: 'Calibri', size: 10, color: { argb: 'FF334155' } };
+    wsIndiretos.getCell('C4').alignment = { vertical: 'middle' };
+
+    const revisaoFormatada = String(revisao || '').toUpperCase().startsWith('REV') ? revisao : `REV: ${revisao}`;
+    wsIndiretos.getCell('B5').value = 'REVISÃO:';
+    wsIndiretos.getCell('B5').font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF1E293B' } };
+    wsIndiretos.getCell('B5').alignment = { vertical: 'middle' };
+    wsIndiretos.getCell('C5').value = revisaoFormatada;
+    wsIndiretos.getCell('C5').font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF1E293B' } };
+    wsIndiretos.getCell('C5').alignment = { vertical: 'middle' };
+
+    // Bordas dos Metadados B2:C5
+    for (let r = 2; r <= 5; r++) {
+      for (let c = 2; c <= 3; c++) {
+        wsIndiretos.getRow(r).getCell(c).border = {
+          top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          right: { style: 'thin', color: { argb: 'FF94A3B8' } }
+        };
+      }
+    }
+
+    // Título Mesclado D2:J5
+    wsIndiretos.mergeCells('D2:J5');
+    const titleCell = wsIndiretos.getCell('D2');
+    titleCell.value = 'CUSTOS INDIRETOS E CANTEIRO';
+    titleCell.font = { name: 'Calibri', bold: true, size: 14, color: { argb: 'FF0F172A' } };
+    titleCell.alignment = { horizontal: 'center', vertical: 'middle' };
+
+    for (let r = 2; r <= 5; r++) {
+      for (let c = 4; c <= 10; c++) {
+        const cell = wsIndiretos.getRow(r).getCell(c);
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          right: { style: 'thin', color: { argb: 'FF94A3B8' } }
+        };
+      }
+    }
+
+    // Obter grupos e itens
+    const cfg = options.custosIndiretosConfig;
+    let grupos = (cfg?.grupos || []).filter(g => g.itens && g.itens.length > 0);
+    if (grupos.length === 0 && cfg?.grupos?.length) {
+      grupos = cfg.grupos.filter(g => g.ativo !== false);
+    }
+
+    let currentRow = 7;
+    const tableHeaders = [
+      'Item EAP',
+      'Estrutura / Seção / Atividade / Mão de Obra',
+      'UNIDADE',
+      'PRAZO',
+      'FIXO?',
+      'QUANTIDADE',
+      'VALOR UNIT. (R$)',
+      'VALOR FIXO/ ENCARGOS (R$)',
+      'TOTAL (R$)'
+    ];
+
+    grupos.forEach((grupo, gIdx) => {
+      const groupNum = grupo.numero || (gIdx + 1);
+
+      // 1. Linha de Cabeçalho da Tabela
+      const headerRow = wsIndiretos.getRow(currentRow);
+      headerRow.height = 26;
+      tableHeaders.forEach((txt, idx) => {
+        const colIdx = idx + 2;
+        const cell = headerRow.getCell(colIdx);
+        cell.value = txt;
+        cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FFFFFFFF' } };
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+        cell.border = {
+          top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+          bottom: { style: 'hair', color: { argb: 'FF94A3B8' } },
+          left: { style: colIdx === 2 ? 'thin' : 'hair', color: { argb: 'FF94A3B8' } },
+          right: { style: colIdx === 10 ? 'thin' : 'hair', color: { argb: 'FF94A3B8' } }
+        };
+      });
+      currentRow++;
+
+      // 2. Linha do Grupo
+      const groupRow = wsIndiretos.getRow(currentRow);
+      groupRow.height = 22;
+      groupRow.getCell(2).value = String(groupNum);
+      groupRow.getCell(3).value = (grupo.nome || `GRUPO ${groupNum}`).toUpperCase();
+
+      for (let c = 2; c <= 10; c++) {
+        const cell = groupRow.getCell(c);
+        cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF1E293B' } };
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+        cell.border = {
+          top: { style: 'hair', color: { argb: 'FF94A3B8' } },
+          bottom: { style: 'hair', color: { argb: 'FF94A3B8' } },
+          left: { style: c === 2 ? 'thin' : 'hair', color: { argb: 'FF94A3B8' } },
+          right: { style: c === 10 ? 'thin' : 'hair', color: { argb: 'FF94A3B8' } }
+        };
+        if (c === 2) {
+          cell.alignment = { horizontal: 'center', vertical: 'middle' };
+        } else if (c === 3) {
+          cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+        } else {
+          cell.alignment = { vertical: 'middle' };
+        }
+      }
+      currentRow++;
+
+      // 3. Linhas dos Itens
+      const firstItemRow = currentRow;
+      const itensDoGrupo = (grupo.itens || []).filter(it => it.ativo !== false);
+
+      itensDoGrupo.forEach((item, iIdx) => {
+        const row = wsIndiretos.getRow(currentRow);
+        row.height = 20;
+
+        const itemEap = `${groupNum}.${iIdx + 1}`;
+        const isFixo = Boolean(item.isCustoFixo);
+        const prazo = isFixo ? null : (item.alocacaoMensal ?? 1);
+        const qtd = Number(item.quantidadeTotal ?? 0);
+        const valUnit = Number(item.valorUnitario ?? 0);
+        const valFixo = Number(item.valorFixoEncargos ?? 0);
+        const totalCalc = isFixo ? valFixo : ((qtd * valUnit * (prazo || 1)) + valFixo);
+
+        row.getCell(2).value = itemEap;
+        row.getCell(3).value = item.descricao || '';
+        row.getCell(4).value = item.unidade || 'un';
+        row.getCell(5).value = prazo;
+        row.getCell(6).value = isFixo ? 'X' : null;
+        row.getCell(7).value = qtd;
+        row.getCell(8).value = valUnit;
+        row.getCell(9).value = valFixo;
+        row.getCell(10).value = {
+          formula: `IF(F${currentRow}="X",I${currentRow},(G${currentRow}*H${currentRow}*E${currentRow})+I${currentRow})`,
+          result: totalCalc
+        };
+
+        for (let c = 2; c <= 10; c++) {
+          const cell = row.getCell(c);
+          cell.font = { name: 'Calibri', size: 10, color: { argb: 'FF1E293B' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFFFFF' } };
+          cell.border = {
+            top: { style: 'hair', color: { argb: 'FF94A3B8' } },
+            bottom: { style: 'hair', color: { argb: 'FF94A3B8' } },
+            left: { style: c === 2 ? 'thin' : 'hair', color: { argb: 'FF94A3B8' } },
+            right: { style: c === 10 ? 'thin' : 'hair', color: { argb: 'FF94A3B8' } }
+          };
+
+          if (c === 2) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else if (c === 3) {
+            cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true };
+          } else if (c === 4 || c === 5 || c === 6) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+          }
+
+          if (c === 7 && typeof cell.value === 'number') {
+            cell.numFmt = '#,##0.00';
+          } else if ((c === 8 || c === 9 || c === 10)) {
+            cell.numFmt = '_-"R$" * #,##0.00_-;-"R$" * #,##0.00_-;_-"R$" * "-"??_-;_-@_-';
+          }
+        }
+
+        currentRow++;
+      });
+
+      const lastItemRow = currentRow - 1;
+
+      // 4. Linha de Subtotal
+      if (itensDoGrupo.length > 0) {
+        const subtotalRow = wsIndiretos.getRow(currentRow);
+        subtotalRow.height = 22;
+        subtotalRow.getCell(9).value = 'SUBTOTAL';
+        const sumResult = itensDoGrupo.reduce((acc, it) => {
+          const isFixo = Boolean(it.isCustoFixo);
+          const prazo = isFixo ? 1 : (it.alocacaoMensal ?? 1);
+          const qtd = Number(it.quantidadeTotal ?? 0);
+          const valUnit = Number(it.valorUnitario ?? 0);
+          const valFixo = Number(it.valorFixoEncargos ?? 0);
+          return acc + (isFixo ? valFixo : ((qtd * valUnit * prazo) + valFixo));
+        }, 0);
+
+        subtotalRow.getCell(10).value = {
+          formula: `SUM(J${firstItemRow}:J${lastItemRow})`,
+          result: sumResult
+        };
+
+        [9, 10].forEach(c => {
+          const cell = subtotalRow.getCell(c);
+          cell.font = { name: 'Calibri', bold: true, size: 10, color: { argb: 'FF0F172A' } };
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFE2E8F0' } };
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FF94A3B8' } },
+            bottom: { style: 'thin', color: { argb: 'FF94A3B8' } },
+            left: { style: 'thin', color: { argb: 'FF94A3B8' } },
+            right: { style: 'thin', color: { argb: 'FF94A3B8' } }
+          };
+          if (c === 9) {
+            cell.alignment = { horizontal: 'center', vertical: 'middle' };
+          } else {
+            cell.alignment = { horizontal: 'right', vertical: 'middle' };
+            cell.numFmt = '_-"R$" * #,##0.00_-;-"R$" * #,##0.00_-;_-"R$" * "-"??_-;_-@_-';
+          }
+        });
+
+        currentRow++;
+      }
+
+      // Linha vazia entre grupos
+      currentRow++;
+    });
+  }
 
   // Gerar o buffer Excel e acionar o download no navegador
   const buffer = await workbook.xlsx.writeBuffer();

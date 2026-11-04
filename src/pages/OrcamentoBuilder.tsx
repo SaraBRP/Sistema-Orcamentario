@@ -1027,6 +1027,7 @@ export default function OrcamentoBuilder() {
     // Exportação para Excel (.xlsx) utilizando o Padrão Oficial Formatado da BRP Engenharia / BRP Soluções Metálicas
     const currentEmpresa = configData.empresa || (orcamento as any)?.empresa || (id ? localStorage.getItem(`orcamento_empresa_${id}`) : null) || 'BRP Soluções Metálicas';
     const currentResponsavel = configData.responsavel || (orcamento as any)?.responsavel || (id ? localStorage.getItem(`orcamento_responsavel_${id}`) : null) || '';
+    const indiretoConfig = loadIndiretoConfig(id || 'temp', cronogramaDuracaoInfo?.totalMonths || 6);
 
     exportarOrcamentoExcelPadrao({
       empresa: currentEmpresa,
@@ -1041,7 +1042,10 @@ export default function OrcamentoBuilder() {
       itens: computedItens,
       memoriaCalculo: itens,
       duracoesMap,
-      jornadasMap
+      jornadasMap,
+      exportScope,
+      activeTab: activeSubTab,
+      custosIndiretosConfig: indiretoConfig
     }).catch(err => {
       alert('Erro ao gerar arquivo Excel formatado: ' + err.message);
     });
@@ -6731,7 +6735,7 @@ export default function OrcamentoBuilder() {
                       <span className="text-blue-600 font-bold">{exportScope === 'full' && '✓'}</span>
                     </div>
                     <p className="text-[10px] text-slate-500 font-normal">
-                      Inclui Planilha, Memória de Cálculo e Distribuição de Equipe.
+                      Inclui Planilha, Memória de Cálculo, Distribuição de Equipe e Custos Indiretos.
                     </p>
                   </button>
 
@@ -6752,7 +6756,9 @@ export default function OrcamentoBuilder() {
                       Exporta somente ({
                         activeSubTab === 'memoria_calculo' ? 'Memória de Cálculo' :
                         activeSubTab === 'distribuicao_equipe' ? 'Distribuição de Equipe' :
-                        activeSubTab === 'lista_materiais' ? 'Lista de Materiais' : 'Planilha Orçamentária'
+                        activeSubTab === 'lista_materiais' ? 'Lista de Materiais' :
+                        activeSubTab === 'custos_indiretos' ? 'Custos Indiretos' :
+                        activeSubTab === 'cronograma' ? 'Cronograma' : 'Planilha Orçamentária'
                       }).
                     </p>
                   </button>
