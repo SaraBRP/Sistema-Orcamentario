@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect, useRef, useLayoutEffect } from 're
 import { 
   Calendar, Clock, Layers, ArrowRight, RefreshCw, ChevronDown, ChevronRight, 
   BarChart3, TrendingUp, Package, HardHat, FileSpreadsheet, ZoomIn, ZoomOut, Filter,
-  Sliders, Zap, ShieldAlert, Check, Link, Link2, Info, HelpCircle
+  Sliders, Zap, ShieldAlert, Check, Link, Link2, Info, HelpCircle, AlertTriangle
 } from 'lucide-react';
 import { 
   ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, Legend, 
@@ -1880,6 +1880,231 @@ export default function CronogramaTab({
     return Math.round((maxEnd - minStart) / (1000 * 60 * 60 * 24));
   }, [calculatedTasks]);
 
+  // --------------------------------------------------------------------------
+  // CONEXÃO INTERATIVA DE PREDECESSORAS NO GANTT (CLIQUE E ARRASTE A SETA)
+  // --------------------------------------------------------------------------
+  const [linkingState, setLinkingState] = useState<{
+    sourceTask: typeof calculatedTasks[0];
+    sourceIdx: number;
+    sourceX: number;
+    sourceY: number;
+    currentSVGX: number;
+    currentSVGY: number;
+    hoverTargetTask: typeof calculatedTasks[0] | null;
+  } | null>(null);
+
+  const [linkToast, setLinkToast] = useState<{ message: string; type: 'success' | 'warn' } | null>(null);
+
+  const ganttRowsRef = useRef<HTMLDivElement>(null);
+  const dragStartCandidateRef = useRef<{ x: number; y: number; task: typeof calculatedTasks[0] } | null>(null);
+  const linkingStateRef = useRef(linkingState);
+  linkingStateRef.current = linkingState;
+
+  // Auto-dismiss do toast após 3.8s
+  useEffect(() => {
+    if (linkToast) {
+      const timer = setTimeout(() => setLinkToast(null), 3800);
+      return () => clearTimeout(timer);
+    }
+  }, [linkToast]);
+
+  // Inicia o modo de conexão imediatamente (ao clicar no conector na ponta da barra)
+  const startLinkingFromTask = (task: typeof calculatedTasks[0], e: React.MouseEvent) => {
+    if (task.isSection || task.isInherited) return;
+    e.preventDefault();
+    e.stopPropagation();
+
+    const sourceIdx = visibleTasks.findIndex(vt => vt.item.id === task.item.id);
+    if (sourceIdx === -1) return;
+
+    const totalDays = Math.max(1, timelineInfo.totalDays);
+    const sourceStart_x = 4 + (task.startOffsetDays / totalDays) * 992;
+    const sourceWidth_x = Math.max(15, (task.duracaoDias / totalDays) * 992);
+    const sourceX = sourceStart_x + sourceWidth_x;
+    const sourceY = sourceIdx * 40 + 20;
+
+    let initSVGX = sourceX;
+    let initSVGY = sourceY;
+
+    if (ganttRowsRef.current) {
+      const rect = ganttRowsRef.current.getBoundingClientRect();
+      const svgLeft = rect.left + tablePanelWidth;
+      const svgWidth = Math.max(1, rect.width - tablePanelWidth);
+      initSVGX = Math.max(0, Math.min(1000, ((e.clientX - svgLeft) / svgWidth) * 1000));
+      initSVGY = Math.max(0, Math.min(visibleTasks.length * 40, e.clientY - rect.top));
+    }
+
+    setLinkingState({
+      sourceTask: task,
+      sourceIdx,
+      sourceX,
+      sourceY,
+      currentSVGX: initSVGX,
+      currentSVGY: initSVGY,
+      hoverTargetTask: null
+    });
+  };
+
+  // Quando clica na barra da tarefa (inicia ao arrastar mais de 4px)
+  const handleBarMouseDown = (e: React.MouseEvent, task: typeof calculatedTasks[0]) => {
+    if (task.isSection || task.isInherited) return;
+    if (e.button !== 0) return;
+    dragStartCandidateRef.current = { x: e.clientX, y: e.clientY, task };
+  };
+
+  useEffect(() => {
+    const handleWindowMouseMove = (e: MouseEvent) => {
+      // Se tiver candidato de clique na barra e mover mais de 4px, inicia o linking
+      if (!linkingStateRef.current && dragStartCandidateRef.current) {
+        const dist = Math.hypot(
+          e.clientX - dragStartCandidateRef.current.x,
+          e.clientY - dragStartCandidateRef.current.y
+        );
+        if (dist > 4) {
+          const task = dragStartCandidateRef.current.task;
+          dragStartCandidateRef.current = null;
+          const sourceIdx = visibleTasks.findIndex(vt => vt.item.id === task.item.id);
+          if (sourceIdx !== -1) {
+            const totalDays = Math.max(1, timelineInfo.totalDays);
+            const sourceStart_x = 4 + (task.startOffsetDays / totalDays) * 992;
+            const sourceWidth_x = Math.max(15, (task.duracaoDias / totalDays) * 992);
+            const sourceX = sourceStart_x + sourceWidth_x;
+            const sourceY = sourceIdx * 40 + 20;
+
+            let curX = sourceX;
+            let curY = sourceY;
+            if (ganttRowsRef.current) {
+              const rect = ganttRowsRef.current.getBoundingClientRect();
+              const svgLeft = rect.left + tablePanelWidth;
+              const svgWidth = Math.max(1, rect.width - tablePanelWidth);
+              curX = Math.max(0, Math.min(1000, ((e.clientX - svgLeft) / svgWidth) * 1000));
+              curY = Math.max(0, Math.min(visibleTasks.length * 40, e.clientY - rect.top));
+            }
+
+            setLinkingState({
+              sourceTask: task,
+              sourceIdx,
+              sourceX,
+              sourceY,
+              currentSVGX: curX,
+              currentSVGY: curY,
+              hoverTargetTask: null
+            });
+            return;
+          }
+        }
+      }
+
+      if (!linkingStateRef.current || !ganttRowsRef.current) return;
+
+      const rect = ganttRowsRef.current.getBoundingClientRect();
+      const svgLeft = rect.left + tablePanelWidth;
+      const svgWidth = Math.max(1, rect.width - tablePanelWidth);
+      const svgHeight = visibleTasks.length * 40;
+
+      const mousePixelX = e.clientX - svgLeft;
+      const mousePixelY = e.clientY - rect.top;
+
+      const svgX = Math.max(0, Math.min(1000, (mousePixelX / svgWidth) * 1000));
+      const svgY = Math.max(0, Math.min(svgHeight, mousePixelY));
+
+      const hoveredRowIdx = Math.floor(mousePixelY / 40);
+      let candidateTarget: typeof calculatedTasks[0] | null = null;
+
+      if (hoveredRowIdx >= 0 && hoveredRowIdx < visibleTasks.length) {
+        const potential = visibleTasks[hoveredRowIdx];
+        if (
+          potential &&
+          !potential.isSection &&
+          !potential.isInherited &&
+          potential.item.id !== linkingStateRef.current.sourceTask.item.id
+        ) {
+          candidateTarget = potential;
+        }
+      }
+
+      setLinkingState(prev => prev ? {
+        ...prev,
+        currentSVGX: svgX,
+        currentSVGY: svgY,
+        hoverTargetTask: candidateTarget
+      } : null);
+    };
+
+    const handleWindowMouseUp = (_e: MouseEvent) => {
+      dragStartCandidateRef.current = null;
+
+      const current = linkingStateRef.current;
+      if (!current) return;
+
+      const { sourceTask, hoverTargetTask } = current;
+      setLinkingState(null);
+
+      if (hoverTargetTask) {
+        const targetId = hoverTargetTask.item.id;
+        const targetEap = (hoverTargetTask.item.item_eap || targetId).trim();
+        const sourceId = sourceTask.item.id;
+        const sourceEap = (sourceTask.item.item_eap || sourceId).trim();
+
+        // 1. Verifica dependência circular direta
+        const sourcePreds = predecessorasMap[sourceId] || predecessorasMap[sourceEap] || '';
+        const isCircular = sourcePreds.split(/[,;]/).some(tok => {
+          const m = tok.match(/^([0-9\.]+)/);
+          return m && (m[1].trim() === targetEap || m[1].trim() === targetId);
+        });
+
+        if (isCircular) {
+          setLinkToast({
+            message: `Não é possível vincular: a atividade ${targetEap} já é predecessora de ${sourceEap} (dependência circular).`,
+            type: 'warn'
+          });
+          return;
+        }
+
+        // 2. Verifica se já está vinculada
+        const currentPredStr = predecessorasMap[targetId] || predecessorasMap[targetEap] || '';
+        const tokens = currentPredStr.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+        const alreadyLinked = tokens.some(tok => {
+          const m = tok.match(/^([0-9\.]+)/);
+          return m && (m[1].trim() === sourceEap || m[1].trim() === sourceId);
+        });
+
+        if (alreadyLinked) {
+          setLinkToast({
+            message: `A atividade ${sourceEap} já está definida como predecessora de ${targetEap}.`,
+            type: 'warn'
+          });
+          return;
+        }
+
+        // 3. Acrescenta a predecessora e atualiza
+        const newPredStr = tokens.length > 0 ? `${currentPredStr}; ${sourceEap}` : sourceEap;
+        handleValidateAndCommitPredecessor(targetId, targetEap, newPredStr);
+        setLinkToast({
+          message: `Predecessora vinculada com sucesso: ${sourceEap} ➔ ${targetEap}`,
+          type: 'success'
+        });
+      }
+    };
+
+    const handleWindowKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && linkingStateRef.current) {
+        setLinkingState(null);
+        dragStartCandidateRef.current = null;
+      }
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+    window.addEventListener('keydown', handleWindowKeyDown);
+
+    return () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      window.removeEventListener('keydown', handleWindowKeyDown);
+    };
+  }, [visibleTasks, timelineInfo.totalDays, tablePanelWidth, predecessorasMap]);
+
   const getTaskColor = (level: number, isSection: boolean, isInherited: boolean, isCritical?: boolean) => {
     if (isSection) {
       if (level === 1) return 'bg-slate-800 border-slate-900 text-white font-bold';
@@ -2047,9 +2272,12 @@ export default function CronogramaTab({
             </div>
 
             {/* LINHAS DAS TAREFAS (SEÇÕES, COMPOSIÇÕES E SUBCOMPOSIÇÕES) */}
-            <div className="bg-white relative">
+            <div 
+              ref={ganttRowsRef} 
+              className={`bg-white relative ${linkingState ? 'select-none cursor-crosshair' : ''}`}
+            >
               {/* OVERLAY SVG DE DEPENDÊNCIAS / PREDECESSORAS (SETAS FINAS MS PROJECT) */}
-              {dependencyLinks.length > 0 && (
+              {(dependencyLinks.length > 0 || linkingState) && (
                 <svg 
                   className="absolute top-0 bottom-0 right-0 pointer-events-none z-30" 
                   style={{ left: `${tablePanelWidth}px`, width: `calc(100% - ${tablePanelWidth}px)`, height: `${visibleTasks.length * 40}px` }}
@@ -2068,6 +2296,17 @@ export default function CronogramaTab({
                     >
                       <path d="M 0 0 L 6 3 L 0 6 z" fill="#2563eb" />
                     </marker>
+                    <marker
+                      id="gantt-arrow-active"
+                      viewBox="0 0 6 6"
+                      refX="6"
+                      refY="3"
+                      markerWidth="7"
+                      markerHeight="7"
+                      orient="auto"
+                    >
+                      <path d="M 0 0 L 6 3 L 0 6 z" fill="#2563eb" />
+                    </marker>
                   </defs>
                   {dependencyLinks.map((link) => (
                     <path
@@ -2082,6 +2321,42 @@ export default function CronogramaTab({
                       className="opacity-80"
                     />
                   ))}
+                  {/* LINHA DINÂMICA DE ARRASTAR PREDECESSORA */}
+                  {linkingState && (() => {
+                    const { sourceX, sourceY, currentSVGX, currentSVGY, hoverTargetTask } = linkingState;
+                    let pathD = '';
+                    if (hoverTargetTask) {
+                      const targetIdx = visibleTasks.findIndex(vt => vt.item.id === hoverTargetTask.item.id);
+                      const targetY = targetIdx * 40 + 20;
+                      const targetX = 4 + (hoverTargetTask.startOffsetDays / Math.max(1, timelineInfo.totalDays)) * 992;
+                      const exitX = Math.min(996, Math.max(sourceX, targetX) + 12);
+                      pathD = `M ${sourceX} ${sourceY} H ${exitX} V ${targetY} H ${targetX}`;
+                    } else {
+                      const midX = sourceX + (currentSVGX - sourceX) * 0.5;
+                      pathD = `M ${sourceX} ${sourceY} C ${midX} ${sourceY}, ${midX} ${currentSVGY}, ${currentSVGX} ${currentSVGY}`;
+                    }
+                    return (
+                      <g>
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke="#60a5fa"
+                          strokeWidth="6"
+                          strokeOpacity="0.4"
+                          vectorEffect="non-scaling-stroke"
+                        />
+                        <path
+                          d={pathD}
+                          fill="none"
+                          stroke="#2563eb"
+                          strokeWidth="2.5"
+                          strokeDasharray="6,4"
+                          vectorEffect="non-scaling-stroke"
+                          markerEnd="url(#gantt-arrow-active)"
+                        />
+                      </g>
+                    );
+                  })()}
                 </svg>
               )}
 
@@ -2090,12 +2365,14 @@ export default function CronogramaTab({
                 const eap = t.item.item_eap || t.item.id;
                 const isCollapsed = collapsedSections.has(eap);
                 const isInherited = t.isInherited;
+                const isLinkingSource = linkingState?.sourceTask.item.id === t.item.id;
+                const isLinkingTarget = linkingState?.hoverTargetTask?.item.id === t.item.id;
 
                 return (
                   <div 
                     key={t.item.id || eap}
                     className={`flex items-center h-10 hover:bg-slate-50/90 transition-colors text-xs ${
-                      isSec ? 'bg-slate-100/70 font-bold' : isInherited ? 'bg-indigo-50/40' : 'bg-white'
+                      isSec ? 'bg-slate-100/70 font-bold' : isLinkingTarget ? 'bg-emerald-50/80 ring-1 ring-emerald-300' : isInherited ? 'bg-indigo-50/40' : 'bg-white'
                     }`}
                   >
                     {/* Tabela Esquerda (Inputs & Informações) */}
@@ -2243,17 +2520,47 @@ export default function CronogramaTab({
                           </div>
                         ) : (
                           <div 
-                            className={`relative h-6 rounded-md border flex items-center justify-between px-2 text-[10px] shadow-xs transition-all ${getTaskColor(t.level, isSec, isInherited, t.isCritical)}`}
+                            onMouseDown={(e) => handleBarMouseDown(e, t)}
+                            className={`relative h-6 rounded-md border flex items-center justify-between px-2 text-[10px] shadow-xs transition-all group ${
+                              getTaskColor(t.level, isSec, isInherited, t.isCritical)
+                            } ${
+                              isLinkingSource ? 'ring-2 ring-blue-500 shadow-lg ring-offset-1 scale-[1.01]' : ''
+                            } ${
+                              isLinkingTarget ? 'ring-2 ring-emerald-500 shadow-xl ring-offset-1 bg-emerald-600! border-emerald-500! font-bold scale-[1.03]' : ''
+                            } ${
+                              !isSec && !isInherited ? 'cursor-grab active:cursor-grabbing' : ''
+                            }`}
                             style={{
                               marginLeft: `${Math.max(0, (t.startOffsetDays / timelineInfo.totalDays) * 100)}%`,
                               width: `${Math.max(1.5, (t.duracaoDias / timelineInfo.totalDays) * 100)}%`
                             }}
                             title={`${t.item.item_eap} - ${t.item.descricao}\n${t.isCritical ? '🔥 CAMINHO CRÍTICO (Impacta a data final do projeto)\n' : ''}${isInherited ? '🔗 Herdada do Pai\n' : ''}Início: ${t.startDate.toLocaleDateString('pt-BR')}\nTérmino: ${t.endDate.toLocaleDateString('pt-BR')}\nDuração: ${t.duracaoDias} dias\nPerfil: ${t.defaultProfile}\nM.O.: ${t.moTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}\nMateriais: ${t.matTotal.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })}`}
                           >
-                            <span className="truncate font-semibold drop-shadow-xs flex items-center gap-1">
+                            <span className="truncate font-semibold drop-shadow-xs flex items-center gap-1 select-none pointer-events-none">
                               {isInherited && <Link2 className="w-3 h-3 text-slate-200 shrink-0" />}
                               {t.duracaoDias}d
                             </span>
+
+                            {/* Ponto / Conector na ponta direita para arrastar predecessora */}
+                            {!isSec && !isInherited && (
+                              <div
+                                onMouseDown={(e) => startLinkingFromTask(t, e)}
+                                className={`absolute -right-2 top-1/2 -translate-y-1/2 w-4 h-4 rounded-full bg-blue-600 hover:bg-blue-700 border-2 border-white shadow-md hover:scale-125 transition-all cursor-crosshair z-30 flex items-center justify-center ${
+                                  isLinkingSource ? 'opacity-100 scale-125 ring-2 ring-blue-400' : 'opacity-0 group-hover:opacity-100'
+                                }`}
+                                title="Clique e arraste a seta até outra atividade para torná-la predecessora"
+                              >
+                                <div className="w-1.5 h-1.5 rounded-full bg-white" />
+                              </div>
+                            )}
+
+                            {/* Badge flutuante de confirmação ao sobrepor o alvo */}
+                            {isLinkingTarget && (
+                              <div className="absolute -top-7 left-1/2 -translate-x-1/2 z-40 bg-emerald-700 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-lg whitespace-nowrap flex items-center gap-1 animate-bounce pointer-events-none">
+                                <Check className="w-3 h-3" />
+                                Solte para definir {linkingState?.sourceTask.item.item_eap} como predecessora
+                              </div>
+                            )}
                           </div>
                         )
                       )}
@@ -2650,6 +2957,28 @@ export default function CronogramaTab({
           </div>
         </div>
       </div>
+
+      {/* Indicador flutuante no topo durante o arrasto de predecessora */}
+      {linkingState && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-50 bg-slate-900/95 text-white px-5 py-2.5 rounded-full shadow-2xl text-xs font-medium flex items-center gap-3 pointer-events-none backdrop-blur-md border border-slate-700 animate-in fade-in">
+          <div className="w-2.5 h-2.5 rounded-full bg-blue-400 animate-ping shrink-0" />
+          <span>
+            Arrastando seta de <strong className="text-blue-300">{linkingState.sourceTask.item.item_eap || linkingState.sourceTask.item.descricao}</strong>: solte sobre a atividade que será a sucessora <span className="text-slate-400 font-normal">(Esc para cancelar)</span>
+          </span>
+        </div>
+      )}
+
+      {/* Toast de notificação de vínculo criado ou aviso */}
+      {linkToast && (
+        <div className={`fixed bottom-6 right-6 z-50 px-4 py-3 rounded-xl shadow-2xl text-xs font-semibold flex items-center gap-2.5 animate-in fade-in slide-in-from-bottom-3 border ${
+          linkToast.type === 'warn' 
+            ? 'bg-amber-600 border-amber-500 text-white' 
+            : 'bg-emerald-600 border-emerald-500 text-white'
+        }`}>
+          {linkToast.type === 'warn' ? <AlertTriangle className="w-4 h-4 shrink-0 text-white" /> : <Check className="w-4 h-4 shrink-0 text-white" />}
+          <span>{linkToast.message}</span>
+        </div>
+      )}
     </div>
   );
 }
